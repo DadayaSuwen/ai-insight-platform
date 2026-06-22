@@ -10,6 +10,9 @@
     "dev:all": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:server": "pnpm --filter @ai-insight/server test",
+    "test:watch": "pnpm --filter @ai-insight/server test -- --watch",
+    "test:coverage": "pnpm --filter @ai-insight/server test -- --coverage",
     "db:up": "docker-compose up -d postgres",
     "db:seed": "pnpm --filter @ai-insight/server prisma db push && pnpm --filter @ai-insight/server ts-node prisma/seed.ts",
     "db:studio": "pnpm --filter @ai-insight/server prisma studio"
