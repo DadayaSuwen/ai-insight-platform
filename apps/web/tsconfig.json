@@ -17,8 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@workspace/types": ["../../packages/types/src"],
-      "@workspace/types/*": ["../../packages/types/src/*"]
+      "@workspace/types": ["../../packages/types/dist/esm"],
+      "@workspace/types/*": ["../../packages/types/dist/esm/*"]
     }
   },
   "include": ["src"],

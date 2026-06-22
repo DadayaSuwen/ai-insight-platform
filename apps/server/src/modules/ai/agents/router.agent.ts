@@ -43,33 +43,30 @@ export class RouterAgent {
    * TODO: Replace with LLM-based recognition
    */
   private simpleRecognize(message: string): IntentType {
-    const lowerMessage = message.toLowerCase();
+    const lowerMessage = message.toLowerCase().trim();
 
-    // Keywords for each intent
-    const sqlKeywords = ['查询', '数据', '销售', '多少', 'SELECT', '找出', '统计'];
+    // Chat keywords - greetings, small talk, help. Match FIRST because they
+    // should never be confused with data queries.
+    const chatKeywords = [
+      '你好', '您好', 'hello', 'hi', 'hey', '嗨',
+      'help', '帮助', '谢谢', 'thank', '你是谁', 'who are you',
+      '在吗', '干嘛', '做什么',
+    ];
+    if (chatKeywords.some((kw) => lowerMessage.includes(kw))) {
+      return 'chat';
+    }
+
+    // Keywords for each intent (chart > analysis > sql priority)
     const chartKeywords = [
-      '图表',
-      '图',
-      '可视化',
-      '趋势',
-      '柱状',
-      '折线',
-      '饼图',
-      'bar',
-      'line',
-      'pie',
+      '图表', '图', '可视化', '柱状', '折线', '饼图',
+      'bar', 'line', 'pie', '散点', '面积',
     ];
     const analysisKeywords = [
-      '分析',
-      '洞察',
-      '为什么',
-      '原因',
-      '趋势',
-      '预测',
-      '建议',
+      '分析', '洞察', '为什么', '原因', '预测', '建议',
     ];
+    const sqlKeywords = ['查询', '数据', '销售', '多少', 'SELECT', '找出', '统计', '列表', '给我'];
 
-    // Check keywords
+    // Check keywords in priority order
     if (chartKeywords.some((kw) => lowerMessage.includes(kw))) {
       return 'chart';
     }
@@ -80,7 +77,11 @@ export class RouterAgent {
       return 'sql';
     }
 
-    // Default to sql for data-related queries
+    // Default: short messages (< 6 chars) without data keywords → chat
+    // Otherwise assume data query
+    if (lowerMessage.length < 6) {
+      return 'chat';
+    }
     return 'sql';
   }
 }

@@ -31,6 +31,6 @@ module.exports = {
   testEnvironment: 'node',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
-    '^@workspace/types$': '<rootDir>/../../../packages/types/src/index.ts',
+    '^@workspace/types$': '<rootDir>/../../../packages/types/dist/cjs/index.js',
   },
 };

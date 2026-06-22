@@ -1,7 +1,9 @@
+import ChatWindow from './features/chat/components/ChatWindow';
+
 function App() {
   return (
-    <div>
-      <h1>AI Insight Platform</h1>
+    <div className="h-screen w-screen">
+      <ChatWindow />
     </div>
   );
 }

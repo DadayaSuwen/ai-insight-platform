@@ -45,6 +45,7 @@ docs/
 | 文档 | 描述 |
 |------|------|
 | `development/AGENT.md` | Agent 链路开发文档、测试用例 |
+| `development/ISSUES.md` | Phase 3/4/5 实际运行发现的问题与根因 |
 
 ## 开发阶段
 
@@ -54,7 +55,7 @@ docs/
 | Phase 2 | ✅ | 数据契约定义 - Zod 类型、API 规范 |
 | Phase 3 | ✅ | Agent 链路开发 - 51 个测试用例通过 (含 AiService 编排) |
 | Phase 4 | ✅ | SSE 流式输出 - 58 个测试用例通过 (含 ChatService 流) |
-| Phase 5 | 🔄 | 前端 UI 对接 |
+| Phase 5 | ✅ | 前端 UI 对接 - 4 个组件完整实现 (MessageBubble/ChatInput/DynamicChart/ChatWindow) |
 | Phase 6 | ⏳ | Docker 化 |
 
 ## 快速链接

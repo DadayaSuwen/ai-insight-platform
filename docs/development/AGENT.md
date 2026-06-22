@@ -187,9 +187,9 @@ async generate(data: unknown[], message: string): Promise<EChartsOption>
 
 ## 后续任务
 
-1. **前端 UI**: Phase 5 - 进行中
-2. **LangChain**: 集成 Ollama 实现 LLM 驱动
-3. **Docker 化**: Phase 6
+1. **LangChain**: 集成 Ollama 实现 LLM 驱动
+2. **Docker 化**: Phase 6
+3. **端到端联调**: Phase 5 完成后验证完整链路
 
 ---
 
