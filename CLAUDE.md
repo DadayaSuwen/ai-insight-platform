@@ -102,9 +102,9 @@ VITE_API_BASE_URL=http://localhost:3000
 
 1. **Phase 1: 骨架搭建** ✅ 完成
 2. **Phase 2: 数据契约定义** ✅ 完成
-3. **Phase 3: Agent 链路开发** 🔄 进行中
-4. **Phase 4: SSE 流式输出** ⏳ 待开始
-5. **Phase 5: 前端 UI 对接** ⏳ 待开始
+3. **Phase 3: Agent 链路开发** ✅ 完成 (51 测试通过)
+4. **Phase 4: SSE 流式输出** ✅ 完成 (58 测试通过, +7 ChatService)
+5. **Phase 5: 前端 UI 对接** 🔄 进行中
 6. **Phase 6: Docker 化** ⏳ 待开始
 
 ## Documentation

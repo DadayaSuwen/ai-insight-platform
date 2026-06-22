@@ -4,10 +4,11 @@
 
 - **Base URL**: `http://localhost:3000`
 - **Content-Type**: `application/json`
+- **SSE 端点**: `text/event-stream`
 
 ## 聊天接口
 
-### 发送消息
+### 同步发送消息 (返回完整结果)
 
 ```
 POST /chat/message
@@ -22,14 +23,29 @@ POST /chat/message
 }
 ```
 
-**响应**:
+**响应** (返回 `AiProcessResult`):
 
 ```json
 {
-  "sessionId": "uuid",
-  "message": "处理中..."
+  "intent": "chart",
+  "message": "已生成图表,基于 12 条数据。",
+  "sql": "SELECT DATE(\"saleDate\") as date, SUM(\"amount\") FROM \"Sales\" GROUP BY DATE(\"saleDate\")",
+  "executed": true,
+  "rows": [{ "date": "2024-01-01", "sum": 1234.56 }],
+  "chart": { "xAxis": { "type": "category" }, "series": [{ "type": "line" }] }
 }
 ```
+
+### SSE 流式消息 (推荐)
+
+```
+GET /chat/stream?message=...
+```
+
+**Query 参数**:
+- `message` (必填) — 用户输入
+
+**响应**: `Content-Type: text/event-stream`,持续推送 SSE 事件,事件类型见下方"SSE 事件流"。
 
 ## 数据库接口
 
@@ -47,18 +63,7 @@ POST /database/query
 }
 ```
 
-**响应**:
-
-```json
-[
-  {
-    "id": 1,
-    "productName": "Product A",
-    "amount": "1000",
-    ...
-  }
-]
-```
+**响应**: 原始行数组 `Array<Record<string, unknown>>`
 
 ### 获取 Schema
 
@@ -66,29 +71,11 @@ POST /database/query
 GET /database/schema
 ```
 
-**响应**:
-
-```json
-{
-  "tables": [
-    {
-      "name": "Sales",
-      "columns": [
-        {
-          "name": "id",
-          "type": "integer",
-          "nullable": false,
-          "isPrimaryKey": true
-        }
-      ]
-    }
-  ]
-}
-```
+**响应**: 数据库表结构信息 (列名、类型、是否可空等)
 
 ## AI 接口
 
-### 处理消息
+### 处理消息 (低层)
 
 ```
 POST /ai/process
@@ -105,20 +92,45 @@ POST /ai/process
 **响应**:
 
 ```json
-{
-  "status": "ok"
-}
+{ "status": "ok" }
 ```
+
+> 推荐使用 `/chat/stream` 替代此端点。
 
 ## SSE 事件流
 
-当使用 SSE 时，会推送以下事件类型：
+`/chat/stream` 按以下顺序推送事件 (除 `done` 外,每种事件最多一次):
 
-| 事件 | 描述 |
+| 事件 | 触发条件 | `data` 字段 |
+|------|---------|------------|
+| `token` | **总是先发** | `{ content: string, isFinal: false }` 用户可见文本 |
+| `error` | 当 result.error 存在 | `{ code: string, message: string }` |
+| `sql` | 当 sql 已生成 | `{ sql: string, executed: boolean }` |
+| `chart` | 当 chart 已生成 | `{ chartType, title?, data: { option, rows } }` |
+| `analysis` | 当 analysis 已生成 | `{ content: string, keyInsights?: string[] }` |
+| `done` | **总是最后** | `{}` |
+
+**事件流示例** (柱状图查询):
+
+```
+event: token
+data: {"content":"已生成图表,基于 5 条数据。","isFinal":false}
+
+event: sql
+data: {"sql":"SELECT \"category\", SUM(\"amount\") as total FROM \"Sales\" GROUP BY \"category\"","executed":true}
+
+event: chart
+data: {"chartType":"bar","data":{"option":{...},"rows":[...]}}
+
+event: done
+data: {}
+```
+
+**错误码** (SSE error 事件):
+
+| code | 含义 |
 |------|------|
-| `token` | 普通文字流 |
-| `sql` | 生成的 SQL 语句 |
-| `chart` | 图表配置 JSON |
-| `analysis` | 分析报告 |
-| `error` | 错误信息 |
-| `done` | 结束标志 |
+| `INTENT_FAILED` | RouterAgent 异常 |
+| `PIPELINE_FAILED` | SQL/Chart/Analysis 阶段异常 (保留原始 intent) |
+| `STREAM_FAILED` | SSE 流本身异常 |
+| `INVALID_MESSAGE` | 缺少 message 参数 |

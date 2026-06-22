@@ -8,7 +8,7 @@ export type ChartType = "line" | "bar" | "pie" | "scatter" | "area";
 /**
  * ECharts option interface
  */
-interface EChartsOption {
+export interface EChartsOption {
   title?: {
     text: string;
   };

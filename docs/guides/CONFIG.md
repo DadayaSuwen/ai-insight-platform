@@ -6,13 +6,13 @@
 
 ## apps/server/tsconfig.json
 
-**用途**: NestJS 后端服务
+**用途**: NestJS 后端服务 (运行时)
 
 ```json
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "moduleResolution": "bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
@@ -21,9 +21,9 @@
     "target": "ES2021",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
+    "rootDir": "./src",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "incremental": true,
     "skipLibCheck": true,
@@ -33,7 +33,8 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["jest", "node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
@@ -44,15 +45,33 @@
 
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
-| `module` | commonjs | Node.js 原生模块系统，输出 `.js` 文件 |
-| `moduleResolution` | bundler | 打包工具兼容（NestJS 配合打包器） |
+| `module` | NodeNext | 与运行时 node 版本对齐，支持 ESM/CJS 互操作 |
+| `moduleResolution` | NodeNext | Node.js 12+ 模块解析策略 |
 | `outDir` | ./dist | **编译输出目录**，JS 文件放这里 |
-| `baseUrl` | ./ | 解析模块的基准目录 |
-| `paths` | @/* → src/* | 路径别名，如 `import from '@/core/prisma'` |
+| `rootDir` | ./src | 所有源码都在 `src/` 下,导入外部包会触发 TS6059 |
+| `paths` | @/* → src/* | 路径别名,如 `import from '@/core/prisma'` |
 | `declaration` | true | 生成 `.d.ts` 类型声明文件 |
-| `emitDecoratorMetadata` | true | **NestJS 必需**，运行时反射元数据 |
-| `experimentalDecorators` | true | **NestJS 必需**，启用装饰器 |
-| `incremental` | true | 增量编译，加快 rebuild |
+| `emitDecoratorMetadata` | true | **NestJS 必需**,运行时反射元数据 |
+| `experimentalDecorators` | true | **NestJS 必需**,启用装饰器 |
+| `incremental` | true | 增量编译,加快 rebuild |
+
+### 测试时的特殊处理 (jest.config.js)
+
+`ts-jest` 在加载 `apps/server` 源码时,会使用一份内联的 tsconfig 覆盖:
+
+```js
+tsconfig: {
+  module: 'commonjs',
+  moduleResolution: 'node',
+  esModuleInterop: true,
+  allowSyntheticDefaultImports: true,
+}
+```
+
+为什么需要覆盖?
+- `packages/types/src/index.ts` 用 `export * from './chat'` (无扩展名),与 NodeNext 的解析规则冲突
+- 测试要 CJS 输出,`@/...` 别名需要被 jest 解析 (见 `moduleNameMapper`)
+- 这套覆盖让生产构建 (`nest build`) 继续用 NodeNext,同时让 jest 顺利加载 `@workspace/types` 源码
 
 ### outDir vs baseUrl 的关系
 

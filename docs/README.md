@@ -52,9 +52,9 @@ docs/
 |-------|------|------|
 | Phase 1 | ✅ | 骨架搭建 - Monorepo、依赖安装、数据库连接 |
 | Phase 2 | ✅ | 数据契约定义 - Zod 类型、API 规范 |
-| Phase 3 | 🔄 | Agent 链路开发 - 44 个测试用例通过 |
-| Phase 4 | ⏳ | SSE 流式输出 |
-| Phase 5 | ⏳ | 前端 UI 对接 |
+| Phase 3 | ✅ | Agent 链路开发 - 51 个测试用例通过 (含 AiService 编排) |
+| Phase 4 | ✅ | SSE 流式输出 - 58 个测试用例通过 (含 ChatService 流) |
+| Phase 5 | 🔄 | 前端 UI 对接 |
 | Phase 6 | ⏳ | Docker 化 |
 
 ## 快速链接
@@ -84,4 +84,6 @@ pnpm test:coverage
 - RouterAgent: 15 个测试
 - SqlAgent: 15 个测试
 - ChartAgent: 14 个测试
-- **总计**: 44 个测试全部通过 ✅
+- AiService (编排): 7 个测试
+- ChatService (SSE 流): 7 个测试
+- **总计**: 58 个测试全部通过 ✅

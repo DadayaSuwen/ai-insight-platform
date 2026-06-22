@@ -39,9 +39,9 @@
 | Step 2 | ✅ 完成 | 实现 RouterAgent |
 | Step 3 | ✅ 完成 | 实现 SqlAgent |
 | Step 4 | ✅ 完成 | 实现 ChartAgent |
-| Step 5 | ⏳ 待实现 | 实现 AnalysisAgent |
-| Step 6 | ⏳ 待实现 | 实现 AiService 编排 |
-| Step 7 | ⏳ 待实现 | SSE 流式输出 |
+| Step 5 | ✅ 完成 | 实现 AnalysisAgent (基础版) |
+| Step 6 | ✅ 完成 | 实现 AiService 编排 |
+| Step 7 | ✅ 完成 | SSE 流式输出 (Phase 4) |
 
 ---
 
@@ -56,7 +56,7 @@ apps/server/src/modules/ai/
 │   ├── sql.agent.spec.ts      # SQL 生成测试 ✅
 │   ├── chart.agent.ts        # 图表生成 ✅
 │   ├── chart.agent.spec.ts    # 图表生成测试 ✅
-│   ├── analysis.agent.ts      # 分析报告 (待实现)
+│   ├── analysis.agent.ts      # 分析报告 ✅ (基础版)
 │   └── index.ts
 ├── prompts/
 │   ├── router.prompt.ts     # 路由提示词
@@ -64,7 +64,8 @@ apps/server/src/modules/ai/
 │   ├── chart.prompt.ts       # 图表提示词
 │   ├── analysis.prompt.ts    # 分析提示词
 │   └── index.ts
-├── ai.service.ts            # 核心服务 (待实现)
+├── ai.service.ts            # 核心服务 ✅ (含 7 个测试)
+├── ai.service.spec.ts       # AiService 测试 ✅
 ├── ai.controller.ts         # 控制器
 └── ai.module.ts            # 模块
 ```
@@ -80,7 +81,9 @@ apps/server/src/modules/ai/
 | RouterAgent | 15 | ✅ |
 | SqlAgent | 15 | ✅ |
 | ChartAgent | 14 | ✅ |
-| **总计** | **44** | ✅ |
+| AiService (编排) | 7 | ✅ |
+| ChatService (SSE 流) | 7 | ✅ |
+| **总计** | **58** | ✅ |
 
 ### 测试类型
 
@@ -126,6 +129,46 @@ async generate(message: string): Promise<string>
 
 **安全**: 只生成 SELECT，防止 SQL 注入
 
+### AnalysisAgent
+
+```typescript
+// 生成分析报告
+async generate(data: unknown[], message: string): Promise<string>
+```
+
+**当前为模板化实现**:
+- 报告数据规模 (记录数 / 字段数)
+- 识别数值字段并求 总和/平均/最大/最小
+- 完整 LLM 驱动的深度分析由后续 LangChain+Ollama 集成提供
+
+### AiService (编排)
+
+```typescript
+// 主入口
+async process(message: string): Promise<AiProcessResult>
+```
+
+**编排流程**:
+1. `RouterAgent.recognize()` → 意图
+2. 根据意图分支:
+   - `chat` → 直接返回文本
+   - `sql` → `SqlAgent.generate` + `DatabaseService.executeQuery`
+   - `chart` → + `ChartAgent.generate`
+   - `analysis` → + `AnalysisAgent.generate`
+3. 全程 try/catch,错误返回 `{ intent, message, error: { code, message } }`
+
+**返回结构 `AiProcessResult`**:
+- `intent: IntentType`
+- `message: string` (用户可见文本)
+- `sql? / executed? / rows?` (SQL 路径)
+- `chart?` (chart 路径)
+- `analysis?` (analysis 路径)
+- `error?` (失败时填充)
+
+**错误码**:
+- `INTENT_FAILED` — 意图识别阶段异常
+- `PIPELINE_FAILED` — 管道执行异常 (保留原始 intent)
+
 ### ChartAgent
 
 ```typescript
@@ -144,10 +187,9 @@ async generate(data: unknown[], message: string): Promise<EChartsOption>
 
 ## 后续任务
 
-1. **AnalysisAgent**: 实现数据分析报告生成
-2. **AiService**: 编排各 Agent 调用
-3. **SSE**: 实现流式输出
-4. **LangChain**: 集成 Ollama 实现 LLM 驱动
+1. **前端 UI**: Phase 5 - 进行中
+2. **LangChain**: 集成 Ollama 实现 LLM 驱动
+3. **Docker 化**: Phase 6
 
 ---
 
