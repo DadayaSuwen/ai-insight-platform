@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "module": "ES2022",
-    "moduleResolution": "bundler",
+    "module": "NodeNext", // 从 "commonjs" 修改为 "NodeNext"
+    "moduleResolution": "NodeNext", // 从 "node" 修改为 "NodeNext"
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
@@ -10,9 +10,9 @@
     "target": "ES2021",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
+    "rootDir": "./src",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "incremental": true,
     "skipLibCheck": true,

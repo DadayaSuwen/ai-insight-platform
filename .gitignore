@@ -12,6 +12,8 @@ build/
 .env
 .env.local
 .env.*.local
+apps/server/.env
+apps/web/.env
 
 # Logs
 *.log
@@ -33,6 +35,10 @@ coverage/
 
 # Prisma
 *.db
+prisma/dev.db
 
 # Turborepo
 .turbo/
+
+# TypeScript build info
+*.tsbuildinfo
