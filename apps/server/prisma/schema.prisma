@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Business data tables
+model Sales {
+  id          Int      @id @default(autoincrement())
+  productName String
+  category    String
+  amount      Decimal
+  quantity    Int
+  region      String
+  saleDate    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Chat history tables
+model ChatSession {
+  id        String   @id @default(uuid())
+  userId    String?
+  title     String?
+  messages  ChatMessage[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String
+  role      String   // 'user' | 'assistant'
+  content   String
+  metadata  Json?
+  session   ChatSession @relation(fields: [sessionId], references: [id])
+  createdAt DateTime @default(now())
+}
