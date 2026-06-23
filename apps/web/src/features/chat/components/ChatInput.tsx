@@ -31,12 +31,12 @@ function ChatInput({
   const [placeholderIdx] = useState(() => Math.floor(Math.random() * PLACEHOLDERS.length));
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize up to 5 lines (140px)
+  // Auto-resize textarea (no hard cap — scrollbar appears when content overflows)
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+    el.style.height = `${el.scrollHeight}px`;
   }, [value]);
 
   // Focus on mount
@@ -97,6 +97,8 @@ function ChatInput({
               borderColor: 'var(--border)',
               color: 'var(--text-primary)',
               outline: 'none',
+              maxHeight: '200px',
+              overflowY: 'auto',
             }}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}

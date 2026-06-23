@@ -1,24 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Observable, from } from 'rxjs';
-import { catchError, mergeMap } from 'rxjs';
+import { Observable } from 'rxjs';
 import { MessageEvent } from '@nestjs/common';
 import {
   SSEEventType,
-  SSETokenData,
-  SSESQLData,
-  SSEChartData,
-  SSEAnalysisData,
   SSEErrorData,
 } from '@workspace/types';
-import { AiService, AiProcessResult } from '../ai/ai.service';
-import { EChartsOption, ChartType } from '../ai/agents/chart.agent';
+import { AiService, AiProcessResult, AiStreamEvent } from '../ai/ai.service';
 
 /**
  * ChatService - Chat streaming and orchestration
  *
- * Wraps AiService and exposes a non-streaming sync call plus an SSE stream.
- * The stream emits events in the contract order:
- *   token → (error) → (sql) → (chart) → (analysis) → done
+ * Wraps AiService and exposes a non-streaming sync call plus a true
+ * streaming SSE stream powered by the LLM's token-by-token output.
  */
 @Injectable()
 export class ChatService {
@@ -35,100 +28,69 @@ export class ChatService {
   }
 
   /**
-   * SSE stream - converts AiProcessResult into a sequence of MessageEvent
-   * matching the SSE contract defined in packages/types.
+   * True SSE stream — each yield from aiService.processStream() maps to
+   * an immediate SSE emission, giving token-by-token output for chat intents.
    */
   processMessageStream(message: string): Observable<MessageEvent> {
     this.logger.log(`SSE stream start: ${message}`);
-    return from(this.aiService.process(message)).pipe(
-      mergeMap((result: AiProcessResult) => from(this.resultToEvents(result))),
-      catchError((err: unknown) => {
-        this.logger.error(`SSE pipeline error: ${err}`);
-        const errorData: SSEErrorData = {
-          code: 'STREAM_FAILED',
-          message: err instanceof Error ? err.message : String(err),
+    return new Observable<MessageEvent>((subscriber) => {
+      const abortController = new AbortController();
+
+      (async () => {
+        try {
+          for await (const event of this.aiService.processStream(message)) {
+            if (abortController.signal.aborted) break;
+            const msgEvent = this.mapEvent(event);
+            if (msgEvent) {
+              subscriber.next(msgEvent);
+            }
+          }
+          subscriber.next({ type: SSEEventType.DONE, data: {} });
+          subscriber.complete();
+        } catch (err: unknown) {
+          this.logger.error(`SSE stream error: ${err}`);
+          const errorData: SSEErrorData = {
+            code: 'STREAM_FAILED',
+            message: err instanceof Error ? err.message : String(err),
+          };
+          subscriber.next({ type: SSEEventType.ERROR, data: errorData });
+          subscriber.next({ type: SSEEventType.DONE, data: {} });
+          subscriber.complete();
+        }
+      })();
+
+      return () => {
+        abortController.abort();
+      };
+    });
+  }
+
+  /**
+   * Map an AiStreamEvent to an SSE MessageEvent.
+   * Returns null for 'done' (caller sends it) or unknown types.
+   */
+  private mapEvent(event: AiStreamEvent): MessageEvent | null {
+    switch (event.type) {
+      case 'token':
+        return {
+          type: SSEEventType.TOKEN,
+          data: event.data as { content: string; isFinal: boolean },
         };
-        return from<MessageEvent[]>([
-          { type: SSEEventType.ERROR, data: errorData },
-          { type: SSEEventType.DONE, data: {} },
-        ]);
-      }),
-    );
-  }
-
-  /**
-   * Map AiProcessResult to an ordered list of MessageEvent.
-   */
-  private resultToEvents(result: AiProcessResult): MessageEvent[] {
-    const events: MessageEvent[] = [];
-
-    // 1. Token - always first, carries the user-facing summary text
-    const tokenData: SSETokenData = {
-      content: result.message,
-      isFinal: false,
-    };
-    events.push({ type: SSEEventType.TOKEN, data: tokenData });
-
-    // 2. Error - emit before data events so the UI can stop rendering
-    if (result.error) {
-      const errorData: SSEErrorData = {
-        code: result.error.code,
-        message: result.error.message,
-      };
-      events.push({ type: SSEEventType.ERROR, data: errorData });
+      case 'sql':
+        return { type: SSEEventType.SQL, data: event.data };
+      case 'chart':
+        return { type: SSEEventType.CHART, data: event.data };
+      case 'analysis':
+        return { type: SSEEventType.ANALYSIS, data: event.data };
+      case 'error':
+        return {
+          type: SSEEventType.ERROR,
+          data: event.data as SSEErrorData,
+        };
+      case 'done':
+        return null;
+      default:
+        return null;
     }
-
-    // 3. SQL - emitted when a query was generated
-    if (result.sql !== undefined) {
-      const sqlData: SSESQLData = {
-        sql: result.sql,
-        executed: result.executed ?? false,
-        rows: result.rows as SSESQLData['rows'],
-      };
-      events.push({ type: SSEEventType.SQL, data: sqlData });
-    }
-
-    // 4. Chart - emitted when a chart was generated
-    if (result.chart) {
-      const chartData = this.toChartData(result.chart, result.rows);
-      events.push({ type: SSEEventType.CHART, data: chartData });
-    }
-
-    // 5. Analysis - emitted when an analysis report was generated
-    if (result.analysis) {
-      const analysisData: SSEAnalysisData = {
-        content: result.analysis,
-      };
-      events.push({ type: SSEEventType.ANALYSIS, data: analysisData });
-    }
-
-    // 6. Done - always last
-    events.push({ type: SSEEventType.DONE, data: {} });
-
-    return events;
-  }
-
-  /**
-   * Convert internal EChartsOption to the SSE contract shape.
-   * The full ECharts config travels in `data` for the frontend to render.
-   */
-  private toChartData(
-    chart: EChartsOption,
-    rows?: unknown[],
-  ): SSEChartData {
-    const series = (chart.series as Array<{ type?: string }>) ?? [];
-    const firstSeries = series[0];
-    const chartType: ChartType = (firstSeries?.type as ChartType) ?? 'bar';
-
-    // The contract wants a `data` map; we pack the full chart + rows
-    // so the frontend can render either via the option or via the data.
-    return {
-      chartType,
-      title: chart.title?.text,
-      data: {
-        option: chart,
-        rows: rows ?? [],
-      },
-    };
   }
 }

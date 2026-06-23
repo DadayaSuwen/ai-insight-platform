@@ -64,14 +64,29 @@ function ChatWindow() {
   const navigate = useNavigate();
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const [connected] = useState(true); // todo: wire to actual health-check
 
-  // Auto-scroll to bottom on new content
-  useEffect(() => {
+  const scrollToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    isNearBottomRef.current = true;
+  };
+
+  // Auto-scroll to bottom only when near bottom (user hasn't manually scrolled up)
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      scrollToBottom();
+    }
   }, [messages]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceFromBottom < 80;
+  };
 
   const onToken = useCallback(
     (data: SSETokenData) => {
@@ -116,6 +131,9 @@ function ChatWindow() {
 
   const onDone = useCallback(() => {
     updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
+    // Always scroll to bottom when done, so the final result is visible
+    isNearBottomRef.current = true;
+    scrollToBottom();
   }, [updateLastAssistant]);
 
   const { sendMessage, isLoading, error } = useSSEChat({
@@ -254,24 +272,26 @@ function ChatWindow() {
         </div>
       </header>
 
-      {/* ── Quick Commands (shown when empty) ──────────────── */}
+      {/* ── Quick Commands ─────────────────────────────────── */}
       {isEmpty && (
-        <div className="shrink-0 border-b px-4 py-4" style={{ borderColor: 'var(--border)' }}>
-          <p className="mb-3 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-            快捷指令
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {QUICK_COMMANDS.map((cmd) => (
-              <button
-                key={cmd.query}
-                className="quick-chip"
-                onClick={() => handleQuickCommand(cmd.query)}
-                disabled={isLoading}
-              >
-                <span>{cmd.icon}</span>
-                <span>{cmd.label}</span>
-              </button>
-            ))}
+        <div className="shrink-0 border-b px-6 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}>
+          <div className="mx-auto max-w-5xl">
+            <p className="mb-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              快捷指令
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_COMMANDS.map((cmd) => (
+                <button
+                  key={cmd.query}
+                  className="quick-chip"
+                  onClick={() => handleQuickCommand(cmd.query)}
+                  disabled={isLoading}
+                >
+                  <span>{cmd.icon}</span>
+                  <span>{cmd.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -279,10 +299,11 @@ function ChatWindow() {
       {/* ── Messages ───────────────────────────────────────── */}
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
         style={{ background: 'var(--bg-secondary)' }}
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-3 p-4">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
           {isEmpty && (
             <div
               className="flex flex-col items-center justify-center py-16 text-center"
@@ -315,7 +336,7 @@ function ChatWindow() {
       {/* ── Error banner ──────────────────────────────────── */}
       {error && (
         <div
-          className="flex items-center gap-2 border-t px-4 py-2 text-xs"
+          className="flex items-center gap-2 border-t px-6 py-2 text-xs"
           style={{ background: 'var(--error-light)', borderColor: 'var(--error)', color: 'var(--error)' }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

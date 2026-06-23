@@ -51,26 +51,32 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   }, []);
 
   /**
-   * Parse a single SSE data block from the read buffer.
-   * Handles both single-line "data: xxx" and multi-line "data: xxx\ndata: yyy" blocks.
+   * Parse a single SSE field line.
+   * Returns the event type from "event: xxx" or data from "data: xxx".
+   * Ignores "id: xxx" and other SSE field types.
    */
   const parseSSELine = (line: string): { event?: string; data?: string } => {
+    // Check event: first (must be before data: since "event:" also starts with "e")
     if (line.startsWith('event:')) {
       return { event: line.slice(6).trim() };
     }
     if (line.startsWith('data:')) {
       return { data: line.slice(5).trim() };
     }
+    // Ignore "id:", "retry:", etc.
     return {};
   };
 
   /**
    * Parse a complete SSE message (all data lines + optional event type)
    * joined with double-newline-separated chunks from the stream.
+   *
+   * Handles multi-line data blocks where a single event has multiple
+   * consecutive data: lines (joined with \n before JSON parsing).
    */
   const parseSSEMessage = (rawEvent: string, rawData: string): SSEMessage => {
     return {
-      event: rawEvent as SSEMessage['event'],
+      event: (rawEvent || SSEEventType.TOKEN) as SSEMessage['event'],
       data: rawData,
     };
   };

@@ -28,6 +28,16 @@ export interface LlmInvokeOptions {
 }
 
 /**
+ * Options for {@link LlmService.invokeStream}.
+ */
+export interface LlmStreamOptions {
+  system?: string;
+  human: string;
+  timeoutMs?: number;
+  temperature?: number;
+}
+
+/**
  * Options for {@link LlmService.invokeStructured}.
  */
 export interface LlmStructuredOptions<T extends z.ZodTypeAny> {
@@ -101,6 +111,58 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
       timeoutMs,
     )) as any;
     return this.normalizeContent(result.content);
+  }
+
+  /**
+   * Streaming text completion — yields tokens as they arrive.
+   * Used by SSE streaming to give real-time token-by-token output.
+   */
+  async *invokeStream(opts: LlmStreamOptions): AsyncGenerator<string> {
+    await this.chatReady;
+    const chat = this.getRequiredChat();
+    const messages = this.buildMessages(opts.system, opts.human);
+    const timeoutMs = opts.timeoutMs ?? 120_000;
+
+    if (opts.temperature !== undefined) {
+      (chat as unknown as { temperature: number }).temperature =
+        opts.temperature;
+    }
+
+    // LangChain's stream() may return a Promise that resolves to AsyncIterable
+    // (e.g. ChatOpenAI returns Promise<IterableReadableStream>).
+    // Wrap sync iterables in an async generator for uniform handling.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await (chat as any).stream(messages);
+    const stream: AsyncIterable<unknown> =
+      raw[Symbol.asyncIterator] != null
+        ? raw
+        : (async function* () { yield* raw; })();
+
+    let timedOut = false;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+    }, timeoutMs);
+
+    try {
+      // Track accumulated content to detect new chunks
+      let accumulated = '';
+
+      for await (const chunk of stream) {
+        if (timedOut) {
+          throw new Error(`LLM stream timeout after ${timeoutMs}ms`);
+        }
+        const content = this.normalizeContent((chunk as { content: unknown }).content);
+        if (content) {
+          accumulated += content;
+          yield content;
+        }
+      }
+    } catch (err) {
+      this.logger.error(`[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    } finally {
+      clearTimeout(timeoutTimer);
+    }
   }
 
   /**

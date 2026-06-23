@@ -5,6 +5,14 @@ import { ChartAgent, EChartsOption } from './agents/chart.agent';
 import { AnalysisAgent } from './agents/analysis.agent';
 import { DatabaseService } from '../database/database.service';
 import { LlmService } from './llm/llm.service';
+import {
+  SSEEventType,
+  SSETokenData,
+  SSESQLData,
+  SSEChartData,
+  SSEAnalysisData,
+  SSEErrorData,
+} from '@workspace/types';
 
 /**
  * System prompt for the catch-all chat branch. Kept short — it's used
@@ -19,6 +27,15 @@ const CHAT_SYSTEM_PROMPT = `你是 AI Insight Platform 的智能助手。你的�
 - 用中文,简洁友好
 - 如果用户问的是数据相关问题,引导他们用具体业务语言,例如"显示按类别销售额"
 - 不知道就说不知道,不要编造`;
+
+/**
+ * Partial SSE event emitted during streaming.
+ * Used by the streaming pipeline (processMessageStream).
+ */
+export interface AiStreamEvent {
+  type: 'token' | 'sql' | 'chart' | 'analysis' | 'error' | 'done';
+  data: SSETokenData | SSESQLData | SSEChartData | SSEAnalysisData | SSEErrorData | Record<string, never>;
+}
 
 /**
  * Structured result returned by AiService.process().
@@ -95,6 +112,52 @@ export class AiService {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Pipeline failed at intent=${intent}: ${msg}`);
       return this.errorResult('PIPELINE_FAILED', msg, intent);
+    }
+  }
+
+  /**
+   * Streaming version of process — yields SSE events as they become available.
+   * The chat intent streams tokens in real-time from the LLM.
+   * Other intents execute synchronously but still yield events sequentially.
+   */
+  async *processStream(
+    message: string,
+  ): AsyncGenerator<AiStreamEvent, void, unknown> {
+    this.logger.log(`[stream] Processing message: ${message}`);
+
+    let intent: IntentType;
+    try {
+      intent = await this.routerAgent.recognize(message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[stream] Intent recognition failed: ${msg}`);
+      yield this.errorEvent('INTENT_FAILED', msg);
+      return;
+    }
+
+    this.logger.log(`[stream] Intent: ${intent}`);
+
+    try {
+      switch (intent) {
+        case 'chat':
+          yield* this.handleChatStream(message);
+          break;
+        case 'sql':
+          yield* this.handleSqlStream(message);
+          break;
+        case 'chart':
+          yield* this.handleChartStream(message);
+          break;
+        case 'analysis':
+          yield* this.handleAnalysisStream(message);
+          break;
+        default:
+          yield* this.handleChatStream(message);
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[stream] Pipeline failed at intent=${intent}: ${msg}`);
+      yield this.errorEvent('PIPELINE_FAILED', msg);
     }
   }
 
@@ -185,6 +248,215 @@ export class AiService {
       intent,
       message: '抱歉,处理您的请求时出错了。',
       error: { code, message },
+    };
+  }
+
+  private errorEvent(
+    code: string,
+    message: string,
+  ): AiStreamEvent {
+    return {
+      type: 'error',
+      data: { code, message },
+    };
+  }
+
+  // ─── Streaming handlers ─────────────────────────────────────────────────────
+
+  private async *handleChatStream(
+    message: string,
+  ): AsyncGenerator<AiStreamEvent, void, unknown> {
+    let accumulated = '';
+    try {
+      for await (const token of this.llm.invokeStream({
+        system: CHAT_SYSTEM_PROMPT,
+        human: message,
+        timeoutMs: 20_000,
+        temperature: 0.3,
+      })) {
+        accumulated += token;
+        yield {
+          type: 'token',
+          data: { content: token, isFinal: false },
+        };
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`[stream] Chat LLM failed (${msg}); using fallback`);
+      const fallback = this.fallbackChatMessage(message);
+      for (const char of fallback) {
+        yield { type: 'token', data: { content: char, isFinal: false } };
+      }
+    }
+    // Mark final
+    yield { type: 'done', data: {} };
+  }
+
+  private async *handleSqlStream(
+    message: string,
+  ): AsyncGenerator<AiStreamEvent, void, unknown> {
+    // 1. Generate SQL (synchronous, fast)
+    let sql: string;
+    try {
+      sql = await this.sqlAgent.generate(message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('SQL_GENERATION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    // 2. Execute query
+    let rows: unknown[];
+    try {
+      rows = await this.databaseService.executeQuery(sql);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('QUERY_EXECUTION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    // 3. Emit SQL result (non-token events go out first)
+    yield {
+      type: 'sql',
+      data: { sql, executed: true, rows } as SSESQLData,
+    };
+
+    // 4. Stream LLM summary tokens
+    let accumulated = '';
+    try {
+      for await (const token of this.llm.invokeStream({
+        system:
+          '你是数据分析助手。基于以下 SQL 查询结果，用中文简洁地总结数据要点。',
+        human: `查询结果:\n${JSON.stringify(rows, null, 2)}\n\n用户问题: ${message}`,
+        timeoutMs: 30_000,
+      })) {
+        accumulated += token;
+        yield {
+          type: 'token',
+          data: { content: token, isFinal: false },
+        };
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`[stream] SQL summary LLM failed: ${msg}`);
+      // Emit a brief summary instead of letting it fail silently
+      const summary = `查询完成,共 ${rows.length} 条记录。`;
+      for (const char of summary) {
+        yield { type: 'token', data: { content: char, isFinal: false } };
+      }
+    }
+
+    yield { type: 'done', data: {} };
+  }
+
+  private async *handleChartStream(
+    message: string,
+  ): AsyncGenerator<AiStreamEvent, void, unknown> {
+    let sql: string;
+    try {
+      sql = await this.sqlAgent.generate(message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('SQL_GENERATION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    let rows: unknown[];
+    try {
+      rows = await this.databaseService.executeQuery(sql);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('QUERY_EXECUTION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    yield {
+      type: 'sql',
+      data: { sql, executed: true, rows } as SSESQLData,
+    };
+
+    let chart: EChartsOption;
+    try {
+      chart = await this.chartAgent.generate(rows, message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('CHART_GENERATION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    const chartData = this.toChartData(chart, rows);
+    yield { type: 'chart', data: chartData };
+
+    // Stream a brief confirmation
+    const confirmation = `图表已生成,基于 ${rows.length} 条数据。`;
+    for (const char of confirmation) {
+      yield { type: 'token', data: { content: char, isFinal: false } };
+    }
+
+    yield { type: 'done', data: {} };
+  }
+
+  private async *handleAnalysisStream(
+    message: string,
+  ): AsyncGenerator<AiStreamEvent, void, unknown> {
+    let sql: string;
+    try {
+      sql = await this.sqlAgent.generate(message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('SQL_GENERATION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    let rows: unknown[];
+    try {
+      rows = await this.databaseService.executeQuery(sql);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('QUERY_EXECUTION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    yield {
+      type: 'sql',
+      data: { sql, executed: true, rows } as SSESQLData,
+    };
+
+    let analysisText: string;
+    try {
+      analysisText = await this.analysisAgent.generate(rows, message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      yield this.errorEvent('ANALYSIS_GENERATION_FAILED', msg);
+      yield { type: 'done', data: {} };
+      return;
+    }
+
+    yield { type: 'analysis', data: { content: analysisText } };
+    yield { type: 'done', data: {} };
+  }
+
+  private toChartData(
+    chart: EChartsOption,
+    rows?: unknown[],
+  ): SSEChartData {
+    const series = (chart.series as Array<{ type?: string }>) ?? [];
+    const firstSeries = series[0];
+    const chartType = (firstSeries?.type as 'bar' | 'line' | 'pie') ?? 'bar';
+    return {
+      chartType,
+      title: chart.title?.text,
+      data: {
+        option: chart,
+        rows: rows ?? [],
+      },
     };
   }
 }
