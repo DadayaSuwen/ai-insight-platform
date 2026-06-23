@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MessageEvent } from '@nestjs/common';
 import { ChatService } from './chat.service';
-import { AiService, AiProcessResult, AiStreamEvent } from '../ai/ai.service';
+import { AiService, type AiProcessResult } from '../ai/ai.service';
+import type { PlannerStreamEvent } from '../ai/agents/planner.agent';
 import { SSEEventType } from '@workspace/types';
-import { IntentType } from '../ai/agents/router.agent';
 
 describe('ChatService', () => {
   let service: ChatService;
@@ -44,14 +44,14 @@ describe('ChatService', () => {
   /**
    * Build an async generator from a list of AiStreamEvents.
    */
-  async function* mockStream(events: AiStreamEvent[]): AsyncGenerator<AiStreamEvent, void, unknown> {
+  async function* mockStream(events: PlannerStreamEvent[]): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     for (const e of events) yield e;
   }
 
   describe('processMessage (sync)', () => {
     it('should delegate to AiService.process', async () => {
       const result: AiProcessResult = {
-        intent: 'chat' as IntentType,
+        intent: 'chat',
         message: 'hi',
       };
       aiService.process.mockResolvedValue(result);
@@ -112,13 +112,12 @@ describe('ChatService', () => {
           type: 'chart',
           data: {
             chartType: 'bar',
-            title: '销售',
             data: {
               option: { xAxis: { type: 'category', data: ['A'] }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: [100] }] },
               rows: [{ category: 'A', total: 100 }],
             },
           },
-        },
+        } as unknown as PlannerStreamEvent,
         { type: 'token', data: { content: '图表已生成', isFinal: false } },
         { type: 'done', data: {} },
       ]));
@@ -174,7 +173,7 @@ describe('ChatService', () => {
     });
 
     it('should emit error + done when aiService.processStream throws', async () => {
-      async function* throwingGen(): AsyncGenerator<AiStreamEvent, void, unknown> {
+      async function* throwingGen(): AsyncGenerator<PlannerStreamEvent, void, unknown> {
         throw new Error('boom');
       }
       aiService.processStream.mockReturnValue(throwingGen());

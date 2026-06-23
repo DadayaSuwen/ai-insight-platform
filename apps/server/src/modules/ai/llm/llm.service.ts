@@ -265,6 +265,14 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     return this.activeProvider;
   }
 
+  /**
+   * Expose the underlying chat model for tool binding.
+   * Used by PlannerAgent to call bindTools() on the active provider.
+   */
+  getChatModel(): ReturnType<typeof createChatModel> {
+    return this.getRequiredChat();
+  }
+
   // ─── Internals ─────────────────────────────────────────────────────────────
 
   private async initFromDatabase(): Promise<void> {

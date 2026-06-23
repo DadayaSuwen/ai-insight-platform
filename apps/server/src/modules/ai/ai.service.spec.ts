@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from './ai.service';
-import { RouterAgent, IntentType } from './agents/router.agent';
+import { PlannerAgent, type PlannerStreamEvent } from './agents/planner.agent';
 import { SqlAgent } from './agents/sql.agent';
-import { ChartAgent, EChartsOption } from './agents/chart.agent';
+import { ChartAgent, type EChartsOption } from './agents/chart.agent';
 import { AnalysisAgent } from './agents/analysis.agent';
 import { DatabaseService } from '../database/database.service';
 import { LlmService } from './llm/llm.service';
@@ -10,12 +10,8 @@ import { createLlmMock } from './llm/llm.mock';
 
 describe('AiService', () => {
   let service: AiService;
-  let routerAgent: jest.Mocked<RouterAgent>;
-  let sqlAgent: jest.Mocked<SqlAgent>;
-  let chartAgent: jest.Mocked<ChartAgent>;
-  let analysisAgent: jest.Mocked<AnalysisAgent>;
-  let databaseService: jest.Mocked<DatabaseService>;
-  let llmMock: ReturnType<typeof createLlmMock>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let plannerAgent: any;
 
   const mockRows = [
     { category: 'A', total: 100 },
@@ -28,14 +24,25 @@ describe('AiService', () => {
     series: [{ type: 'bar', data: [100, 200] }],
   };
 
+  function toStream(events: PlannerStreamEvent[]) {
+    async function* gen(): AsyncGenerator<PlannerStreamEvent> {
+      for (const e of events) yield e;
+    }
+    return gen();
+  }
+
   beforeEach(async () => {
+    plannerAgent = {
+      refreshSchema: jest.fn().mockResolvedValue(undefined),
+      invokeStream: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AiService,
-        {
-          provide: RouterAgent,
-          useValue: { recognize: jest.fn() },
-        },
+        // Override PlannerAgent so NestJS doesn't try to instantiate the real class
+        // (which would call real LLM/DatabaseService at construction time)
+        { provide: PlannerAgent, useValue: plannerAgent },
         {
           provide: SqlAgent,
           useValue: { generate: jest.fn(), summarize: jest.fn() },
@@ -50,132 +57,130 @@ describe('AiService', () => {
         },
         {
           provide: DatabaseService,
-          useValue: { executeQuery: jest.fn() },
+          useValue: { executeQuery: jest.fn(), getSchema: jest.fn().mockResolvedValue([]) },
         },
         { provide: LlmService, useValue: createLlmMock() },
       ],
     }).compile();
 
     service = module.get<AiService>(AiService);
-    routerAgent = module.get(RouterAgent);
-    sqlAgent = module.get(SqlAgent);
-    chartAgent = module.get(ChartAgent);
-    analysisAgent = module.get(AnalysisAgent);
-    databaseService = module.get(DatabaseService);
-    llmMock = module.get(LlmService) as unknown as ReturnType<typeof createLlmMock>;
   });
 
-  describe('chat intent', () => {
-    it('should return chat result without invoking SQL pipeline', async () => {
-      routerAgent.recognize.mockResolvedValue('chat');
+  describe('process (sync)', () => {
+    it('should return chat result for small talk', async () => {
+      plannerAgent.invokeStream.mockReturnValue(
+        toStream([
+          { type: 'tool_call', data: { name: 'small_talk', args: { message: '你好' } } } as PlannerStreamEvent,
+          { type: 'tool_result', data: { name: 'small_talk', result: { reply: '你好！有什么可以帮你？' } } } as PlannerStreamEvent,
+          { type: 'token', data: { content: '你好！有什么可以帮你？', isFinal: false } } as PlannerStreamEvent,
+          { type: 'done', data: {} } as PlannerStreamEvent,
+        ]),
+      );
 
       const result = await service.process('你好');
 
       expect(result.intent).toBe('chat');
-      expect(result.message).toContain('你好');
-      expect(result.sql).toBeUndefined();
-      expect(result.rows).toBeUndefined();
-      expect(sqlAgent.generate).not.toHaveBeenCalled();
-      expect(databaseService.executeQuery).not.toHaveBeenCalled();
+      expect(result.message).toBe('你好！有什么可以帮你？');
     });
 
-    it('should return LLM reply when LlmService resolves', async () => {
-      routerAgent.recognize.mockResolvedValue('chat');
-      llmMock.invoke.mockResolvedValue('你好!我是 AI Insight 助手,可以帮你查询销售数据。');
-
-      const result = await service.process('hello');
-
-      expect(result.intent).toBe('chat');
-      expect(result.message).toContain('AI Insight');
-      expect(llmMock.invoke).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('sql intent', () => {
-    it('should run sql pipeline and return rows', async () => {
-      routerAgent.recognize.mockResolvedValue('sql');
-      sqlAgent.generate.mockResolvedValue('SELECT 1');
-      sqlAgent.summarize.mockResolvedValue('查询返回 2 条数据，最高金额 ¥1000');
-      databaseService.executeQuery.mockResolvedValue(mockRows);
+    it('should return sql result with rows', async () => {
+      plannerAgent.invokeStream.mockReturnValue(
+        toStream([
+          { type: 'tool_call', data: { name: 'query_sales', args: { query: '查询所有数据' } } } as PlannerStreamEvent,
+          { type: 'tool_result', data: { name: 'query_sales', result: { sql: 'SELECT 1', rows: mockRows, rowCount: 2 } } } as PlannerStreamEvent,
+          { type: 'sql', data: { sql: 'SELECT 1', executed: true, rows: mockRows } } as PlannerStreamEvent,
+          { type: 'token', data: { content: '查询返回 2 条数据', isFinal: false } } as PlannerStreamEvent,
+          { type: 'done', data: {} } as PlannerStreamEvent,
+        ]),
+      );
 
       const result = await service.process('查询所有数据');
 
       expect(result.intent).toBe('sql');
       expect(result.sql).toBe('SELECT 1');
-      expect(result.executed).toBe(true);
       expect(result.rows).toEqual(mockRows);
-      expect(result.message).toContain('2');
-      expect(sqlAgent.summarize).toHaveBeenCalledWith(mockRows, '查询所有数据');
-      expect(chartAgent.generate).not.toHaveBeenCalled();
-      expect(analysisAgent.generate).not.toHaveBeenCalled();
+      expect(result.message).toBe('查询返回 2 条数据');
     });
 
-    it('should return error result when SQL execution fails', async () => {
-      routerAgent.recognize.mockResolvedValue('sql');
-      sqlAgent.generate.mockResolvedValue('SELECT bad');
-      databaseService.executeQuery.mockRejectedValue(new Error('syntax error'));
-
-      const result = await service.process('查询');
-
-      // Error result preserves the failing intent so the user knows which pipeline broke
-      expect(result.intent).toBe('sql');
-      expect(result.error?.code).toBe('PIPELINE_FAILED');
-      expect(result.error?.message).toBe('syntax error');
-    });
-  });
-
-  describe('chart intent', () => {
-    it('should generate chart from rows', async () => {
-      routerAgent.recognize.mockResolvedValue('chart');
-      sqlAgent.generate.mockResolvedValue('SELECT category, SUM(amount) FROM sales');
-      databaseService.executeQuery.mockResolvedValue(mockRows);
-      chartAgent.generate.mockResolvedValue(mockChart);
+    it('should return chart result', async () => {
+      plannerAgent.invokeStream.mockReturnValue(
+        toStream([
+          { type: 'tool_call', data: { name: 'gen_chart', args: { query: '按类别显示柱状图' } } } as PlannerStreamEvent,
+          { type: 'tool_result', data: { name: 'gen_chart', result: { sql: 'SELECT category', rows: mockRows, chart: mockChart, chartType: 'bar', rowCount: 2 } } } as PlannerStreamEvent,
+          { type: 'sql', data: { sql: 'SELECT category', executed: true, rows: mockRows } } as PlannerStreamEvent,
+          { type: 'chart', data: { chartType: 'bar', data: { option: mockChart, rows: mockRows } } } as PlannerStreamEvent,
+          { type: 'done', data: {} } as PlannerStreamEvent,
+        ]),
+      );
 
       const result = await service.process('按类别显示柱状图');
 
       expect(result.intent).toBe('chart');
-      expect(result.sql).toBeDefined();
-      expect(result.rows).toEqual(mockRows);
       expect(result.chart).toEqual(mockChart);
-      expect(chartAgent.generate).toHaveBeenCalledWith(mockRows, expect.any(String));
     });
-  });
 
-  describe('analysis intent', () => {
-    it('should run analysis pipeline and return report', async () => {
-      routerAgent.recognize.mockResolvedValue('analysis');
-      sqlAgent.generate.mockResolvedValue('SELECT * FROM sales');
-      databaseService.executeQuery.mockResolvedValue(mockRows);
-      analysisAgent.generate.mockResolvedValue('趋势分析: 类别 B 表现最佳');
+    it('should return analysis result', async () => {
+      plannerAgent.invokeStream.mockReturnValue(
+        toStream([
+          { type: 'tool_call', data: { name: 'gen_analysis', args: { query: '分析销售趋势' } } } as PlannerStreamEvent,
+          { type: 'tool_result', data: { name: 'gen_analysis', result: { sql: 'SELECT *', rows: mockRows, analysis: '趋势分析：类别 B 表现最佳', rowCount: 2 } } } as PlannerStreamEvent,
+          { type: 'sql', data: { sql: 'SELECT *', executed: true, rows: mockRows } } as PlannerStreamEvent,
+          { type: 'analysis', data: { content: '趋势分析：类别 B 表现最佳' } } as PlannerStreamEvent,
+          { type: 'done', data: {} } as PlannerStreamEvent,
+        ]),
+      );
 
       const result = await service.process('分析销售趋势');
 
       expect(result.intent).toBe('analysis');
-      expect(result.sql).toBe('SELECT * FROM sales');
-      expect(result.rows).toEqual(mockRows);
-      expect(result.analysis).toBe('趋势分析: 类别 B 表现最佳');
-      expect(chartAgent.generate).not.toHaveBeenCalled();
+      expect(result.analysis).toBe('趋势分析：类别 B 表现最佳');
+    });
+
+    it('should return error result when PlannerAgent throws', async () => {
+      async function* throwingGen(): AsyncGenerator<PlannerStreamEvent> {
+        throw new Error('LLM unavailable');
+      }
+      plannerAgent.invokeStream.mockReturnValue(throwingGen());
+
+      const result = await service.process('查询');
+
+      expect(result.error?.code).toBe('PLANNER_FAILED');
+      expect(result.error?.message).toBe('LLM unavailable');
     });
   });
 
-  describe('error handling', () => {
-    it('should return INTENT_FAILED when router throws', async () => {
-      routerAgent.recognize.mockRejectedValue(new Error('router down'));
+  describe('processStream (SSE)', () => {
+    it('should delegate to PlannerAgent.invokeStream', async () => {
+      const events: PlannerStreamEvent[] = [
+        { type: 'token', data: { content: 'hi', isFinal: false } } as PlannerStreamEvent,
+        { type: 'done', data: {} } as PlannerStreamEvent,
+      ];
+      plannerAgent.invokeStream.mockReturnValue(toStream(events));
 
-      const result = await service.process('任何问题');
+      const collected: PlannerStreamEvent[] = [];
+      for await (const e of service.processStream('hello')) {
+        collected.push(e);
+      }
 
-      expect(result.intent).toBe('chat');
-      expect(result.error?.code).toBe('INTENT_FAILED');
-      expect(result.error?.message).toBe('router down');
+      expect(collected).toEqual(events);
+      expect(plannerAgent.refreshSchema).toHaveBeenCalled();
+      expect(plannerAgent.invokeStream).toHaveBeenCalledWith('hello');
     });
 
-    it('should default to chat on unknown intent', async () => {
-      // Cast to bypass type-safety for the unknown-intent test case
-      routerAgent.recognize.mockResolvedValue('weird' as IntentType);
+    it('should yield error and done on PlannerAgent failure', async () => {
+      async function* throwingGen(): AsyncGenerator<PlannerStreamEvent> {
+        throw new Error('connection lost');
+      }
+      plannerAgent.invokeStream.mockReturnValue(throwingGen());
 
-      const result = await service.process('test');
+      const collected: PlannerStreamEvent[] = [];
+      for await (const e of service.processStream('hello')) {
+        collected.push(e);
+      }
 
-      expect(result.intent).toBe('chat');
+      expect(collected).toHaveLength(2);
+      expect(collected[0]).toEqual({ type: 'error', data: { code: 'PLANNER_FAILED', message: 'connection lost' } });
+      expect(collected[1]).toEqual({ type: 'done', data: {} });
     });
   });
 });

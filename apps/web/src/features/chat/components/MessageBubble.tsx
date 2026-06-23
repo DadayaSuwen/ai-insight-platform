@@ -63,6 +63,55 @@ function BotAvatar() {
  * - User: right-aligned flex row, avatar at right end
  * - Assistant: CSS grid [avatar-fixed | content-fluid], blocks go full width
  */
+/** Tool call indicator card — shown while a tool is being executed */
+function ToolCallCard({ name, args }: { name: string; args: Record<string, unknown> }) {
+  const label = name.replace(/_/g, ' ');
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+      style={{ borderColor: 'var(--accent)', background: 'var(--bg-tertiary)', opacity: 0.9 }}
+    >
+      <span className="loading-spinner" style={{ width: 10, height: 10 }} />
+      <span style={{ color: 'var(--accent)' }}>
+        正在调用 {label}…
+      </span>
+      {args.query != null && (
+        <span
+          className="truncate max-w-[200px] text-[10px]"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          {String(args.query).slice(0, 40)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Tool result badge — shown after a tool completes */
+function ToolResultBadge({ name, result }: { name: string; result: Record<string, unknown> }) {
+  let label = '';
+  if (name === 'query_sales') {
+    label = `查询到 ${result.rowCount ?? 0} 条记录`;
+  } else if (name === 'gen_chart') {
+    label = '图表已生成';
+  } else if (name === 'gen_analysis') {
+    label = '分析报告已生成';
+  } else if (name === 'small_talk') {
+    return null;
+  } else {
+    label = `${name} 完成`;
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--success)' }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+      {label}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
@@ -136,6 +185,14 @@ function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           </AssistantCard>
         ) : null}
+
+        {/* ── Tool call cards ─────────────────────── */}
+        {message.toolCalls && message.toolCalls.map((tc, i) => (
+          <ToolCallCard key={i} name={tc.name} args={tc.args} />
+        ))}
+        {message.toolResults && message.toolResults.map((tr, i) => (
+          <ToolResultBadge key={i} name={tr.name} result={tr.result} />
+        ))}
 
         {/* ── Error block ────────────────────────── */}
         {message.error && (

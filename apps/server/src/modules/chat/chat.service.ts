@@ -5,7 +5,8 @@ import {
   SSEEventType,
   SSEErrorData,
 } from '@workspace/types';
-import { AiService, AiProcessResult, AiStreamEvent } from '../ai/ai.service';
+import { AiService, type AiProcessResult } from '../ai/ai.service';
+import type { PlannerStreamEvent } from '../ai/agents/planner.agent';
 
 /**
  * ChatService - Chat streaming and orchestration
@@ -69,7 +70,7 @@ export class ChatService {
    * Map an AiStreamEvent to an SSE MessageEvent.
    * Returns null for 'done' (caller sends it) or unknown types.
    */
-  private mapEvent(event: AiStreamEvent): MessageEvent | null {
+  private mapEvent(event: PlannerStreamEvent): MessageEvent | null {
     switch (event.type) {
       case 'token':
         return {
@@ -86,6 +87,16 @@ export class ChatService {
         return {
           type: SSEEventType.ERROR,
           data: event.data as SSEErrorData,
+        };
+      case 'tool_call':
+        return {
+          type: SSEEventType.TOOL_CALL,
+          data: event.data as unknown as Record<string, unknown>,
+        };
+      case 'tool_result':
+        return {
+          type: SSEEventType.TOOL_RESULT,
+          data: event.data as unknown as Record<string, unknown>,
         };
       case 'done':
         return null;

@@ -17,6 +17,10 @@ export interface AssistantMessage extends Message {
   error?: { code?: string; message: string };
   /** True after the SSE 'done' event was received */
   isFinal: boolean;
+  /** Tool calls sequence (from SSE tool_call events) */
+  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  /** Tool results sequence (from SSE tool_result events) */
+  toolResults?: Array<{ name: string; result: Record<string, unknown> }>;
 }
 
 export type ChatMessage = Message | AssistantMessage;

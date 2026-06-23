@@ -136,6 +136,26 @@ function ChatWindow() {
     scrollToBottom();
   }, [updateLastAssistant]);
 
+  const onToolCall = useCallback(
+    (data: { name: string; args: Record<string, unknown> }) => {
+      updateLastAssistant((msg) => ({
+        ...msg,
+        toolCalls: [...(msg.toolCalls ?? []), data],
+      }));
+    },
+    [updateLastAssistant],
+  );
+
+  const onToolResult = useCallback(
+    (data: { name: string; result: Record<string, unknown> }) => {
+      updateLastAssistant((msg) => ({
+        ...msg,
+        toolResults: [...(msg.toolResults ?? []), data],
+      }));
+    },
+    [updateLastAssistant],
+  );
+
   const { sendMessage, isLoading, error } = useSSEChat({
     onToken,
     onSQL,
@@ -143,6 +163,8 @@ function ChatWindow() {
     onAnalysis,
     onError,
     onDone,
+    onToolCall,
+    onToolResult,
   });
 
   const handleSend = useCallback(

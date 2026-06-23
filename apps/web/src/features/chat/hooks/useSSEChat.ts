@@ -16,6 +16,9 @@ interface UseSSEChatOptions {
   onAnalysis?: (data: SSEAnalysisData) => void;
   onError?: (data: SSEErrorData) => void;
   onDone?: () => void;
+  // Planner tool-call events
+  onToolCall?: (data: { name: string; args: Record<string, unknown> }) => void;
+  onToolResult?: (data: { name: string; result: Record<string, unknown> }) => void;
 }
 
 interface UseSSEChatReturn {
@@ -111,6 +114,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
         abortControllerRef.current = null;
         setIsLoading(false);
         opts.onDone?.();
+        break;
+      case SSEEventType.TOOL_CALL:
+        opts.onToolCall?.(data as { name: string; args: Record<string, unknown> });
+        break;
+      case SSEEventType.TOOL_RESULT:
+        opts.onToolResult?.(data as { name: string; result: Record<string, unknown> });
         break;
     }
   }, []);
