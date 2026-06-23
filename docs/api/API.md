@@ -103,25 +103,50 @@ POST /ai/process
 
 | 事件 | 触发条件 | `data` 字段 |
 |------|---------|------------|
-| `token` | **总是先发** | `{ content: string, isFinal: false }` 用户可见文本 |
+| `tool_call` | LLM 决定调用工具 | `{ name: string, args?: object }` |
+| `tool_result` | 工具执行完成 | `{ name: string, result: object }` |
+| `sql` | SQL 已生成并执行 | `{ sql, executed, rows?, rowCount? }` |
+| `chart` | 图表已生成 | `{ chartType, title?, data: { option, rows } }` |
+| `analysis` | 分析报告已生成 | `{ content: string }` |
+| `token` | 最终 LLM 文本流 | `{ content: string, isFinal?: false }` |
 | `error` | 当 result.error 存在 | `{ code: string, message: string }` |
-| `sql` | 当 sql 已生成 | `{ sql: string, executed: boolean }` |
-| `chart` | 当 chart 已生成 | `{ chartType, title?, data: { option, rows } }` |
-| `analysis` | 当 analysis 已生成 | `{ content: string, keyInsights?: string[] }` |
 | `done` | **总是最后** | `{}` |
 
-**事件流示例** (柱状图查询):
+**典型事件流** (查询 + 图表):
 
 ```
-event: token
-data: {"content":"已生成图表,基于 5 条数据。","isFinal":false}
+event: tool_call
+data: {"name":"query_sales","args":{"timeRange":"last_month","groupBy":"category"}}
+
+event: tool_result
+data: {"name":"query_sales","result":{"sql":"...","rows":[...],"rowCount":5}}
 
 event: sql
-data: {"sql":"SELECT \"category\", SUM(\"amount\") as total FROM \"Sales\" GROUP BY \"category\"","executed":true}
+data: {"sql":"SELECT \"category\", SUM(\"amount\") as total FROM \"Sales\" GROUP BY \"category\"","executed":true,"rows":[...],"rowCount":5}
+
+event: tool_call
+data: {"name":"gen_chart","args":{"sql":"...","chartType":"bar"}}
+
+event: tool_result
+data: {"name":"gen_chart","result":{"chartType":"bar","data":{...}}}
 
 event: chart
 data: {"chartType":"bar","data":{"option":{...},"rows":[...]}}
 
+event: token
+data: {"content":"根据查询结果，我为您生成了以下柱状图..."}
+
+event: done
+data: {}
+```
+
+**闲聊/简单对话** (无工具调用):
+
+```
+event: token
+data: {"content":"你好"}
+event: token
+data: {"content":"！"}
 event: done
 data: {}
 ```
@@ -130,7 +155,7 @@ data: {}
 
 | code | 含义 |
 |------|------|
-| `INTENT_FAILED` | RouterAgent 异常 |
-| `PIPELINE_FAILED` | SQL/Chart/Analysis 阶段异常 (保留原始 intent) |
+| `TOOL_EXECUTION_FAILED` | 工具执行异常 (数据库/LLM 等) |
+| `LLM_UNAVAILABLE` | LLM 服务不可用 |
 | `STREAM_FAILED` | SSE 流本身异常 |
 | `INVALID_MESSAGE` | 缺少 message 参数 |

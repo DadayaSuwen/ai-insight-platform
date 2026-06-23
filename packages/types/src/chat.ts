@@ -8,7 +8,7 @@ import { z } from 'zod';
  * SSE event types for streaming responses
  */
 export enum SSEEventType {
-  TOKEN = 'token',
+  TEXT = 'text',
   SQL = 'sql',
   CHART = 'chart',
   ANALYSIS = 'analysis',

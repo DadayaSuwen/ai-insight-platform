@@ -20,12 +20,17 @@ packages/types/
 ```typescript
 // SSE 事件类型
 enum SSEEventType {
-  TOKEN = 'token',      // 普通文字流
-  SQL = 'sql',          // 生成的 SQL
-  CHART = 'chart',     // 图表配置
-  ANALYSIS = 'analysis', // 分析报告
-  ERROR = 'error',     // 错误
-  DONE = 'done',       // 完成
+  // 原有事件
+  TOKEN = 'token',        // 普通文字流
+  SQL = 'sql',            // SQL 执行结果
+  CHART = 'chart',       // 图表配置
+  ANALYSIS = 'analysis',  // 分析报告
+  ERROR = 'error',       // 错误
+  DONE = 'done',         // 完成
+  // 新增事件 (Planner + Function Calling)
+  TOOL_CALL = 'tool_call',      // LLM 决定调用工具
+  TOOL_RESULT = 'tool_result',  // 工具执行结果
+  THINKING = 'thinking',         // LLM 中间思考
 }
 ```
 
@@ -89,6 +94,8 @@ SSETokenDataSchema = z.object({
 SSESQLDataSchema = z.object({
   sql: z.string(),
   executed: z.boolean(),
+  rows: z.array(z.record(z.string(), z.any())).optional(), // 新增：查询结果行
+  rowCount: z.number().optional(),                          // 新增：结果条数
 });
 
 // 图表数据
@@ -111,6 +118,19 @@ SSEErrorDataSchema = z.object({
   code: z.string().optional(),
   message: z.string(),
   details: z.string().optional(),
+});
+
+// ★ 新增：工具调用 (Planner + Function Calling)
+ToolCallDataSchema = z.object({
+  name: z.string(),         // 工具名：query_sales | gen_chart | gen_analysis | small_talk
+  args: z.record(z.string(), z.any()).optional(),  // 工具参数
+});
+
+// ★ 新增：工具结果
+ToolResultDataSchema = z.object({
+  name: z.string(),         // 工具名
+  result: z.record(z.string(), z.any()),           // 执行结果
+  success: z.boolean().optional(),
 });
 ```
 

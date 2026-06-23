@@ -5,9 +5,9 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ChatOllama } from "@langchain/community/chat_models/ollama";
+import { ChatOllama } from "@langchain/ollama";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import type { BaseMessage } from "@langchain/core/messages";
+import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
@@ -100,16 +100,13 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     const timeoutMs = opts.timeoutMs ?? 60_000;
 
     if (opts.temperature !== undefined) {
-      // BaseChatModel doesn't expose temperature — each subclass does.
-      (chat as unknown as { temperature: number }).temperature =
-        opts.temperature;
+      chat.temperature = opts.temperature;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (await this.raceWithTimeout(
-      chat.invoke(messages),
+    const result = await this.raceWithTimeout(
+      chat.invoke(messages as any) as Promise<AIMessage>,
       timeoutMs,
-    )) as any;
+    );
     return this.normalizeContent(result.content);
   }
 
@@ -136,7 +133,9 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     const stream: AsyncIterable<unknown> =
       raw[Symbol.asyncIterator] != null
         ? raw
-        : (async function* () { yield* raw; })();
+        : (async function* () {
+            yield* raw;
+          })();
 
     let timedOut = false;
     const timeoutTimer = setTimeout(() => {
@@ -145,20 +144,24 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
 
     try {
       // Track accumulated content to detect new chunks
-      let accumulated = '';
+      let accumulated = "";
 
       for await (const chunk of stream) {
         if (timedOut) {
           throw new Error(`LLM stream timeout after ${timeoutMs}ms`);
         }
-        const content = this.normalizeContent((chunk as { content: unknown }).content);
+        const content = this.normalizeContent(
+          (chunk as { content: unknown }).content,
+        );
         if (content) {
           accumulated += content;
           yield content;
         }
       }
     } catch (err) {
-      this.logger.error(`[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(
+        `[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`,
+      );
       throw err;
     } finally {
       clearTimeout(timeoutTimer);
@@ -330,7 +333,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     return new ChatOllama({
       baseUrl:
         this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
-      model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen3:8b",
+      model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b",
       temperature: 0,
       numCtx: 4096,
     });

@@ -1,18 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { MessageEvent } from '@nestjs/common';
-import {
-  SSEEventType,
-  SSEErrorData,
-} from '@workspace/types';
-import { AiService, type AiProcessResult } from '../ai/ai.service';
-import type { PlannerStreamEvent } from '../ai/agents/planner.agent';
+import { Injectable, Logger } from "@nestjs/common";
+import { Observable } from "rxjs";
+import { MessageEvent } from "@nestjs/common";
+import { AiService } from "../ai/ai.service";
 
 /**
- * ChatService - Chat streaming and orchestration
+ * ChatService - Chat streaming orchestration
  *
- * Wraps AiService and exposes a non-streaming sync call plus a true
- * streaming SSE stream powered by the LLM's token-by-token output.
+ * 在 Agent 架构下，它的唯一职责是将 AiService 的 AsyncGenerator
+ * 转换为 NestJS 的 SSE Observable 流，并直接透传所有事件。
  */
 @Injectable()
 export class ChatService {
@@ -21,87 +16,34 @@ export class ChatService {
   constructor(private readonly aiService: AiService) {}
 
   /**
-   * Synchronous call - returns the full AiProcessResult.
-   * Useful for callers that don't need streaming.
-   */
-  async processMessage(message: string): Promise<AiProcessResult> {
-    return this.aiService.process(message);
-  }
-
-  /**
-   * True SSE stream — each yield from aiService.processStream() maps to
-   * an immediate SSE emission, giving token-by-token output for chat intents.
+   * True SSE stream — 直接透传 AiService 产生的事件。
    */
   processMessageStream(message: string): Observable<MessageEvent> {
     this.logger.log(`SSE stream start: ${message}`);
-    return new Observable<MessageEvent>((subscriber) => {
-      const abortController = new AbortController();
 
+    return new Observable<MessageEvent>((subscriber) => {
       (async () => {
         try {
+          // 消费 AiService 的异步迭代器
           for await (const event of this.aiService.processStream(message)) {
-            if (abortController.signal.aborted) break;
-            const msgEvent = this.mapEvent(event);
-            if (msgEvent) {
-              subscriber.next(msgEvent);
-            }
+            // 直接透传事件的 type 和 data，不做任何拦截和修改
+            subscriber.next({
+              type: event.type, // "tool_call" | "tool_result" | "text" | "error" | "done"
+              data: event.data,
+            });
           }
-          subscriber.next({ type: SSEEventType.DONE, data: {} });
           subscriber.complete();
         } catch (err: unknown) {
           this.logger.error(`SSE stream error: ${err}`);
-          const errorData: SSEErrorData = {
-            code: 'STREAM_FAILED',
+          const errorData = {
+            code: "STREAM_FAILED",
             message: err instanceof Error ? err.message : String(err),
           };
-          subscriber.next({ type: SSEEventType.ERROR, data: errorData });
-          subscriber.next({ type: SSEEventType.DONE, data: {} });
+          subscriber.next({ type: "error", data: errorData });
+          subscriber.next({ type: "done", data: {} });
           subscriber.complete();
         }
       })();
-
-      return () => {
-        abortController.abort();
-      };
     });
-  }
-
-  /**
-   * Map an AiStreamEvent to an SSE MessageEvent.
-   * Returns null for 'done' (caller sends it) or unknown types.
-   */
-  private mapEvent(event: PlannerStreamEvent): MessageEvent | null {
-    switch (event.type) {
-      case 'token':
-        return {
-          type: SSEEventType.TOKEN,
-          data: event.data as { content: string; isFinal: boolean },
-        };
-      case 'sql':
-        return { type: SSEEventType.SQL, data: event.data };
-      case 'chart':
-        return { type: SSEEventType.CHART, data: event.data };
-      case 'analysis':
-        return { type: SSEEventType.ANALYSIS, data: event.data };
-      case 'error':
-        return {
-          type: SSEEventType.ERROR,
-          data: event.data as SSEErrorData,
-        };
-      case 'tool_call':
-        return {
-          type: SSEEventType.TOOL_CALL,
-          data: event.data as unknown as Record<string, unknown>,
-        };
-      case 'tool_result':
-        return {
-          type: SSEEventType.TOOL_RESULT,
-          data: event.data as unknown as Record<string, unknown>,
-        };
-      case 'done':
-        return null;
-      default:
-        return null;
-    }
   }
 }

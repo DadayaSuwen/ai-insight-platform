@@ -128,13 +128,13 @@ pnpm preview          # 预览构建结果
 - ESLint + Prettier
 - 提交前运行 `pnpm lint`
 
-## Docker 构建 (Phase 6 待开始)
+## Docker 构建
+
+详见 [DOCKER.md](./DOCKER.md)。
 
 ```bash
-# 构建镜像
-docker build -f .docker/Dockerfile.web -t ai-insight-web .
-docker build -f .docker/Dockerfile.server -t ai-insight-server .
+# 一键启动全部服务
+pnpm docker:up
 
-# 运行
-docker-compose up -d
+# 浏览器打开 http://localhost:8080
 ```

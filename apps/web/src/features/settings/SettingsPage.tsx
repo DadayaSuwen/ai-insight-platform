@@ -13,7 +13,7 @@ const PROVIDER_LABELS: Record<LLMProvider, string> = {
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
   [LLMProvider.OPENAI]: 'gpt-4o',
   [LLMProvider.ANTHROPIC]: 'claude-3-5-sonnet-20240620',
-  [LLMProvider.OLLAMA]: 'qwen3:8b',
+  [LLMProvider.OLLAMA]: 'qwen2.5:3b',
 };
 
 const BASE_URLS: Record<LLMProvider, string> = {

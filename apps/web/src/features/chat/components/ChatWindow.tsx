@@ -1,17 +1,15 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import MessageBubble from './MessageBubble';
-import ChatInput from './ChatInput';
-import { useChatStore } from '../store';
-import { useSSEChat } from '../hooks';
-import type { ChatMessage, AssistantMessage } from '../types';
+import { useRef, useEffect, useCallback, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import MessageBubble from "./MessageBubble";
+import ChatInput from "./ChatInput";
+import { useChatStore } from "../store";
+import { useSSEChat } from "../hooks";
 import type {
-  SSETokenData,
-  SSESQLData,
-  SSEChartData,
-  SSEAnalysisData,
-  SSEErrorData,
-} from '@workspace/types';
+  ChatMessage,
+  AssistantMessage,
+  ToolCallData,
+  ToolResultData,
+} from "../types";
 
 function newId(): string {
   return (
@@ -22,12 +20,12 @@ function newId(): string {
 
 /** Preset quick-command chips shown in the empty state and below the header */
 const QUICK_COMMANDS = [
-  { label: '按类目统计销售额', icon: '📊', query: '按类别显示销售额' },
-  { label: '月度销售趋势', icon: '📈', query: '展示月度销售趋势' },
-  { label: 'Top 5 客户', icon: '👑', query: '销量最高的5个客户' },
-  { label: '地区分布', icon: '🗺️', query: '按地区统计销量分布' },
-  { label: '同比分析', icon: '📉', query: '今年与去年同期的销售对比' },
-  { label: '库存预警', icon: '⚠️', query: '哪些商品库存低于100' },
+  { label: "按类目统计销售额", icon: "📊", query: "按类别显示销售额" },
+  { label: "月度销售趋势", icon: "📈", query: "展示月度销售趋势" },
+  { label: "Top 5 客户", icon: "👑", query: "销量最高的5个客户" },
+  { label: "地区分布", icon: "🗺️", query: "按地区统计销量分布" },
+  { label: "同比分析", icon: "📉", query: "今年与去年同期的销售对比" },
+  { label: "库存预警", icon: "⚠️", query: "哪些商品库存低于100" },
 ];
 
 /** Simulated connection health — in production this would ping /database/schema */
@@ -39,7 +37,7 @@ function StatusDot({ connected }: { connected: boolean }) {
       )}
       <span
         className={`relative inline-flex h-2 w-2 rounded-full ${
-          connected ? 'bg-green-500' : 'bg-red-500'
+          connected ? "bg-green-500" : "bg-red-500"
         }`}
       />
     </span>
@@ -52,8 +50,8 @@ function StatusDot({ connected }: { connected: boolean }) {
  * Wires ChatInput → useSSEChat → useChatStore.
  *
  * Streaming model: assistant messages are stored in the zustand store from
- * the moment a user sends. SSE events update the *last* assistant message
- * in place. When 'done' fires, we mark `isFinal = true`.
+ * the moment a user sends. SSE events (tool_call, tool_result, text) update
+ * the *last* assistant message in place. When 'done' fires, we mark `isFinal = true`.
  */
 function ChatWindow() {
   const messages = useChatStore((s) => s.messages);
@@ -88,8 +86,10 @@ function ChatWindow() {
     isNearBottomRef.current = distanceFromBottom < 80;
   };
 
-  const onToken = useCallback(
-    (data: SSETokenData) => {
+  // ─── SSE Event Handlers (新架构适配) ───────────────────────────
+
+  const onText = useCallback(
+    (data: { content: string }) => {
       updateLastAssistant((msg) => ({
         ...msg,
         content: msg.content + data.content,
@@ -98,29 +98,28 @@ function ChatWindow() {
     [updateLastAssistant],
   );
 
-  const onSQL = useCallback(
-    (data: SSESQLData) => {
-      updateLastAssistant((msg) => ({ ...msg, sql: data }));
+  const onToolCall = useCallback(
+    (data: ToolCallData) => {
+      updateLastAssistant((msg) => ({
+        ...msg,
+        toolCalls: [...(msg.toolCalls ?? []), data],
+      }));
     },
     [updateLastAssistant],
   );
 
-  const onChart = useCallback(
-    (data: SSEChartData) => {
-      updateLastAssistant((msg) => ({ ...msg, chart: data }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onAnalysis = useCallback(
-    (data: SSEAnalysisData) => {
-      updateLastAssistant((msg) => ({ ...msg, analysis: data.content }));
+  const onToolResult = useCallback(
+    (data: ToolResultData) => {
+      updateLastAssistant((msg) => ({
+        ...msg,
+        toolResults: [...(msg.toolResults ?? []), data],
+      }));
     },
     [updateLastAssistant],
   );
 
   const onError = useCallback(
-    (data: SSEErrorData) => {
+    (data: { code: string; message: string }) => {
       updateLastAssistant((msg) => ({
         ...msg,
         error: { code: data.code, message: data.message },
@@ -131,56 +130,36 @@ function ChatWindow() {
 
   const onDone = useCallback(() => {
     updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
-    // Always scroll to bottom when done, so the final result is visible
     isNearBottomRef.current = true;
     scrollToBottom();
   }, [updateLastAssistant]);
 
-  const onToolCall = useCallback(
-    (data: { name: string; args: Record<string, unknown> }) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        toolCalls: [...(msg.toolCalls ?? []), data],
-      }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onToolResult = useCallback(
-    (data: { name: string; result: Record<string, unknown> }) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        toolResults: [...(msg.toolResults ?? []), data],
-      }));
-    },
-    [updateLastAssistant],
-  );
-
   const { sendMessage, isLoading, error } = useSSEChat({
-    onToken,
-    onSQL,
-    onChart,
-    onAnalysis,
-    onError,
-    onDone,
+    onText,
     onToolCall,
     onToolResult,
+    onError,
+    onDone,
   });
+
+  // ─── User Actions ───────────────────────────────────────────
 
   const handleSend = useCallback(
     (text: string) => {
       const userMsg: ChatMessage = {
         id: newId(),
-        role: 'user',
+        role: "user",
         content: text,
         createdAt: new Date().toISOString(),
       };
       const draftAssistant: AssistantMessage = {
         id: newId(),
-        role: 'assistant',
-        content: '',
+        role: "assistant",
+        content: "",
         createdAt: new Date().toISOString(),
         isFinal: false,
+        toolCalls: [],
+        toolResults: [],
       };
       addMessage(userMsg);
       addMessage(draftAssistant);
@@ -197,31 +176,52 @@ function ChatWindow() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--bg-primary)' }}>
+    <div
+      className="flex h-full flex-col"
+      style={{ background: "var(--bg-primary)" }}
+    >
       {/* ── Header ─────────────────────────────────────────── */}
       <header
         className="flex shrink-0 items-center justify-between border-b px-4 py-3"
-        style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)' }}
+        style={{
+          background: "var(--bg-primary)",
+          borderColor: "var(--border)",
+        }}
       >
         <div className="flex items-center gap-3">
           {/* Logo mark */}
           <div
             className="flex h-9 w-9 items-center justify-center rounded-lg text-white"
-            style={{ background: 'var(--accent)' }}
+            style={{ background: "var(--accent)" }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
           <div>
-            <h1 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <h1
+              className="text-sm font-semibold"
+              style={{ color: "var(--text-primary)" }}
+            >
               AI Insight Platform
             </h1>
-            <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <div
+              className="flex items-center gap-1.5 text-xs"
+              style={{ color: "var(--text-muted)" }}
+            >
               <StatusDot connected={connected} />
-              <span>{connected ? '服务正常' : '服务中断'}</span>
+              <span>{connected ? "服务正常" : "服务中断"}</span>
               <span className="opacity-50">·</span>
-              <span>自然语言查询</span>
+              <span>Agent 架构已启用</span>
             </div>
           </div>
         </div>
@@ -233,11 +233,25 @@ function ChatWindow() {
             <button
               onClick={() => useChatStore.getState().clearMessages()}
               className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs transition-colors"
-              style={{ color: 'var(--text-secondary)', background: 'transparent' }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              style={{
+                color: "var(--text-secondary)",
+                background: "transparent",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--bg-hover)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "transparent")
+              }
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6l-1 14H6L5 6" />
                 <path d="M10 11v6M14 11v6" />
@@ -249,14 +263,25 @@ function ChatWindow() {
 
           {/* Settings */}
           <button
-            onClick={() => navigate('/settings')}
+            onClick={() => navigate("/settings")}
             className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--bg-hover)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
             title="LLM 设置"
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
@@ -266,14 +291,25 @@ function ChatWindow() {
           <button
             onClick={toggleTheme}
             className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-            title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+            style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--bg-hover)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+            title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
           >
-            {theme === 'dark' ? (
+            {theme === "dark" ? (
               /* Sun icon */
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="12" cy="12" r="5" />
                 <line x1="12" y1="1" x2="12" y2="3" />
                 <line x1="12" y1="21" x2="12" y2="23" />
@@ -286,7 +322,14 @@ function ChatWindow() {
               </svg>
             ) : (
               /* Moon icon */
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
               </svg>
             )}
@@ -296,9 +339,18 @@ function ChatWindow() {
 
       {/* ── Quick Commands ─────────────────────────────────── */}
       {isEmpty && (
-        <div className="shrink-0 border-b px-6 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}>
+        <div
+          className="shrink-0 border-b px-6 py-3"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--bg-primary)",
+          }}
+        >
           <div className="mx-auto max-w-5xl">
-            <p className="mb-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+            <p
+              className="mb-2.5 text-xs font-medium"
+              style={{ color: "var(--text-muted)" }}
+            >
               快捷指令
             </p>
             <div className="flex flex-wrap gap-2">
@@ -323,27 +375,37 @@ function ChatWindow() {
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
-        style={{ background: 'var(--bg-secondary)' }}
+        style={{ background: "var(--bg-secondary)" }}
       >
         <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
           {isEmpty && (
             <div
               className="flex flex-col items-center justify-center py-16 text-center"
-              style={{ color: 'var(--text-muted)' }}
+              style={{ color: "var(--text-muted)" }}
             >
               <div
                 className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl"
-                style={{ background: 'var(--bg-tertiary)' }}
+                style={{ background: "var(--bg-tertiary)" }}
               >
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
-              <p className="mb-1 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+              <p
+                className="mb-1 text-sm font-medium"
+                style={{ color: "var(--text-secondary)" }}
+              >
                 开始对话
               </p>
               <p className="text-xs">
-                输入自然语言问题，我将查询数据并生成可视化图表与分析报告
+                输入自然语言问题，我将自动规划任务、查询数据并生成可视化图表
               </p>
             </div>
           )}
@@ -359,9 +421,20 @@ function ChatWindow() {
       {error && (
         <div
           className="flex items-center gap-2 border-t px-6 py-2 text-xs"
-          style={{ background: 'var(--error-light)', borderColor: 'var(--error)', color: 'var(--error)' }}
+          style={{
+            background: "var(--error-light)",
+            borderColor: "var(--error)",
+            color: "var(--error)",
+          }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />

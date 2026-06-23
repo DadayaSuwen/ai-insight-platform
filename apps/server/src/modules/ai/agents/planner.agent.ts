@@ -1,19 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { ToolCall } from '@langchain/core/messages/tool';
-import { DatabaseService } from '../../database/database.service';
-import { SqlAgent } from './sql.agent';
-import { ChartAgent } from './chart.agent';
-import { AnalysisAgent } from './analysis.agent';
-import { LlmService } from '../llm/llm.service';
+import { Injectable, Logger } from "@nestjs/common";
 import {
-  createQuerySalesTool,
-  createGenChartTool,
-  createGenAnalysisTool,
-  createSmallTalkTool,
-  type PlannerTool,
-} from '../tools';
+  AIMessage,
+  AIMessageChunk,
+  BaseMessage,
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
+import { z } from "zod";
+import { LlmService } from "../llm/llm.service";
+import { DatabaseService } from "../../database/database.service";
+import { ChartHelper } from "../tools/chart.helper";
+import type { StructuredTool } from "@langchain/core/tools";
+import { createQuerySalesTool, createGenChartTool } from "../tools";
 
 export interface PlannerToolCallData {
   name: string;
@@ -26,69 +25,47 @@ export interface PlannerToolResultData {
 }
 
 export type PlannerStreamEvent =
-  | { type: 'token'; data: { content: string; isFinal: boolean } }
-  | { type: 'sql'; data: { sql: string; executed: boolean; rows?: unknown[] } }
-  | { type: 'chart'; data: { chartType: string; data: { option: Record<string, unknown>; rows: unknown[] } } }
-  | { type: 'analysis'; data: { content: string } }
-  | { type: 'error'; data: { code: string; message: string } }
-  | { type: 'done'; data: Record<string, never> }
-  | { type: 'tool_call'; data: PlannerToolCallData }
-  | { type: 'tool_result'; data: PlannerToolResultData }
-  | { type: 'thinking'; data: { content: string } };
-
-const PLANNER_SYSTEM_PROMPT = `你是一个智能数据分析助手，拥有四个工具可以调用。
-
-可用工具:
-- query_sales: 执行 SQL 查询销售数据，返回查询结果（sql + rows）
-- gen_chart: 生成 ECharts 可视化图表配置，返回图表配置+SQL+数据
-- gen_analysis: 生成深度分析报告，返回分析文本+SQL+数据
-- small_talk: 处理闲聊、问候、帮助类问题
-
-数据库表结构:
-{schema}
-
-规则:
-1. 如果用户询问数据相关问题（销售额、订单、地区、类别、时间趋势等），调用 query_sales / gen_chart / gen_analysis
-2. 如果用户只是闲聊、问候或问怎么使用，调用 small_talk
-3. 调用工具后，根据返回结果生成中文自然语言回复
-4. 永远不要编造数据，只基于工具返回的真实查询结果
-5. 可以按顺序调用多个工具进行多步分析
-6. 图表使用 ECharts 配置格式`;
+  | { type: "text"; data: { content: string } }
+  | { type: "error"; data: { code: string; message: string } }
+  | { type: "done"; data: Record<string, never> }
+  | { type: "tool_call"; data: PlannerToolCallData }
+  | { type: "tool_result"; data: PlannerToolResultData }
+  | { type: "thinking"; data: { content: string } };
 
 @Injectable()
 export class PlannerAgent {
   private readonly logger = new Logger(PlannerAgent.name);
-  private readonly toolMap = new Map<string, PlannerTool>();
+  private readonly toolMap = new Map<string, StructuredTool>();
   private schema: string;
-  private readonly chat: BaseChatModel;
 
   constructor(
     private readonly llm: LlmService,
     private readonly db: DatabaseService,
-    private readonly sqlAgent: SqlAgent,
-    private readonly chartAgent: ChartAgent,
-    private readonly analysisAgent: AnalysisAgent,
+    private readonly chartAgent: ChartHelper,
   ) {
-    // Create tools with injected dependencies
-    const querySalesTool = createQuerySalesTool(db, sqlAgent);
-    const genChartTool = createGenChartTool(db, sqlAgent, chartAgent);
-    const genAnalysisTool = createGenAnalysisTool(db, sqlAgent, analysisAgent);
-    const smallTalkTool = createSmallTalkTool(llm);
+    const querySalesTool = createQuerySalesTool(this.db);
+    const genChartTool = createGenChartTool(this.db, this.chartAgent);
 
-    this.toolMap.set('query_sales', querySalesTool);
-    this.toolMap.set('gen_chart', genChartTool);
-    this.toolMap.set('gen_analysis', genAnalysisTool);
-    this.toolMap.set('small_talk', smallTalkTool);
+    this.toolMap.set("query_sales", querySalesTool);
+    this.toolMap.set("gen_chart", genChartTool);
 
     this.schema = this.buildDefaultSchema();
 
-    const baseChat = this.llm.getChatModel();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.chat = (baseChat as any).bindTools([...this.toolMap.values()]);
-
     this.logger.log(
-      `PlannerAgent initialized with tools: ${[...this.toolMap.keys()].join(', ')}`,
+      `PlannerAgent initialized with tools: ${[...this.toolMap.keys()].join(", ")}`,
     );
+  }
+
+  /**
+   * Bind tools to the current chat model each call.
+   * In LangChain 0.3.x with @langchain/ollama, we pass the StructuredTool[] directly.
+   */
+  private getChat() {
+    const baseChat = this.llm.getChatModel();
+    const tools = [...this.toolMap.values()];
+
+    // 直接传递 StructuredTool 数组，@langchain/ollama 会自动处理 Ollama API 所需的格式
+    return baseChat.bindTools(tools);
   }
 
   private buildDefaultSchema(): string {
@@ -99,11 +76,13 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
   async refreshSchema(): Promise<void> {
     try {
-      const rows = (await this.db.getSchema()) as Array<{
+      const rows = (await (this.db as any).getSchema?.()) as Array<{
         table_name: string;
         column_name: string;
         data_type: string;
       }>;
+
+      if (!rows) return;
 
       const tables = new Map<string, string[]>();
       for (const row of rows) {
@@ -114,163 +93,177 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
       const lines: string[] = [];
       for (const [table, cols] of tables) {
-        lines.push(`${table}: ${cols.join(', ')}`);
+        lines.push(`${table}: ${cols.join(", ")}`);
       }
-      this.schema = lines.join('\n');
-      this.logger.log('Schema refreshed from database');
+      this.schema = lines.join("\n");
+      this.logger.log("Schema refreshed from database");
     } catch (err) {
-      this.logger.warn(`Failed to refresh schema: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(
+        `Failed to refresh schema: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+  }
+
+  /**
+   * Build system prompt from tool Zod schemas.
+   */
+  private buildSystemPrompt(): string {
+    const toolDescs = [...this.toolMap.entries()]
+      .map(([name, tool]) => {
+        const argsShape = (
+          tool.schema as z.ZodObject<Record<string, z.ZodTypeAny>>
+        ).shape;
+        const params = Object.entries(argsShape)
+          .map(([k, v]) => {
+            const desc = (v as z.ZodTypeAny).description ?? "string";
+            return `${k}: ${desc}`;
+          })
+          .join(", ");
+        return `- ${name}(${params}): ${tool.description}`;
+      })
+      .join("\n");
+
+    return `你是一个智能数据分析助手。
+
+可用工具:
+ ${toolDescs}
+
+数据库表结构:
+ ${this.schema}
+
+规则:
+1. 如果用户询问数据相关问题（销售额、订单量、地区、类别、时间趋势等），调用 query_sales
+2. 如果用户要求生成图表（柱状图、折线图、饼图等），调用 gen_chart
+3. 永远不要编造数据，只基于工具返回的真实查询结果
+4. 收到查询结果后，用中文自然语言回复用户
+5. 最多调用 5 次工具，超过则停止并告知用户`;
+  }
+
+  /**
+   * Safely extract string content from AIMessage content which might be string or complex array.
+   */
+  private extractContent(content: AIMessage["content"]): string {
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if (typeof part === "string") return part;
+          if (typeof part === "object" && part !== null && "text" in part) {
+            return String(part.text);
+          }
+          return "";
+        })
+        .join("");
+    }
+    return "";
   }
 
   async *invokeStream(
     message: string,
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
-    const systemPrompt = PLANNER_SYSTEM_PROMPT.replace('{schema}', this.schema);
-    const messages = [
+    const MAX_ITERATIONS = 5;
+    const systemPrompt = this.buildSystemPrompt();
+    const messages: BaseMessage[] = [
       new SystemMessage(systemPrompt),
       new HumanMessage(message),
     ];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let response: any;
+    let iterations = 0;
 
-    try {
-      response = await this.chat.invoke(messages);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Planner LLM invoke failed: ${msg}`);
-      yield { type: 'error', data: { code: 'PLANNER_LLM_FAILED', message: msg } };
-      yield { type: 'done', data: {} };
-      return;
-    }
+    while (true) {
+      iterations++;
+      if (iterations > MAX_ITERATIONS) {
+        this.logger.warn(
+          `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+        );
+        yield {
+          type: "error",
+          data: {
+            code: "MAX_ITERATIONS_REACHED",
+            message: `已尝试 ${MAX_ITERATIONS} 次，仍无法完成请求，请尝试换一种问法。`,
+          },
+        };
+        yield { type: "done", data: {} };
+        return;
+      }
 
-    // Tool call loop
-    while (response.tool_calls && response.tool_calls.length > 0) {
-      for (const toolCall of response.tool_calls) {
-        const toolName = (toolCall as ToolCall).name ?? '';
-        const toolArgs = this.parseToolArgs(toolCall as ToolCall);
+      const stream = await this.getChat().stream(messages);
+
+      // ★ 使用 AIMessageChunk 累积流式碎片
+      let finalMessage: AIMessageChunk | undefined;
+
+      for await (const chunk of stream) {
+        // 1. 实时输出文本片段（打字机效果）
+        const content = this.extractContent(chunk.content);
+        if (content) {
+          yield {
+            type: "text",
+            data: { content },
+          };
+        }
+
+        // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
+        finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
+      }
+
+      // 3. 流结束后，检查是否有完整的工具调用
+      if (
+        !finalMessage ||
+        !finalMessage.tool_calls ||
+        finalMessage.tool_calls.length === 0
+      ) {
+        // 没有工具调用，说明 LLM 已经说完了，退出循环
+        break;
+      }
+
+      // 4. 把拼接完整的 AIMessage 加入历史记录
+      messages.push(finalMessage as AIMessage);
+
+      // 5. 执行工具
+      for (const toolCall of finalMessage.tool_calls) {
+        const toolName = toolCall.name ?? "";
+        // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
+        const toolArgs = toolCall.args ?? {};
 
         yield {
-          type: 'tool_call',
+          type: "tool_call",
           data: { name: toolName, args: toolArgs },
         };
 
         const tool = this.toolMap.get(toolName);
-        let rawResult: string;
+        let result: Record<string, unknown>;
+
         try {
           if (!tool) {
-            rawResult = JSON.stringify({ error: `Unknown tool: ${toolName}` });
+            result = { error: `Unknown tool: ${toolName}` };
           } else {
-            rawResult = await tool._call(toolArgs);
+            const raw = await tool.invoke(toolArgs);
+            result =
+              typeof raw === "string"
+                ? JSON.parse(raw)
+                : (raw as Record<string, unknown>);
           }
         } catch (err) {
-          rawResult = JSON.stringify({
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-
-        let parsedResult: Record<string, unknown>;
-        try {
-          parsedResult = JSON.parse(rawResult);
-        } catch {
-          parsedResult = { raw: rawResult };
+          result = { error: err instanceof Error ? err.message : String(err) };
         }
 
         yield {
-          type: 'tool_result',
-          data: { name: toolName, result: parsedResult },
+          type: "tool_result",
+          data: { name: toolName, result },
         };
 
         messages.push(
           new ToolMessage({
-            tool_call_id: (toolCall as ToolCall).id ?? toolName,
+            tool_call_id: toolCall.id ?? toolName,
             name: toolName,
-            content: rawResult,
+            content: JSON.stringify(result),
           }),
         );
-
-        // Emit backward-compatible SSE events
-        for (const event of this.emitBackwardCompat(toolName, parsedResult)) {
-          yield event;
-        }
-      }
-
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        response = await (this.chat.invoke(messages) as any);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Planner LLM invoke (tool result phase) failed: ${msg}`);
-        yield { type: 'error', data: { code: 'PLANNER_LLM_FAILED', message: msg } };
-        yield { type: 'done', data: {} };
-        return;
       }
     }
 
-    if (response.content && typeof response.content === 'string') {
-      yield {
-        type: 'token',
-        data: { content: response.content, isFinal: false },
-      };
-    }
-
-    yield { type: 'done', data: {} };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private parseToolArgs(toolCall: ToolCall): Record<string, unknown> {
-    const raw = (toolCall as any).args ?? {};
-    if (typeof raw === 'string') {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return { _raw: raw };
-      }
-    }
-    return raw as Record<string, unknown>;
-  }
-
-  private emitBackwardCompat(
-    toolName: string,
-    result: Record<string, unknown>,
-  ): PlannerStreamEvent[] {
-    const events: PlannerStreamEvent[] = [];
-
-    if (toolName === 'query_sales' || toolName === 'gen_chart' || toolName === 'gen_analysis') {
-      const sql = result.sql as string | undefined;
-      const rows = result.rows as unknown[] | undefined;
-      if (sql && rows) {
-        events.push({
-          type: 'sql',
-          data: { sql, executed: true, rows },
-        });
-      }
-    }
-
-    if (toolName === 'gen_chart') {
-      const chart = result.chart as Record<string, unknown> | undefined;
-      if (chart) {
-        const chartType = String(result.chartType ?? 'bar');
-        const rows: unknown[] = (result.rows ?? []) as unknown[];
-        const chartEvent = {
-          type: 'chart' as const,
-          data: {
-            chartType,
-            data: { option: chart, rows },
-          },
-        };
-        events.push(chartEvent as PlannerStreamEvent);
-      }
-    }
-
-    if (toolName === 'gen_analysis') {
-      const analysis = result.analysis as string | undefined;
-      if (analysis) {
-        events.push({ type: 'analysis', data: { content: analysis } });
-      }
-    }
-
-    return events;
+    yield { type: "done", data: {} };
   }
 }

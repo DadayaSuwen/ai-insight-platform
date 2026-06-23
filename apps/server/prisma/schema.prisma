@@ -22,22 +22,22 @@ model Sales {
 
 // Chat history tables
 model ChatSession {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   userId    String?
   title     String?
   messages  ChatMessage[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 }
 
 model ChatMessage {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
   sessionId String
-  role      String   // 'user' | 'assistant'
+  role      String // 'user' | 'assistant'
   content   String
   metadata  Json?
   session   ChatSession @relation(fields: [sessionId], references: [id])
-  createdAt DateTime @default(now())
+  createdAt DateTime    @default(now())
 }
 
 // ─── LLM Configuration ─────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ model LLMConfig {
   id          String   @id // "openai" | "anthropic" | "ollama"
   apiKey      String?
   baseUrl     String?
-  model       String   @default("qwen3:8b")
+  model       String   @default("qwen2.5:3b")
   temperature Float    @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

@@ -7,32 +7,30 @@ docs/
 ├── architecture/    # 架构设计文档
 ├── api/            # API 接口文档
 ├── guides/         # 开发指南
-└── development/   # 开发过程文档
+├── development/    # 开发过程文档
+└── archived/       # 过时文档（仅供参考）
 ```
 
-## 文档清单
-
-### 核心文档
+## 核心文档
 
 | 文档 | 描述 |
 |------|------|
-| `../project.md` | 项目技术架构设计 (原始设计文档) |
-| `../CLAUDE.md` | 项目快速入门指南 |
+| `../CLAUDE.md` | 项目快速入门、技术栈、启动命令 |
 
-### 架构文档
-
-| 文档 | 描述 |
-|------|------|
-| `architecture/SYSTEM.md` | 系统架构设计、模块划分、技术选型 |
-
-### API 文档
+## 架构文档
 
 | 文档 | 描述 |
 |------|------|
-| `api/API.md` | API 接口文档 |
+| `architecture/SYSTEM.md` | **Planner + Function Calling** 架构设计、ReAct 循环、工具定义 |
+
+## API 文档
+
+| 文档 | 描述 |
+|------|------|
+| `api/API.md` | API 接口文档（含 SSE 事件流） |
 | `api/CONTRACTS.md` | 数据契约定义 (Zod schemas) |
 
-### 开发指南
+## 开发指南
 
 | 文档 | 描述 |
 |------|------|
@@ -41,26 +39,19 @@ docs/
 | `guides/CONFIG.md` | TypeScript 配置说明 |
 | `guides/DOCKER.md` | Docker 部署指南、架构、故障排查 |
 
-### 开发过程文档
+## 开发过程文档
 
 | 文档 | 描述 |
 |------|------|
-| `development/AGENT.md` | Agent 链路开发文档、测试用例 |
-| `development/ISSUES.md` | Phase 3–8 实际运行发现的问题与根因 (含 LLM 接入、Docker 踩坑、SQL 摘要增强、Settings 页面修复) |
+| `development/REFACTOR.md` | 架构重构记录：从 RouterAgent → Planner + Function Calling |
 
-## 开发阶段
+## 过时文档（仅供参考）
 
-| Phase | 状态 | 描述 |
-|-------|------|------|
-| Phase 1 | ✅ | 骨架搭建 - Monorepo、依赖安装、数据库连接 |
-| Phase 2 | ✅ | 数据契约定义 - Zod 类型、API 规范 |
-| Phase 3 | ✅ | Agent 链路开发 - 51 个测试用例通过 (含 AiService 编排) |
-| Phase 4 | ✅ | SSE 流式输出 - 58 个测试用例通过 (含 ChatService 流) |
-| Phase 5 | ✅ | 前端 UI 对接 - 4 个组件完整实现 (MessageBubble/ChatInput/DynamicChart/ChatWindow) |
-| **LLM 接入** (#11) | ✅ | **LangChain + Ollama** - LlmService 封装 + 4 个 Agent 接入 + 混合 Router - 80 测试通过 |
-| Phase 6 | ✅ | Docker 化 - 4 服务编排 (postgres+ollama+server+web) + 多阶段镜像 + nginx 反代 + entrypoint 自动 init |
-| Phase 7 | ✅ | 企业级 UI + SQL 结果增强 - 流式光标/快捷指令/深浅主题/LLM 自然语言摘要/DataTable 表格渲染 |
-| Phase 8 | ✅ | LLM Settings 修复 - Schema 多行配置/Config 正确回显/Health 读 DB/保存防护/手动健康检查 |
+| 文档 | 描述 |
+|------|------|
+| `archived/SYSTEM.md` | 旧版 RouterAgent 架构（已废弃） |
+| `archived/AGENT.md` | 旧版 Agent 链路文档（已废弃） |
+| `archived/ISSUES.md` | Phase 3-9 bug 记录（已归档） |
 
 ## 快速链接
 
@@ -68,29 +59,22 @@ docs/
 - **运行测试**: `pnpm test`
 - **数据库**: `pnpm db:up` + `pnpm db:seed`
 - **Prisma Studio**: `pnpm db:studio`
+- **Docker 部署**: `pnpm docker:up`（详见 `guides/DOCKER.md`）
 
-## 测试
+## 当前架构
 
-```bash
-# 运行所有测试
-pnpm test
+本项目采用 **Planner + Function Calling** 架构：
 
-# 运行后端测试
-pnpm test:server
-
-# 监听模式
-pnpm test:watch
-
-# 覆盖率
-pnpm test:coverage
+```
+用户输入
+    ↓
+PlannerAgent.invokeStream()  ← LLM + bindTools([4个工具])
+    ↓
+LLM 决定调用工具 → 执行 → 结果回灌 → 再次调用 LLM
+    ↓
+最终文本流式输出
 ```
 
-**测试覆盖** (LLM 接入后):
-- LlmService: 5 个测试 (JSON 解析 / 纯文本兜底)
-- RouterAgent: 14 个测试 (含 LLM 路径 + 回退)
-- SqlAgent: 14 个测试 (含 LLM + 危险 SQL 拦截)
-- ChartAgent: 14 个测试 (含 LLM + 默认补全)
-- AnalysisAgent: 5 个测试
-- AiService (编排): 8 个测试 (含 LLM mock + chat 回退)
-- ChatService (SSE 流): 3 个测试
-- **总计**: 80 个测试全部通过 ✅
+**工具**：`query_sales`（查询）、`gen_chart`（图表）、`gen_analysis`（分析）、`small_talk`（闲聊）
+
+详见 [`architecture/SYSTEM.md`](architecture/SYSTEM.md)。

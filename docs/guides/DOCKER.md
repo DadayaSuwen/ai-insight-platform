@@ -43,7 +43,7 @@ pnpm docker:build
 pnpm docker:up
 
 # 3. 拉取 Ollama 模型（首次需要）
-docker compose exec ollama ollama pull qwen3:8b
+docker compose exec ollama ollama pull qwen2.5:3b
 
 # 4. 浏览器打开 http://localhost:8080
 ```
@@ -62,8 +62,8 @@ docker compose exec ollama ollama pull qwen3:8b
 在仓库根 `.env` 中配置（compose 通过 `${VAR:-default}` 引用）：
 
 ```bash
-# LLM 模型（默认 qwen3:8b；开发常用 qwen2.5:3b）
-OLLAMA_MODEL=qwen3:8b
+# LLM 模型（默认 qwen2.5:3b；开发常用 qwen2.5:3b）
+OLLAMA_MODEL=qwen2.5:3b
 
 # 前端允许跨域 origin（多个用逗号分隔，追加到默认白名单）
 FRONTEND_ORIGIN=http://localhost:8080
@@ -102,7 +102,7 @@ server 容器在 `depends_on` 中等待 `postgres healthy` 与 `ollama healthy` 
 ## 故障排查
 
 ### 1. `OLLAMA_MODEL` 不一致导致行为异常
-确认 `.env` 中设置的值与 `config.service.ts` 默认值一致。当前默认统一为 `qwen3:8b`。
+确认 `.env` 中设置的值与 `config.service.ts` 默认值一致。当前默认统一为 `qwen2.5:3b`。
 ```bash
 docker compose exec server printenv OLLAMA_MODEL
 ```
@@ -131,9 +131,9 @@ curl -N -fsS -X POST http://localhost:8080/chat/stream \
 postgres healthcheck 超时（默认 100s）。检查 `docker compose logs postgres` 看 DB 是否正常初始化。
 
 ### 6. Ollama 拉模型超时
-`qwen3:8b` 约 4.9GB，国内网络可能需要数分钟。失败可重试：
+`qwen2.5:3b` 约 4.9GB，国内网络可能需要数分钟。失败可重试：
 ```bash
-docker compose exec ollama ollama pull qwen3:8b
+docker compose exec ollama ollama pull qwen2.5:3b
 ```
 
 ### 7. web 容器构建报 "Cannot find module '@workspace/types'"

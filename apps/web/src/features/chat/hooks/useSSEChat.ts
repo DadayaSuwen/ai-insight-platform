@@ -1,24 +1,26 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { SSEEventType } from '@workspace/types';
-import type {
-  SSEMessage,
-  SSETokenData,
-  SSESQLData,
-  SSEChartData,
-  SSEAnalysisData,
-  SSEErrorData,
-} from '@workspace/types';
+import { useState, useCallback, useRef, useEffect } from "react";
+
+interface ToolCallData {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+interface ToolResultData {
+  name: string;
+  result: Record<string, unknown>;
+}
+
+interface ErrorData {
+  code: string;
+  message: string;
+}
 
 interface UseSSEChatOptions {
-  onToken?: (data: SSETokenData) => void;
-  onSQL?: (data: SSESQLData) => void;
-  onChart?: (data: SSEChartData) => void;
-  onAnalysis?: (data: SSEAnalysisData) => void;
-  onError?: (data: SSEErrorData) => void;
+  onText?: (data: { content: string }) => void;
+  onToolCall?: (data: ToolCallData) => void;
+  onToolResult?: (data: ToolResultData) => void;
+  onError?: (data: ErrorData) => void;
   onDone?: () => void;
-  // Planner tool-call events
-  onToolCall?: (data: { name: string; args: Record<string, unknown> }) => void;
-  onToolResult?: (data: { name: string; result: Record<string, unknown> }) => void;
 }
 
 interface UseSSEChatReturn {
@@ -31,13 +33,7 @@ interface UseSSEChatReturn {
 /**
  * useSSEChat — stream responses from the backend using fetch + ReadableStream.
  *
- * Uses GET /chat/stream?message=... (backend SSE endpoint via NestJS @Sse decorator).
- * Switched from EventSource to fetch+ReadableStream to support streaming text
- * with proper back-pressure and non-URL-encoded body delivery.
- *
- * Connection errors → `error` state.
- * Server-sent 'error' SSE event → onError callback + error state.
- * 'done' SSE event → onDone callback, closes the stream.
+ * 在新架构下，只处理 5 种核心事件：text, tool_call, tool_result, error, done。
  */
 export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   const [isLoading, setIsLoading] = useState(false);
@@ -53,73 +49,54 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
     }
   }, []);
 
-  /**
-   * Parse a single SSE field line.
-   * Returns the event type from "event: xxx" or data from "data: xxx".
-   * Ignores "id: xxx" and other SSE field types.
-   */
   const parseSSELine = (line: string): { event?: string; data?: string } => {
-    // Check event: first (must be before data: since "event:" also starts with "e")
-    if (line.startsWith('event:')) {
+    if (line.startsWith("event:")) {
       return { event: line.slice(6).trim() };
     }
-    if (line.startsWith('data:')) {
+    if (line.startsWith("data:")) {
       return { data: line.slice(5).trim() };
     }
-    // Ignore "id:", "retry:", etc.
     return {};
   };
 
-  /**
-   * Parse a complete SSE message (all data lines + optional event type)
-   * joined with double-newline-separated chunks from the stream.
-   *
-   * Handles multi-line data blocks where a single event has multiple
-   * consecutive data: lines (joined with \n before JSON parsing).
-   */
-  const parseSSEMessage = (rawEvent: string, rawData: string): SSEMessage => {
-    return {
-      event: (rawEvent || SSEEventType.TOKEN) as SSEMessage['event'],
-      data: rawData,
-    };
-  };
+  const dispatch = useCallback((eventType: string, rawData: string) => {
+    if (!rawData) return;
 
-  const dispatch = useCallback((msg: SSEMessage) => {
     let data: unknown;
     try {
-      data = JSON.parse(msg.data);
+      data = JSON.parse(rawData);
     } catch (err) {
-      console.error('[useSSEChat] Failed to parse SSE event data', err, msg);
+      console.error(
+        "[useSSEChat] Failed to parse SSE event data",
+        err,
+        rawData,
+      );
       return;
     }
+
     const opts = optionsRef.current;
-    switch (msg.event) {
-      case SSEEventType.TOKEN:
-        opts.onToken?.(data as SSETokenData);
+
+    switch (eventType) {
+      case "text":
+        opts.onText?.(data as { content: string });
         break;
-      case SSEEventType.SQL:
-        opts.onSQL?.(data as SSESQLData);
+      case "tool_call":
+        opts.onToolCall?.(data as ToolCallData);
         break;
-      case SSEEventType.CHART:
-        opts.onChart?.(data as SSEChartData);
+      case "tool_result":
+        opts.onToolResult?.(data as ToolResultData);
         break;
-      case SSEEventType.ANALYSIS:
-        opts.onAnalysis?.(data as SSEAnalysisData);
+      case "error":
+        opts.onError?.(data as ErrorData);
+        setError((data as ErrorData).message);
         break;
-      case SSEEventType.ERROR:
-        opts.onError?.(data as SSEErrorData);
-        setError((data as SSEErrorData).message);
-        break;
-      case SSEEventType.DONE:
+      case "done":
         abortControllerRef.current = null;
         setIsLoading(false);
         opts.onDone?.();
         break;
-      case SSEEventType.TOOL_CALL:
-        opts.onToolCall?.(data as { name: string; args: Record<string, unknown> });
-        break;
-      case SSEEventType.TOOL_RESULT:
-        opts.onToolResult?.(data as { name: string; result: Record<string, unknown> });
+      default:
+        // 忽略未知事件类型
         break;
     }
   }, []);
@@ -127,7 +104,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   const sendMessage = useCallback(
     (message: string) => {
       if (!message?.trim()) {
-        setError('消息不能为空');
+        setError("消息不能为空");
         return;
       }
 
@@ -135,7 +112,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
       setError(null);
       setIsLoading(true);
 
-      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+      const baseURL =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
       const url = `${baseURL}/chat/stream?message=${encodeURIComponent(message)}`;
 
       const controller = new AbortController();
@@ -148,46 +126,45 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
           }
           const reader = res.body?.getReader();
           if (!reader) {
-            throw new Error('Response body is not readable');
+            throw new Error("Response body is not readable");
           }
 
           const decoder = new TextDecoder();
-          let buffer = '';
+          let buffer = "";
 
           const readChunk = () => {
             reader.read().then(({ done, value }) => {
               if (done || controller.signal.aborted) {
-                // Stream ended cleanly
                 return;
               }
 
               buffer += decoder.decode(value, { stream: true });
 
-              // Split on double newlines (SSE message boundary)
               const messages: string[] = [];
               let start = 0;
               let idx: number;
-              while ((idx = buffer.indexOf('\n\n', start)) !== -1) {
+              while ((idx = buffer.indexOf("\n\n", start)) !== -1) {
                 messages.push(buffer.slice(start, idx));
                 start = idx + 2;
               }
               buffer = buffer.slice(start);
 
               for (const raw of messages) {
-                let rawEvent = '';
-                let rawData = '';
+                let rawEvent = "";
+                let rawData = "";
 
-                for (const line of raw.split('\n')) {
+                for (const line of raw.split("\n")) {
                   const parsed = parseSSELine(line);
                   if (parsed.event !== undefined) rawEvent = parsed.event;
                   if (parsed.data !== undefined) {
-                    // Multi-line data: append with newline separator
-                    rawData = rawData ? `${rawData}\n${parsed.data}` : parsed.data;
+                    rawData = rawData
+                      ? `${rawData}\n${parsed.data}`
+                      : parsed.data;
                   }
                 }
 
-                if (rawEvent || rawData) {
-                  dispatch(parseSSEMessage(rawEvent || SSEEventType.TOKEN, rawData));
+                if (rawEvent && rawData) {
+                  dispatch(rawEvent, rawData);
                 }
               }
 
@@ -198,12 +175,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
           readChunk();
         })
         .catch((err: Error) => {
-          if (err.name === 'AbortError') {
-            // Intentionally aborted — not an error
+          if (err.name === "AbortError") {
             return;
           }
-          console.error('[useSSEChat] Connection error', err);
-          setError(err.message || '连接中断');
+          console.error("[useSSEChat] Connection error", err);
+          setError(err.message || "连接中断");
           setIsLoading(false);
         });
     },
@@ -216,7 +192,6 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
     setError(null);
   }, [close]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => close();
   }, [close]);

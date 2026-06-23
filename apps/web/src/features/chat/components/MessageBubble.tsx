@@ -1,374 +1,208 @@
-import { useState } from 'react';
-import DynamicChart from './DynamicChart';
-import DataTable from './DataTable';
-import MarkdownRenderer from './MarkdownRenderer';
-import type { ChatMessage } from '../types';
-import { isAssistant } from '../types';
-import type { SSESQLData } from '@workspace/types';
-
-interface MessageBubbleProps {
-  message: ChatMessage;
-}
-
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
-}
-
-/** User avatar — accent circle */
-function UserAvatar() {
-  return (
-    <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm"
-      style={{ background: 'var(--accent)' }}
-    >
-      ME
-    </div>
-  );
-}
-
-/** Bot avatar — subtle card with accent icon */
-function BotAvatar() {
-  return (
-    <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm"
-      style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        style={{ color: 'var(--accent)' }}
-      >
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      </svg>
-    </div>
-  );
-}
+import React from "react";
+import ReactMarkdown from "react-markdown";
+import DynamicChart from "./DynamicChart";
+import type { ChatMessage, AssistantMessage } from "../types";
 
 /**
- * MessageBubble — enterprise chat renderer.
+ * MessageBubble — 渲染单条消息
  *
- * Layout:
- * - User: right-aligned flex row, avatar at right end
- * - Assistant: CSS grid [avatar-fixed | content-fluid], blocks go full width
+ * 适配新的 Agent 架构：
+ * 1. 渲染流式 Markdown 文本 (content)
+ * 2. 渲染工具调用状态时间线 (toolCalls)
+ * 3. 渲染工具返回的结果 (toolResults: 图表/表格)
  */
-/** Tool call indicator card — shown while a tool is being executed */
-function ToolCallCard({ name, args }: { name: string; args: Record<string, unknown> }) {
-  const label = name.replace(/_/g, ' ');
-  return (
-    <div
-      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
-      style={{ borderColor: 'var(--accent)', background: 'var(--bg-tertiary)', opacity: 0.9 }}
-    >
-      <span className="loading-spinner" style={{ width: 10, height: 10 }} />
-      <span style={{ color: 'var(--accent)' }}>
-        正在调用 {label}…
-      </span>
-      {args.query != null && (
-        <span
-          className="truncate max-w-[200px] text-[10px]"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          {String(args.query).slice(0, 40)}
-        </span>
-      )}
-    </div>
-  );
-}
+function MessageBubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
 
-/** Tool result badge — shown after a tool completes */
-function ToolResultBadge({ name, result }: { name: string; result: Record<string, unknown> }) {
-  let label = '';
-  if (name === 'query_sales') {
-    label = `查询到 ${result.rowCount ?? 0} 条记录`;
-  } else if (name === 'gen_chart') {
-    label = '图表已生成';
-  } else if (name === 'gen_analysis') {
-    label = '分析报告已生成';
-  } else if (name === 'small_talk') {
-    return null;
-  } else {
-    label = `${name} 完成`;
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--success)' }}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <polyline points="20 6 9 17 4 12" />
-      </svg>
-      {label}
-    </div>
-  );
-}
-
-function MessageBubble({ message }: MessageBubbleProps) {
-  if (message.role === 'user') {
+  // ─── 用户消息 ───────────────────────────────────────────
+  if (isUser) {
     return (
-      <div className="flex justify-end msg-enter">
-        <div className="flex max-w-[85%] items-end gap-2">
-          <span className="mb-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            {formatTime(message.createdAt)}
-          </span>
-          <div
-            className="rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed shadow-md"
-            style={{ background: 'var(--accent)', color: 'white' }}
-          >
-            {message.content}
-          </div>
-          <UserAvatar />
+      <div className="flex justify-end">
+        <div
+          className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm text-white shadow-sm"
+          style={{ background: "var(--accent)" }}
+        >
+          {message.content}
         </div>
       </div>
     );
   }
 
-  if (!isAssistant(message)) return null;
+  // ─── 助手消息 ───────────────────────────────────────────
+  const msg = message as AssistantMessage;
 
-  const hasStreamingCursor =
-    !message.isFinal && !message.error && !message.content;
+  // 判断是否处于完全空白的状态（没文字、没工具调用结果、正在加载中）
+  const isEmptyThinking =
+    !msg.isFinal && !msg.content && (msg.toolCalls?.length ?? 0) === 0;
 
-  return (
-    /* CSS grid: 44px avatar column + auto-width content column */
-    <div className="grid grid-cols-[44px_auto] gap-3 msg-enter items-start">
-      {/* ── Avatar column ─────────────────────────── */}
-      <BotAvatar />
-
-      {/* ── Content column ─────────────────────────── */}
-      <div className="flex flex-col gap-2">
-
-        {/* Label row */}
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[11px] font-semibold"
-            style={{ color: 'var(--accent)' }}
-          >
-            AI 助手
-          </span>
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            {formatTime(message.createdAt)}
-          </span>
+  // 1. 如果是空白思考状态，渲染一个极简的打字机气泡，防止出现丑陋的空气泡
+  if (isEmptyThinking) {
+    return (
+      <div className="flex justify-start">
+        <div
+          className="flex items-center gap-1 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm"
+          style={{
+            background: "var(--bg-primary)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <span className="thinking-dot"></span>
+          <span className="thinking-dot"></span>
+          <span className="thinking-dot"></span>
         </div>
+      </div>
+    );
+  }
 
-        {/* ── Text block ─────────────────────────── */}
-        {/* ── Text block ─────────────────────────── */}
-        {message.content ? (
-          <AssistantCard>
-            <div
-              className="px-4 py-3 text-sm leading-relaxed"
-              style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-            >
-              {message.content}
-              {!message.isFinal && !message.error && (
-                <span className="streaming-cursor" />
-              )}
-            </div>
-          </AssistantCard>
-        ) : hasStreamingCursor ? (
-          <AssistantCard>
-            <div className="flex items-center gap-1.5 px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-              <span>正在思考</span>
-              <span className="thinking-dots">
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
-          </AssistantCard>
-        ) : null}
-
-        {/* ── Tool call cards ─────────────────────── */}
-        {message.toolCalls && message.toolCalls.map((tc, i) => (
-          <ToolCallCard key={i} name={tc.name} args={tc.args} />
-        ))}
-        {message.toolResults && message.toolResults.map((tr, i) => (
-          <ToolResultBadge key={i} name={tr.name} result={tr.result} />
-        ))}
-
-        {/* ── Error block ────────────────────────── */}
-        {message.error && (
-          <AssistantCard style={{ borderColor: 'var(--error)', background: 'var(--error-light)' }}>
-            <div className="flex items-start gap-2.5 px-4 py-3">
-              <svg
-                width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className="mt-0.5 shrink-0" style={{ color: 'var(--error)' }}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <div>
-                <div className="mb-0.5 text-xs font-semibold" style={{ color: 'var(--error)' }}>
-                  {message.error.code ? `[${message.error.code}] ` : ''}出错了
+  // 2. 正常渲染有内容或有工具状态的气泡
+  return (
+    <div className="flex justify-start">
+      <div
+        className="max-w-[85%] w-full rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm"
+        style={{
+          background: "var(--bg-primary)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        {/* (A) 工具调用状态时间线 */}
+        {(msg.toolCalls?.length ?? 0) > 0 && (
+          <div
+            className="mb-3 space-y-2 border-b pb-3"
+            style={{ borderColor: "var(--border)" }}
+          >
+            {msg.toolCalls!.map((call, idx) => {
+              const hasResult = (msg.toolResults?.length ?? 0) > idx;
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center gap-2 text-xs"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {hasResult ? (
+                    <span style={{ color: "var(--success)" }}>✓</span>
+                  ) : (
+                    <span className="animate-pulse">⏳</span>
+                  )}
+                  <span>
+                    {hasResult ? "已完成" : "正在执行"}：{call.name}
+                  </span>
                 </div>
-                <div className="text-xs" style={{ color: 'var(--error)', opacity: 0.8 }}>
-                  {message.error.message}
-                </div>
-              </div>
-            </div>
-          </AssistantCard>
+              );
+            })}
+          </div>
         )}
 
-        {/* ── SQL block ─────────────────────────── */}
-        {message.sql && (
-          <SqlBlock
-            sql={message.sql.sql}
-            executed={message.sql.executed}
-            rows={message.sql.rows}
-          />
+        {/* (B) 工具返回的结果 (图表 / 表格) */}
+        {(msg.toolResults?.length ?? 0) > 0 && (
+          <div className="mb-3 space-y-4">
+            {msg.toolResults!.map((res, idx) => {
+              if (res.name === "gen_chart" && res.result.chart) {
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-lg p-2"
+                    style={{ background: "var(--bg-secondary)" }}
+                  >
+                    <DynamicChart
+                      option={res.result.chart as Record<string, unknown>}
+                    />
+                  </div>
+                );
+              }
+              if (res.name === "query_sales" && res.result.summary) {
+                return (
+                  <div
+                    key={idx}
+                    className="overflow-x-auto rounded-lg border"
+                    style={{ borderColor: "var(--border)" }}
+                  >
+                    <table className="w-full text-xs">
+                      <thead style={{ background: "var(--bg-hover)" }}>
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">
+                            类别/地区
+                          </th>
+                          <th className="px-3 py-2 text-right font-medium">
+                            销售额 (¥)
+                          </th>
+                          <th className="px-3 py-2 text-right font-medium">
+                            销量
+                          </th>
+                          <th className="px-3 py-2 text-right font-medium">
+                            订单数
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(
+                          res.result.summary as Array<{
+                            key: string;
+                            totalAmount: number;
+                            totalQuantity: number;
+                            orderCount: number;
+                          }>
+                        ).map((row, ridx) => (
+                          <tr
+                            key={ridx}
+                            className="border-t"
+                            style={{ borderColor: "var(--border)" }}
+                          >
+                            <td className="px-3 py-2">{row.key}</td>
+                            <td className="px-3 py-2 text-right">
+                              {row.totalAmount}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {row.totalQuantity}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {row.orderCount}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
         )}
 
-        {/* ── Chart block ──────────────────────── */}
-        {message.chart && <DynamicChart chart={message.chart} />}
-
-        {/* ── Analysis block ──────────────────── */}
-        {message.analysis && (
-          <AssistantCard style={{ borderColor: 'var(--warning)' }}>
-            <div className="flex items-start gap-2.5 px-4 py-3">
-              <svg
-                width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className="mt-0.5 shrink-0" style={{ color: 'var(--warning)' }}
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-              <div className="flex-1 min-w-0">
-                <div className="mb-2 text-xs font-semibold" style={{ color: 'var(--warning)' }}>
-                  分析报告
-                </div>
-                <MarkdownRenderer content={message.analysis} />
-              </div>
-            </div>
-          </AssistantCard>
+        {/* (C) 正在思考的动画 (有工具调用但还没开始吐文本时) */}
+        {!msg.content && (msg.toolCalls?.length ?? 0) > 0 && !msg.isFinal && (
+          <div
+            className="flex items-center gap-1 text-sm"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <span className="thinking-dot"></span>
+            <span className="thinking-dot"></span>
+            <span className="thinking-dot"></span>
+          </div>
         )}
 
-        {/* ── Pending ─────────────────────────── */}
-        {message.isFinal && !message.content && !message.error && !message.sql && !message.chart && !message.analysis && (
-          <AssistantCard>
-            <div className="px-4 py-3 text-sm italic" style={{ color: 'var(--text-muted)' }}>
-              已收到你的问题，正在处理…
-            </div>
-          </AssistantCard>
+        {/* (D) LLM 最终的 Markdown 文本回复 + 流式光标 */}
+        {msg.content && (
+          <div
+            className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed"
+            style={{ color: "var(--text-primary)" }}
+          >
+            <ReactMarkdown>
+              {msg.content + (!msg.isFinal ? " ▋" : "")}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        {/* (E) 错误信息 */}
+        {msg.error && (
+          <div
+            className="mt-2 rounded-lg p-2 text-xs"
+            style={{ background: "var(--error-light)", color: "var(--error)" }}
+          >
+            {msg.error.message}
+          </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/* ── Assistant message card wrapper ───────────────────── */
-function AssistantCard({
-  children,
-  className = '',
-  style = {},
-}: {
-  children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div
-      className={`overflow-hidden rounded-xl border ${className}`}
-      style={{
-        borderColor: 'var(--border)',
-        background: 'var(--bg-primary)',
-        boxShadow: 'var(--shadow-sm)',
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/* ── SQL collapsible block ───────────────────────────── */
-function SqlBlock({
-  sql,
-  executed,
-  rows,
-}: {
-  sql: string;
-  executed: boolean;
-  rows?: SSESQLData['rows'];
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div
-      className="overflow-hidden rounded-xl border"
-      style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-    >
-      {/* Header */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center justify-between px-4 py-2.5 text-left transition-colors w-full"
-        style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-      >
-        <span className="flex items-center gap-2 font-mono text-xs">
-          {executed ? (
-            <>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--success)' }}>
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span style={{ color: 'var(--success)' }}>已执行 SQL</span>
-            </>
-          ) : (
-            <>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)' }}>
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
-              <span>生成的 SQL</span>
-            </>
-          )}
-        </span>
-        <span className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          {open ? '收起' : '展开'}
-          <svg
-            width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-            style={{
-              color: 'var(--text-muted)',
-              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.15s ease',
-            }}
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </span>
-      </button>
-
-      {open && (
-        <>
-          <pre
-            className="overflow-x-auto px-4 py-3 font-mono text-xs leading-relaxed"
-            style={{
-              background: 'var(--bg-secondary)',
-              color: 'var(--accent)',
-              borderTop: '1px solid var(--border)',
-              borderBottom: rows?.length ? '1px solid var(--border)' : 'none',
-            }}
-          >
-            <code>{sql}</code>
-          </pre>
-          {rows && rows.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--border)' }}>
-              <DataTable rows={rows} />
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }

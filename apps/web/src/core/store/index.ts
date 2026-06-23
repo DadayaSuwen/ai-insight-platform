@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { LLMProvider, type LLMConfig } from '@workspace/types';
+import { create } from "zustand";
+import { LLMProvider, type LLMConfig } from "@workspace/types";
 
 interface AppState {
   /** All provider configs keyed by provider name */
@@ -14,18 +14,20 @@ interface AppState {
   isLoadingConfig: boolean;
 
   fetchLlmConfig: () => Promise<void>;
-  saveLlmConfig: (config: LLMConfig) => Promise<{ ok: boolean; message: string }>;
+  saveLlmConfig: (
+    config: LLMConfig,
+  ) => Promise<{ ok: boolean; message: string }>;
   fetchLlmHealth: () => Promise<void>;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 const defaultConfigs: Record<LLMProvider, LLMConfig | null> = {
   [LLMProvider.OPENAI]: null,
   [LLMProvider.ANTHROPIC]: null,
   [LLMProvider.OLLAMA]: {
     provider: LLMProvider.OLLAMA,
-    model: 'qwen3:8b',
+    model: "qwen2.5:3b",
     temperature: 0,
   },
 };
@@ -41,8 +43,12 @@ export const useAppStore = create<AppState>((set) => ({
     try {
       const res = await fetch(`${API_BASE}/llm/config`);
       if (res.ok) {
-        const data: { configs: LLMConfig[]; activeProvider: string } = await res.json();
-        const llmConfigs = { ...defaultConfigs } as Record<LLMProvider, LLMConfig | null>;
+        const data: { configs: LLMConfig[]; activeProvider: string } =
+          await res.json();
+        const llmConfigs = { ...defaultConfigs } as Record<
+          LLMProvider,
+          LLMConfig | null
+        >;
         for (const cfg of data.configs) {
           llmConfigs[cfg.provider] = cfg;
         }
@@ -61,8 +67,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   saveLlmConfig: async (config: LLMConfig) => {
     const res = await fetch(`${API_BASE}/llm/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
     });
     const data = await res.json();
