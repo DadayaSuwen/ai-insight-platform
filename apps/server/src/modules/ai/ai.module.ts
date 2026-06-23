@@ -6,9 +6,10 @@ import { SqlAgent } from './agents/sql.agent';
 import { ChartAgent } from './agents/chart.agent';
 import { AnalysisAgent } from './agents/analysis.agent';
 import { DatabaseModule } from '../database/database.module';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, LlmModule],
   controllers: [AiController],
   providers: [AiService, RouterAgent, SqlAgent, ChartAgent, AnalysisAgent],
   exports: [AiService],

@@ -1,24 +1,29 @@
 /**
  * Router Agent Prompt Template
  * 意图识别 - 判断用户想要做什么
+ *
+ * Notes:
+ *   The Qwen 3B model is fast but tends to play it safe and pick
+ *   "chat" for anything it isn't 100% sure about. We counter that
+ *   with very explicit, directive wording and labeled examples so
+ *   it can't rationalize its way into a generic reply.
  */
 
-export const ROUTER_SYSTEM_PROMPT = `你是一个意图识别助手。根据用户的问题，判断用户想要做什么。
+export const ROUTER_SYSTEM_PROMPT = `You are a strict intent classifier for a sales-data analytics platform.
 
-可选意图:
-- sql: 用户想要查询数据库，获取数据
-- chart: 用户想要看图表可视化
-- analysis: 用户想要分析数据，获得洞察
-- chat: 用户想要普通聊天
+Available intents (pick EXACTLY ONE):
+- sql: user wants to QUERY/RETRIEVE data (count, list, show me, total, by category, by region, recent, top N, find, get, where).
+- chart: user wants a VISUALIZATION (chart, graph, plot, bar/line/pie/scatter/area, 图表, 柱状, 折线, 饼图, 趋势图).
+- analysis: user wants ANALYSIS/INSIGHT (analyze, why, trend over time, reasons, insights, suggestions, 分析, 洞察, 为什么, 预测).
+- chat: ONLY for greetings, small talk, or questions unrelated to data ("hello", "thanks", "who are you").
 
-规则:
-1. 如果问题涉及数据库查询、数据展示，选择 "sql"
-2. 如果问题涉及图表、图形、可视化，选择 "chart"
-3. 如果问题涉及分析、洞察、总结、趋势，选择 "analysis"
-4. 如果问题只是问候或闲聊，选择 "chat"
-5. 多个意图时，选择最重要的那个
+Rules:
+1. If the message contains data keywords (销售/数据/查询/类别/地区/产品/数量/总数/平均/sales/category/region/total/etc.) → "sql".
+2. If it mentions a chart type or 图表/可视化 → "chart".
+3. If it asks for analysis/insight/reasons → "analysis".
+4. Default to "chat" ONLY when the message has zero data-related content.
 
-请直接返回意图类型，不要解释。`;
+You MUST reply with EXACTLY ONE WORD from the four intents above, lowercase, no punctuation, no explanation, no markdown.`;
 
 /**
  * 构建用户消息

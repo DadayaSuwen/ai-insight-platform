@@ -5,6 +5,8 @@ import { SqlAgent } from './agents/sql.agent';
 import { ChartAgent, EChartsOption } from './agents/chart.agent';
 import { AnalysisAgent } from './agents/analysis.agent';
 import { DatabaseService } from '../database/database.service';
+import { LlmService } from './llm/llm.service';
+import { createLlmMock } from './llm/llm.mock';
 
 describe('AiService', () => {
   let service: AiService;
@@ -13,6 +15,7 @@ describe('AiService', () => {
   let chartAgent: jest.Mocked<ChartAgent>;
   let analysisAgent: jest.Mocked<AnalysisAgent>;
   let databaseService: jest.Mocked<DatabaseService>;
+  let llmMock: ReturnType<typeof createLlmMock>;
 
   const mockRows = [
     { category: 'A', total: 100 },
@@ -49,6 +52,7 @@ describe('AiService', () => {
           provide: DatabaseService,
           useValue: { executeQuery: jest.fn() },
         },
+        { provide: LlmService, useValue: createLlmMock() },
       ],
     }).compile();
 
@@ -58,6 +62,7 @@ describe('AiService', () => {
     chartAgent = module.get(ChartAgent);
     analysisAgent = module.get(AnalysisAgent);
     databaseService = module.get(DatabaseService);
+    llmMock = module.get(LlmService) as unknown as ReturnType<typeof createLlmMock>;
   });
 
   describe('chat intent', () => {
@@ -72,6 +77,17 @@ describe('AiService', () => {
       expect(result.rows).toBeUndefined();
       expect(sqlAgent.generate).not.toHaveBeenCalled();
       expect(databaseService.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('should return LLM reply when LlmService resolves', async () => {
+      routerAgent.recognize.mockResolvedValue('chat');
+      llmMock.invoke.mockResolvedValue('你好!我是 AI Insight 助手,可以帮你查询销售数据。');
+
+      const result = await service.process('hello');
+
+      expect(result.intent).toBe('chat');
+      expect(result.message).toContain('AI Insight');
+      expect(llmMock.invoke).toHaveBeenCalledTimes(1);
     });
   });
 

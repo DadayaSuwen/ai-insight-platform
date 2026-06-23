@@ -56,6 +56,7 @@ docs/
 | Phase 3 | ✅ | Agent 链路开发 - 51 个测试用例通过 (含 AiService 编排) |
 | Phase 4 | ✅ | SSE 流式输出 - 58 个测试用例通过 (含 ChatService 流) |
 | Phase 5 | ✅ | 前端 UI 对接 - 4 个组件完整实现 (MessageBubble/ChatInput/DynamicChart/ChatWindow) |
+| **LLM 接入** (#11) | ✅ | **LangChain + Ollama** - LlmService 封装 + 4 个 Agent 接入 + 混合 Router - 80 测试通过 |
 | Phase 6 | ⏳ | Docker 化 |
 
 ## 快速链接
@@ -81,10 +82,12 @@ pnpm test:watch
 pnpm test:coverage
 ```
 
-**测试覆盖**:
-- RouterAgent: 15 个测试
-- SqlAgent: 15 个测试
-- ChartAgent: 14 个测试
-- AiService (编排): 7 个测试
-- ChatService (SSE 流): 7 个测试
-- **总计**: 58 个测试全部通过 ✅
+**测试覆盖** (LLM 接入后):
+- LlmService: 5 个测试 (JSON 解析 / 纯文本兜底)
+- RouterAgent: 14 个测试 (含 LLM 路径 + 回退)
+- SqlAgent: 14 个测试 (含 LLM + 危险 SQL 拦截)
+- ChartAgent: 14 个测试 (含 LLM + 默认补全)
+- AnalysisAgent: 5 个测试
+- AiService (编排): 8 个测试 (含 LLM mock + chat 回退)
+- ChatService (SSE 流): 3 个测试
+- **总计**: 80 个测试全部通过 ✅

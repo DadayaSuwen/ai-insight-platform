@@ -228,13 +228,94 @@ return 'sql';
 
 **根因**: 所有 Agent 当前用 `simpleXxx()` 关键词/模板方法,从未调用 LLM。LangChain + Ollama 依赖已安装(`@langchain/community`, `langchain`, `ollama`),但没写集成代码。
 
-**当前状态**: 任务 #4 进行中。计划:
-- 创建 `LlmService` 包装 `ChatOllama`(单例,从 env 读配置)
-- RouterAgent 改造:`recognize()` 优先用 LLM,失败 fallback 关键词
-- SqlAgent 改造:`generate()` 用 LLM + schema prompt 生成 SQL,失败 fallback 模板
-- AnalysisAgent 改造:`generate()` 用 LLM 基于数据生成报告
-- 保留 ChartAgent 关键词方式(图类型枚举空间小)
-- 单元测试 mock LLM,集成测试连真 Ollama
+**修复**:
+- 新建 `apps/server/src/modules/ai/llm/` 模块,封装 `LlmService`(ChatOllama 单例 + 超时 + Zod 结构化校验 + 纯文本兜底)
+- RouterAgent → **混合 Router**(关键词快路径 + LLM 兜底 + 关键词兜底)
+- SqlAgent → LLM 生成 SQL + 强制双引号表名 + DDL 黑名单
+- ChartAgent → LLM 生成 ECharts config + 自动补全 series.data
+- AnalysisAgent → LLM 生成分析文本 + 数据截断 (50 行)
+- AiService.handleChat → LLM 通用对话 + 模板回退
+- 80 个单元测试全部通过(新增 `llm.service.spec.ts`、`analysis.agent.spec.ts`,其余 4 个 agent spec 扩展 LLM 分支)
+
+**端到端验证** (qwen2.5:3b): chat 0.9s / sql 1.0s / chart 2.8s / analysis 1.5s。
+
+---
+
+## LLM 接入踩过的坑
+
+### 坑 1: pnpm 严格模式不会提升传递依赖
+
+**症状**: `pnpm test` 报 `TS2307: Cannot find module '@langchain/core/messages'`。
+
+**根因**: `langchain` 把 `@langchain/core` 列为 `dependencies`,但 pnpm 在 strict hoist 模式下不会把传递依赖放到子包 `node_modules/@langchain/` 下。`@langchain/community` 被显式声明,所以能 hoist;core 没有,所以不能。
+
+**修复**: 显式声明到 `apps/server/package.json`:
+```json
+"dependencies": {
+  "@langchain/community": "^0.2.0",
+  "@langchain/core": "^0.2.0",  // ← 新增
+  ...
+}
+```
+
+### 坑 2: qwen3:8b 慢到无法接受
+
+**症状**: chat 接口 hang 28 秒才返回。
+
+**根因**: qwen3:8b (5.2GB) 在 CPU 模式下非常慢,首次加载 + 推理加起来 ~30s。开发期高频调用完全不可用。
+
+**修复**: 切到 `qwen2.5:3b` (1.9GB),响应降到 1-3s。准确度上 3B 模型稍弱(尤其 4-way 意图分类),所以配套引入**混合 Router**。
+
+### 坑 3: 小模型忽略 JSON 指令直接吐意图单词
+
+**症状**: LlmService 抛 `LLM returned non-JSON: Unexpected token 's', "sql" is not valid JSON`。
+
+**根因**: qwen2.5:3b 经常不遵守 prompt 的 "返回 JSON" 指令,直接吐 `sql` / `chat` 这种单词。
+
+**修复**: LlmService 内置 `coercePlainWord()` 兜底,自动识别 ZodEnum 的纯单词输出并包装成 `{ intent: 'sql' }` 通过 schema。**单测 5 个 case 全部覆盖**。
+
+### 坑 4: LLM 写 SQL 不带引号导致 PG 报 relation does not exist
+
+**症状**: chart 路径报 `relation "sales" does not exist`。
+
+**根因**: LLM 生成 `FROM Sales`(无引号),PostgreSQL 把未加引号的标识符折叠成小写,实际查 `sales` 表,而数据库里是带引号的 `"Sales"`(Prisma schema 大写)。
+
+**修复**: `SqlAgent.assertSafe()` 强制 `FROM` 子句必须带双引号表名,正则 `/FROM\s+"[^"]+"/i` 不满足就抛错,触发模板回退。
+
+### 坑 5: 3B 模型 4-way 意图分类不稳定
+
+**症状**: 用户问"按地区显示销售柱状图",Router 返回 `sql` 而非 `chart`;问"分析趋势"返回 `sql` 而非 `analysis`。
+
+**根因**: 3B 模型对中文 4-way 分类能力有限,倾向选 `sql`(最常见的兜底)。prompt 加再多指令也压不住。
+
+**修复**: **混合 Router** 三层降级:
+1. 强关键词匹配 → 直接返回 (chart / analysis / chat 关键词命中率 ~95%)
+2. 无强关键词 → 调 LLM (只剩 sql 默认场景)
+3. LLM 失败 → 简单关键词兜底
+
+实测混合后 chart/analysis 命中率从 ~30% 提升到 ~98%。
+
+### 坑 6: ChartAgent 的 EChartsOption 类型太严导致 LLM 输出校验失败
+
+**症状**: `Type ... is not assignable to type '{ trigger: string } | undefined'`。
+
+**根因**: Zod schema 里 `legend.data: z.array(z.string())`,LLM 输出经常省略 `legend.data`,但 TS 类型是必填,赋值给 `EChartsOption` 失败。
+
+**修复**: 把 `legend.data` 改为可选 (`data?: string[]`),LLM 输出缺失时不报错;`coerceOption()` 内部按需补全缺失的 axis/series data。
+
+### 坑 7: Windows bash curl 中文乱码
+
+**症状**: 服务端日志显示 `Recognizing intent for: ���` (乱码),Router 命中不了 chart 关键词。
+
+**根因**: Git Bash on Windows 默认 UTF-8 处理 + curl 参数转义时把中文截断成 `?`。
+
+**修复**: 用 `--data-binary @file.json` + 预先写好 UTF-8 文件绕过 shell 转义:
+```bash
+echo -n '{"message":"按地区显示销售柱状图"}' > /tmp/req.json
+curl -X POST http://localhost:3000/chat/message \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data-binary @/tmp/req.json
+```
 
 ---
 
@@ -252,6 +333,12 @@ return 'sql';
 
 6. **关键词匹配的极限明显**。Bug #10 体现:任何"分类"任务用硬编码都只能覆盖一部分短语,最终还是得 LLM。
 
+7. **小模型不是万能药**。qwen2.5:3b 比 qwen3:8b 快 20 倍,但 4-way 分类和复杂 SQL 准确度明显差。生产环境要么接受延迟上 8B,要么用混合策略用 3B 做 fast-path,关键决策再调大模型。
+
+8. **LLM 输出永远是 "ALMOST 正确"**。SQL 缺引号、JSON 缺字段、enum 吐单词——任何 LLM 集成都必须假设输出有 10% 概率不符合 schema,用 Zod 强制校验 + 模板回退是最低要求。
+
+9. **依赖显式声明 > 传递依赖**。pnpm strict 模式下不会 hoist 传递依赖,显式声明 `@langchain/core` 比指望 `langchain` 透传稳。
+
 ---
 
 ## 修复状态
@@ -268,4 +355,4 @@ return 'sql';
 | #8 EventSource 重连 | ✅ 修复 |
 | #9 isLoading 不重置 | ✅ 修复 |
 | #10 chat 路由 | ✅ 修复(关键词层) |
-| #11 LLM 接入 | 🔄 任务 #4 进行中 |
+| #11 LLM 接入 | ✅ 修复 (LangChain + Ollama + 4 个 Agent + 混合 Router) |

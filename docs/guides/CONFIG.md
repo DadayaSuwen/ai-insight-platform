@@ -1,3 +1,39 @@
+# 配置说明
+
+本文档解释项目中的环境变量和 TypeScript 配置。
+
+---
+
+## 环境变量
+
+### `apps/server/.env`
+
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `DATABASE_URL` | ✅ | — | PostgreSQL 连接字符串,例如 `postgresql://app:password@localhost:5432/ai_insight` |
+| `OLLAMA_BASE_URL` | ❌ | `http://localhost:11434` | Ollama HTTP 服务地址 |
+| `OLLAMA_MODEL` | ❌ | `qwen3:8b` | Ollama 模型名;开发期推荐 `qwen2.5:3b` (响应 ~1s),生产期用 `qwen3:8b` (准确度更高) |
+| `PORT` | ❌ | `3000` | NestJS 服务端口 |
+| `FRONTEND_ORIGIN` | ❌ | `http://localhost:5173` | CORS 白名单,Vite dev server |
+
+### `apps/web/.env`
+
+| 变量 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `VITE_API_BASE_URL` | ❌ | `http://localhost:3000` | 后端 API 地址 |
+
+### 模型选择建议
+
+| 模型 | 体积 | 单次响应 | 适用场景 |
+|------|------|---------|---------|
+| `qwen2.5:3b` | ~2GB | ~1s | 开发期高频迭代、CI、单测 smoke |
+| `qwen3:8b` | ~5GB | ~20-30s | 生产环境、复杂 SQL、深度分析 |
+| `llama3.2:latest` | ~2GB | ~1s | 备选,Qwen 不可用时降级 |
+
+> 模型体积和速度取决于 Ollama 是否用 GPU 推理。CPU 模式下即使是 3B 也可能 3-5s。
+
+---
+
 # TypeScript 配置指南
 
 本文档解释项目中三个 `tsconfig.json` 配置文件的设计理由。

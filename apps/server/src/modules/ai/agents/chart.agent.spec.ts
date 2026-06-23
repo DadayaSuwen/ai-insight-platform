@@ -1,8 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChartAgent, ChartType } from './chart.agent';
+import { LlmService } from '../llm/llm.service';
+import { createLlmMock } from '../llm/llm.mock';
 
 describe('ChartAgent', () => {
   let agent: ChartAgent;
+  let llmMock: ReturnType<typeof createLlmMock>;
 
   // Sample test data
   const mockSalesData = [
@@ -20,8 +23,12 @@ describe('ChartAgent', () => {
   ];
 
   beforeEach(async () => {
+    llmMock = createLlmMock();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ChartAgent],
+      providers: [
+        ChartAgent,
+        { provide: LlmService, useValue: llmMock },
+      ],
     }).compile();
 
     agent = module.get<ChartAgent>(ChartAgent);
@@ -172,6 +179,41 @@ describe('ChartAgent', () => {
     it('should recognize pie keyword', async () => {
       const chart = await agent.generate(mockSalesData, 'show pie chart');
       expect(chart.series?.[0]).toHaveProperty('type', 'pie');
+    });
+  });
+
+  /**
+   * LLM success path. When Ollama returns a parseable EChartsOption,
+   * the agent should shape it into a renderable config.
+   */
+  describe('LLM path', () => {
+    it('should coerce a valid LLM chart option', async () => {
+      llmMock.invokeStructured.mockResolvedValue({
+        type: 'line',
+        xAxis: { type: 'category' },
+        yAxis: { type: 'value' },
+        series: [{ type: 'line', data: [1, 2, 3] }],
+      });
+      const chart = await agent.generate(mockSalesData, 'show trend');
+      expect(chart.series?.[0]).toHaveProperty('type', 'line');
+      expect(chart.xAxis).toBeDefined();
+      expect(chart.yAxis).toBeDefined();
+    });
+
+    it('should fill in defaults when LLM omits axis data', async () => {
+      llmMock.invokeStructured.mockResolvedValue({
+        type: 'bar',
+        series: [{ type: 'bar' }], // no data field
+      });
+      const chart = await agent.generate(mockCategoryData, 'show categories');
+      expect(chart.series?.[0]).toHaveProperty('type', 'bar');
+      expect((chart.series?.[0] as { data: unknown[] }).data.length).toBe(3);
+    });
+
+    it('should fall back to template when LLM throws', async () => {
+      llmMock.invokeStructured.mockRejectedValue(new Error('LLM down'));
+      const chart = await agent.generate(mockSalesData, '显示柱状图');
+      expect(chart.series?.[0]).toHaveProperty('type', 'bar');
     });
   });
 });

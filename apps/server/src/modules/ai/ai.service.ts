@@ -4,6 +4,21 @@ import { SqlAgent } from './agents/sql.agent';
 import { ChartAgent, EChartsOption } from './agents/chart.agent';
 import { AnalysisAgent } from './agents/analysis.agent';
 import { DatabaseService } from '../database/database.service';
+import { LlmService } from './llm/llm.service';
+
+/**
+ * System prompt for the catch-all chat branch. Kept short — it's used
+ * only when the router decides the user is just chatting.
+ */
+const CHAT_SYSTEM_PROMPT = `你是 AI Insight Platform 的智能助手。你的主要能力是:
+1. 帮用户查询和分析销售数据
+2. 把查询结果生成图表(柱状图、折线图、饼图等)
+3. 基于数据生成深度分析报告
+
+回答时:
+- 用中文,简洁友好
+- 如果用户问的是数据相关问题,引导他们用具体业务语言,例如"显示按类别销售额"
+- 不知道就说不知道,不要编造`;
 
 /**
  * Structured result returned by AiService.process().
@@ -28,6 +43,10 @@ export interface AiProcessResult {
  * AiService - Pipeline Orchestrator
  *
  * 串联 RouterAgent → SqlAgent → DatabaseService → ChartAgent / AnalysisAgent
+ *
+ * The chat branch now goes through LlmService directly so casual
+ * conversation (greetings, help questions) feels natural instead of
+ * returning a canned string.
  */
 @Injectable()
 export class AiService {
@@ -39,6 +58,7 @@ export class AiService {
     private readonly chartAgent: ChartAgent,
     private readonly analysisAgent: AnalysisAgent,
     private readonly databaseService: DatabaseService,
+    private readonly llm: LlmService,
   ) {}
 
   /**
@@ -61,7 +81,7 @@ export class AiService {
     try {
       switch (intent) {
         case 'chat':
-          return this.handleChat(message);
+          return await this.handleChat(message);
         case 'sql':
           return await this.handleSql(message);
         case 'chart':
@@ -69,7 +89,7 @@ export class AiService {
         case 'analysis':
           return await this.handleAnalysis(message);
         default:
-          return this.handleChat(message);
+          return await this.handleChat(message);
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -78,11 +98,40 @@ export class AiService {
     }
   }
 
-  private handleChat(message: string): AiProcessResult {
-    return {
-      intent: 'chat',
-      message: `收到您的消息: "${message}"。当前还在接入 LLM,您可以尝试查询语句,例如: "按类别显示销售额"。`,
-    };
+  /**
+   * Handle plain chat. Now goes through LLM with a short system prompt
+   * so greetings/help questions get a real answer; falls back to a
+   * canned string when Ollama is unavailable.
+   */
+  private async handleChat(message: string): Promise<AiProcessResult> {
+    try {
+      const reply = await this.llm.invoke({
+        system: CHAT_SYSTEM_PROMPT,
+        human: message,
+        timeoutMs: 20_000,
+        temperature: 0.3,
+      });
+      return {
+        intent: 'chat',
+        message: reply || this.fallbackChatMessage(message),
+      };
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Chat LLM failed (${msg}); using fallback`);
+      return {
+        intent: 'chat',
+        message: this.fallbackChatMessage(message),
+      };
+    }
+  }
+
+  /**
+   * Canned reply used when LLM is down. Preserves the old behavior for
+   * the existing chat test in ai.service.spec.ts (the test asserts
+   * the response contains "你好" — see fallbackChatMessage).
+   */
+  private fallbackChatMessage(message: string): string {
+    return `收到您的消息: "${message}"。当前 LLM 暂不可用,您可以尝试数据查询语句,例如: "按类别显示销售额"。`;
   }
 
   private async handleSql(message: string): Promise<AiProcessResult> {

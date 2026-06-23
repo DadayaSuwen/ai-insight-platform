@@ -1,12 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SqlAgent } from './sql.agent';
+import { LlmService } from '../llm/llm.service';
+import { createLlmMock } from '../llm/llm.mock';
 
 describe('SqlAgent', () => {
   let agent: SqlAgent;
+  let llmMock: ReturnType<typeof createLlmMock>;
 
   beforeEach(async () => {
+    llmMock = createLlmMock();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SqlAgent],
+      providers: [
+        SqlAgent,
+        { provide: LlmService, useValue: llmMock },
+      ],
     }).compile();
 
     agent = module.get<SqlAgent>(SqlAgent);
@@ -152,6 +159,55 @@ describe('SqlAgent', () => {
     it('should handle special characters', async () => {
       const sql = await agent.generate('查询#销售@数据!');
       expect(sql).toContain('SELECT');
+    });
+  });
+
+  /**
+   * LLM success path. When Ollama returns valid SELECT, the agent
+   * should pass it through; when it returns unsafe or unparsable
+   * text, the agent falls back to the template.
+   */
+  describe('LLM path', () => {
+    it('should accept a plain SELECT from the LLM', async () => {
+      llmMock.invoke.mockResolvedValue(
+        'SELECT "category", SUM("amount") AS total FROM "Sales" GROUP BY "category"',
+      );
+      const sql = await agent.generate('show me category totals');
+      expect(sql).toContain('SELECT');
+      expect(sql).toContain('Sales');
+      expect(llmMock.invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('should strip markdown fences from LLM output', async () => {
+      llmMock.invoke.mockResolvedValue(
+        '```sql\nSELECT * FROM "Sales" LIMIT 5;\n```',
+      );
+      const sql = await agent.generate('give me some rows');
+      expect(sql.startsWith('SELECT')).toBe(true);
+      expect(sql).not.toContain('```');
+    });
+
+    it('should reject non-SELECT SQL from the LLM and fall back', async () => {
+      llmMock.invoke.mockResolvedValue('DROP TABLE "Sales";');
+      const sql = await agent.generate('wipe everything');
+      // DROP is forbidden → falls back to safe SELECT template
+      expect(sql.toUpperCase().trim().startsWith('SELECT')).toBe(true);
+      expect(sql).not.toContain('DROP');
+    });
+
+    it('should reject INSERT from the LLM and fall back', async () => {
+      llmMock.invoke.mockResolvedValue(
+        'INSERT INTO "Sales" VALUES (1, 2, 3, 4, 5, 6);',
+      );
+      const sql = await agent.generate('add a row');
+      expect(sql.toUpperCase().trim().startsWith('SELECT')).toBe(true);
+    });
+
+    it('should fall back when LLM throws', async () => {
+      llmMock.invoke.mockRejectedValue(new Error('LLM timeout after 30000ms'));
+      const sql = await agent.generate('按类别显示销售额');
+      expect(sql).toContain('GROUP BY');
+      expect(sql).toContain('"category"');
     });
   });
 });
