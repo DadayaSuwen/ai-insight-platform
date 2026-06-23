@@ -12,7 +12,7 @@ import {
   LLMProvider,
   LLMConfigSchema,
   type LLMConfig,
-  type LLMConfigPublic,
+  type LLMConfigs,
 } from '@workspace/types';
 
 /**
@@ -32,13 +32,17 @@ export class LlmController {
   // ─── GET /llm/config ────────────────────────────────────────────────────────
 
   @Get('config')
-  async getConfig(): Promise<LLMConfigPublic> {
-    // Note: LlmService doesn't expose raw config yet; we return a minimal default.
-    // Phase 2 will add a getConfig() method to LlmService.
+  async getConfig(): Promise<LLMConfigs> {
+    const configs = await this.llmService.getAllConfigs();
     return {
-      provider: LLMProvider.OLLAMA,
-      model: 'qwen3:8b',
-      temperature: 0,
+      configs: configs.map((c) => ({
+        provider: c.provider,
+        model: c.model,
+        temperature: c.temperature,
+        baseUrl: c.baseUrl,
+        apiKey: c.apiKey,
+      })),
+      activeProvider: this.llmService.getActiveProvider(),
     };
   }
 
@@ -67,46 +71,70 @@ export class LlmController {
   async getHealth(): Promise<
     Record<string, { ok: boolean; latencyMs?: number; error?: string }>
   > {
+    const configs = await this.llmService.getAllConfigs();
+    const configByProvider: Record<string, LLMConfig> = {};
+    for (const c of configs) {
+      configByProvider[c.provider] = c;
+    }
+
     const result: Record<string, { ok: boolean; latencyMs?: number; error?: string }> = {};
 
-    // Ollama
+    // Ollama — use baseUrl from DB (or default), ping the /api/tags endpoint
     try {
       const t0 = Date.now();
-      const ok = await this.llmService.ping();
-      result['ollama'] = { ok, latencyMs: Date.now() - t0 };
+      const cfg = configByProvider[LLMProvider.OLLAMA];
+      const baseUrl = cfg?.baseUrl ?? 'http://localhost:11434';
+      const res = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      result['ollama'] = { ok: res.ok, latencyMs: Date.now() - t0 };
     } catch (e: unknown) {
       result['ollama'] = { ok: false, error: String(e) };
     }
 
-    // OpenAI — requires API key in config, try a cheap /models ping
-    try {
-      const t0 = Date.now();
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY ?? ''}` },
-        signal: AbortSignal.timeout(3000),
-      });
-      result['openai'] = { ok: res.ok, latencyMs: Date.now() - t0 };
-    } catch (e: unknown) {
-      result['openai'] = { ok: false, error: String(e) };
+    // OpenAI — requires API key; if not configured, skip
+    {
+      const cfg = configByProvider[LLMProvider.OPENAI];
+      if (!cfg?.apiKey) {
+        result['openai'] = { ok: false, error: 'No API key configured' };
+      } else {
+        try {
+          const t0 = Date.now();
+          const baseUrl = cfg.baseUrl ?? 'https://api.openai.com/v1';
+          const res = await fetch(`${baseUrl}/models`, {
+            headers: { Authorization: `Bearer ${cfg.apiKey}` },
+            signal: AbortSignal.timeout(3000),
+          });
+          result['openai'] = { ok: res.ok, latencyMs: Date.now() - t0 };
+        } catch (e: unknown) {
+          result['openai'] = { ok: false, error: String(e) };
+        }
+      }
     }
 
-    // Anthropic
-    try {
-      const t0 = Date.now();
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': process.env.ANTHROPIC_API_KEY ?? '',
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ model: 'claude-3-5-sonnet-20240620', max_tokens: 1, messages: [] }),
-        signal: AbortSignal.timeout(3000),
-      });
-      // 401 = auth error but the endpoint responds = API is reachable
-      result['anthropic'] = { ok: res.ok || res.status === 401, latencyMs: Date.now() - t0 };
-    } catch (e: unknown) {
-      result['anthropic'] = { ok: false, error: String(e) };
+    // Anthropic — requires API key; if not configured, skip
+    {
+      const cfg = configByProvider[LLMProvider.ANTHROPIC];
+      if (!cfg?.apiKey) {
+        result['anthropic'] = { ok: false, error: 'No API key configured' };
+      } else {
+        try {
+          const t0 = Date.now();
+          const baseUrl = cfg.baseUrl ?? 'https://api.anthropic.com';
+          const res = await fetch(`${baseUrl}/v1/messages`, {
+            method: 'POST',
+            headers: {
+              'x-api-key': cfg.apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ model: cfg.model, max_tokens: 1, messages: [] }),
+            signal: AbortSignal.timeout(3000),
+          });
+          // 401 = auth error but the endpoint responds = reachable
+          result['anthropic'] = { ok: res.ok || res.status === 401, latencyMs: Date.now() - t0 };
+        } catch (e: unknown) {
+          result['anthropic'] = { ok: false, error: String(e) };
+        }
+      }
     }
 
     return result;

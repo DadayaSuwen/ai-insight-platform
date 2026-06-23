@@ -3,15 +3,15 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ChatOllama } from '@langchain/community/chat_models/ollama';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import type { BaseMessage } from '@langchain/core/messages';
-import { PrismaClient } from '@prisma/client';
-import { z } from 'zod';
-import { LLMProvider, type LLMConfig } from '@workspace/types';
-import { createChatModel } from './llm-factory';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { ChatOllama } from "@langchain/community/chat_models/ollama";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
+import { PrismaClient } from "@prisma/client";
+import { z } from "zod";
+import { LLMProvider, type LLMConfig } from "@workspace/types";
+import { createChatModel } from "./llm-factory";
 
 /**
  * Options for {@link LlmService.invoke}.
@@ -61,6 +61,9 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
    */
   private chatReady: Promise<void>;
 
+  /** The provider currently in use — set on startup and after each reload. */
+  private activeProvider: LLMProvider = LLMProvider.OLLAMA;
+
   constructor(private readonly config: ConfigService) {
     this.chatReady = this.initFromDatabase();
   }
@@ -88,11 +91,15 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
 
     if (opts.temperature !== undefined) {
       // BaseChatModel doesn't expose temperature — each subclass does.
-      (chat as unknown as { temperature: number }).temperature = opts.temperature;
+      (chat as unknown as { temperature: number }).temperature =
+        opts.temperature;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (await this.raceWithTimeout(chat.invoke(messages), timeoutMs)) as any;
+    const result = (await this.raceWithTimeout(
+      chat.invoke(messages),
+      timeoutMs,
+    )) as any;
     return this.normalizeContent(result.content);
   }
 
@@ -105,7 +112,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     await this.chatReady;
     const schemaDescription = this.describeSchema(opts.schema);
     const systemWithSchema = opts.schema
-      ? `${opts.system ?? ''}\n\n${schemaDescription}`
+      ? `${opts.system ?? ""}\n\n${schemaDescription}`
       : opts.system;
 
     const raw = await this.invoke({
@@ -125,7 +132,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   async ping(): Promise<boolean> {
     try {
       const baseUrl =
-        this.config.get<string>('OLLAMA_BASE_URL') ?? 'http://localhost:11434';
+        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434";
       const res = await fetch(`${baseUrl}/api/tags`, {
         signal: AbortSignal.timeout(2_000),
       });
@@ -141,31 +148,82 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
    * @param config  Optional new config to use instead of reading from DB.
    */
   async reload(config?: LLMConfig): Promise<void> {
+    // Persist to DB if provided (called from POST /llm/config)
+    if (config) {
+      const prisma = new PrismaClient();
+      try {
+        await prisma.lLMConfig.upsert({
+          where: { id: config.provider },
+          update: {
+            apiKey: config.apiKey ?? null,
+            baseUrl: config.baseUrl ?? null,
+            model: config.model,
+            temperature: config.temperature,
+          },
+          create: {
+            id: config.provider,
+            apiKey: config.apiKey ?? null,
+            baseUrl: config.baseUrl ?? null,
+            model: config.model,
+            temperature: config.temperature,
+          },
+        });
+      } finally {
+        await prisma.$disconnect();
+      }
+    }
     this.chatReady = config
       ? this.initWithConfig(config)
       : this.initFromDatabase();
     await this.chatReady;
   }
 
+  /**
+   * Returns all saved configs for every provider.
+   * Used by GET /llm/config to populate the Settings form.
+   */
+  async getAllConfigs(): Promise<LLMConfig[]> {
+    const prisma = new PrismaClient();
+    try {
+      const rows = await prisma.lLMConfig.findMany();
+      return rows.map((row) => ({
+        provider: row.id as LLMProvider,
+        apiKey: row.apiKey ?? undefined,
+        baseUrl: row.baseUrl ?? undefined,
+        model: row.model,
+        temperature: row.temperature,
+      }));
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+
+  /** Returns the provider that is currently active (last loaded from DB or set via reload). */
+  getActiveProvider(): LLMProvider {
+    return this.activeProvider;
+  }
+
   // ─── Internals ─────────────────────────────────────────────────────────────
 
   private async initFromDatabase(): Promise<void> {
+    this.activeProvider = LLMProvider.OLLAMA;
     try {
       const prisma = new PrismaClient();
+      // Default to Ollama row on startup
       const row = await prisma.lLMConfig.findUnique({
-        where: { id: 'default' },
+        where: { id: LLMProvider.OLLAMA },
       });
 
       if (!row) {
         this.chat = this.defaultOllamaChat();
         this.logger.warn(
-          'No LLMConfig in DB; using env-default Ollama. Set config via POST /llm/config',
+          "No LLMConfig in DB; using env-default Ollama. Set config via POST /llm/config",
         );
         return;
       }
 
       const config: LLMConfig = {
-        provider: row.provider as LLMProvider,
+        provider: row.id as LLMProvider, // id IS the provider
         apiKey: row.apiKey ?? undefined,
         baseUrl: row.baseUrl ?? undefined,
         model: row.model,
@@ -177,19 +235,23 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
         `LlmService loaded config: provider=${config.provider}, model=${config.model}`,
       );
     } catch (err) {
-      this.logger.error('Failed to init LLM from DB, falling back to Ollama', err);
+      this.logger.error(
+        "Failed to init LLM from DB, falling back to Ollama",
+        err,
+      );
       this.chat = this.defaultOllamaChat();
     }
   }
 
   private async initWithConfig(config: LLMConfig): Promise<void> {
+    this.activeProvider = config.provider;
     try {
       this.chat = createChatModel(config);
       this.logger.log(
         `LlmService reloaded: provider=${config.provider}, model=${config.model}`,
       );
     } catch (err) {
-      this.logger.error('Failed to apply new LLM config', err);
+      this.logger.error("Failed to apply new LLM config", err);
       throw err;
     }
   }
@@ -197,9 +259,8 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private defaultOllamaChat() {
     return new ChatOllama({
       baseUrl:
-        this.config.get<string>('OLLAMA_BASE_URL') ??
-        'http://localhost:11434',
-      model: this.config.get<string>('OLLAMA_MODEL') ?? 'qwen3:8b',
+        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
+      model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen3:8b",
       temperature: 0,
       numCtx: 4096,
     });
@@ -208,7 +269,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private getRequiredChat(): ReturnType<typeof createChatModel> {
     if (!this.chat) {
       throw new Error(
-        'LlmService not initialized. Ensure onModuleInit completed.',
+        "LlmService not initialized. Ensure onModuleInit completed.",
       );
     }
     return this.chat;
@@ -219,7 +280,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     if (system?.trim()) messages.push(new SystemMessage(system));
     if (human?.trim()) messages.push(new HumanMessage(human));
     if (messages.length === 0) {
-      throw new Error('LlmService.invoke requires at least a human prompt');
+      throw new Error("LlmService.invoke requires at least a human prompt");
     }
     return messages;
   }
@@ -240,33 +301,33 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   }
 
   private normalizeContent(content: unknown): string {
-    if (typeof content === 'string') return content.trim();
+    if (typeof content === "string") return content.trim();
     if (Array.isArray(content)) {
       return content
         .map((part) => {
-          if (typeof part === 'string') return part;
+          if (typeof part === "string") return part;
           if (
             part &&
-            typeof part === 'object' &&
-            'text' in part &&
-            typeof (part as { text: unknown }).text === 'string'
+            typeof part === "object" &&
+            "text" in part &&
+            typeof (part as { text: unknown }).text === "string"
           ) {
             return (part as { text: string }).text;
           }
-          return '';
+          return "";
         })
-        .join('')
+        .join("")
         .trim();
     }
-    return String(content ?? '').trim();
+    return String(content ?? "").trim();
   }
 
   private describeSchema(schema: z.ZodTypeAny): string {
     const lines: string[] = [
-      'Return ONLY valid JSON (no prose, no markdown fence) matching this shape:',
+      "Return ONLY valid JSON (no prose, no markdown fence) matching this shape:",
       JSON.stringify(this.schemaToExample(schema), null, 2),
     ];
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   private schemaToExample(schema: z.ZodTypeAny): unknown {
@@ -278,18 +339,25 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
       }
       return obj;
     }
-    if (schema instanceof z.ZodString) return 'string';
+    if (schema instanceof z.ZodString) return "string";
     if (schema instanceof z.ZodNumber) return 0;
     if (schema instanceof z.ZodBoolean) return false;
     if (schema instanceof z.ZodEnum) return schema.options[0];
     if (schema instanceof z.ZodArray)
-      return [this.schemaToExample((schema as z.ZodArray<z.ZodTypeAny>).element)];
+      return [
+        this.schemaToExample((schema as z.ZodArray<z.ZodTypeAny>).element),
+      ];
     if (schema instanceof z.ZodOptional)
-      return this.schemaToExample((schema as z.ZodOptional<z.ZodTypeAny>).unwrap());
+      return this.schemaToExample(
+        (schema as z.ZodOptional<z.ZodTypeAny>).unwrap(),
+      );
     if (schema instanceof z.ZodNullable)
-      return this.schemaToExample((schema as z.ZodNullable<z.ZodTypeAny>).unwrap());
+      return this.schemaToExample(
+        (schema as z.ZodNullable<z.ZodTypeAny>).unwrap(),
+      );
     if (schema instanceof z.ZodUnion) {
-      const opts = (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>).options;
+      const opts = (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>)
+        .options;
       return this.schemaToExample(opts[0]);
     }
     return null;
@@ -326,7 +394,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     schema: T,
   ): z.infer<T> | undefined {
     if (/[{}\[\]"]/.test(raw)) return undefined;
-    const trimmed = raw.trim().replace(/^```\w*\s*/, '').replace(/\s*```$/, '');
+    const trimmed = raw
+      .trim()
+      .replace(/^```\w*\s*/, "")
+      .replace(/\s*```$/, "");
     const tokens = trimmed
       .split(/[\s,;:]+/)
       .map((t) => t.toLowerCase())
@@ -363,7 +434,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     options: readonly [string, ...string[]],
   ): string | undefined {
     for (const tok of tokens) {
-      const cleaned = tok.replace(/[^a-z0-9_-]/g, '');
+      const cleaned = tok.replace(/[^a-z0-9_-]/g, "");
       if ((options as readonly string[]).includes(cleaned)) {
         return cleaned;
       }
@@ -374,13 +445,13 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private extractJson(raw: string): string {
     const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
     if (fenced) return fenced[1].trim();
-    const firstBrace = raw.indexOf('{');
-    const lastBrace = raw.lastIndexOf('}');
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
     if (firstBrace !== -1 && lastBrace > firstBrace) {
       return raw.slice(firstBrace, lastBrace + 1);
     }
-    const firstBracket = raw.indexOf('[');
-    const lastBracket = raw.lastIndexOf(']');
+    const firstBracket = raw.indexOf("[");
+    const lastBracket = raw.lastIndexOf("]");
     if (firstBracket !== -1 && lastBracket > firstBracket) {
       return raw.slice(firstBracket, lastBracket + 1);
     }

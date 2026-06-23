@@ -46,7 +46,7 @@ docs/
 | 文档 | 描述 |
 |------|------|
 | `development/AGENT.md` | Agent 链路开发文档、测试用例 |
-| `development/ISSUES.md` | Phase 3/4/5/6/7 实际运行发现的问题与根因 (含 LLM 接入、Docker 化踩坑、SQL 摘要增强) |
+| `development/ISSUES.md` | Phase 3–8 实际运行发现的问题与根因 (含 LLM 接入、Docker 踩坑、SQL 摘要增强、Settings 页面修复) |
 
 ## 开发阶段
 
@@ -60,6 +60,7 @@ docs/
 | **LLM 接入** (#11) | ✅ | **LangChain + Ollama** - LlmService 封装 + 4 个 Agent 接入 + 混合 Router - 80 测试通过 |
 | Phase 6 | ✅ | Docker 化 - 4 服务编排 (postgres+ollama+server+web) + 多阶段镜像 + nginx 反代 + entrypoint 自动 init |
 | Phase 7 | ✅ | 企业级 UI + SQL 结果增强 - 流式光标/快捷指令/深浅主题/LLM 自然语言摘要/DataTable 表格渲染 |
+| Phase 8 | ✅ | LLM Settings 修复 - Schema 多行配置/Config 正确回显/Health 读 DB/保存防护/手动健康检查 |
 
 ## 快速链接
 

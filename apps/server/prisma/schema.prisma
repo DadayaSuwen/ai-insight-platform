@@ -43,8 +43,7 @@ model ChatMessage {
 // ─── LLM Configuration ─────────────────────────────────────────────────────────
 
 model LLMConfig {
-  id          String   @id @default("default")  // single-row config, id is always "default"
-  provider    String   // "openai" | "anthropic" | "ollama"
+  id          String   @id // "openai" | "anthropic" | "ollama"
   apiKey      String?
   baseUrl     String?
   model       String   @default("qwen3:8b")

@@ -23,10 +23,18 @@ export const LLMConfigSchema = z.object({
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;
 
 /**
- * LLM config as returned to the frontend — apiKey is masked.
+ * LLM config as returned to the frontend.
  */
-export const LLMConfigPublicSchema = LLMConfigSchema.extend({
-  apiKey: z.string().optional().transform((v) => (v ? '***' : undefined)),
-});
+export const LLMConfigPublicSchema = LLMConfigSchema;
 
 export type LLMConfigPublic = z.infer<typeof LLMConfigPublicSchema>;
+
+/**
+ * Response shape for GET /llm/config — all 3 provider configs at once.
+ */
+export const LLMConfigsSchema = z.object({
+  configs: z.array(LLMConfigPublicSchema),
+  activeProvider: z.string(),
+});
+
+export type LLMConfigs = z.infer<typeof LLMConfigsSchema>;

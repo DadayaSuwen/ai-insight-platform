@@ -673,3 +673,111 @@ Phase 7 目标：改进 SQL 查询结果的用户体验（空洞的"查询成功
 | #24 SSE SQL 无 rows | 🟡 | ✅ SSESQLData 加 rows 字段 + DataTable.tsx |
 | #25 EventSource GET 限制 | 🟡 | ✅ 改用 fetch + ReadableStream |
 | #26 前端 UI 简陋 | 🟡 | ✅ 深浅主题/快捷指令/流式光标/DataTable |
+
+---
+
+## Phase 8: LLM Settings 修复（Bug #27–#31）
+
+Phase 8 目标：修复 Settings 页面的配置回显、健康检查、选中状态、按钮防护等问题。
+
+### Bug #27 — LLMConfig Schema 为单行，无法存多个 Provider 配置
+
+🔴 阻塞（功能缺失）
+
+**现象**：数据库只有 `LLMConfig` 表，id = 'default' 单行。切换 Provider Tab 后无法回显，因为每次 POST /llm/config 都 upsert 覆盖这一行。
+
+**根因**：原设计把 `LLMConfig.id` 设为固定值 'default'，无法区分 openai / anthropic / ollama 三个独立配置。
+
+**修复**：
+- Schema 改用 `provider` 字符串作 `@id`（`id: String @id // "openai" | "anthropic" | "ollama"`）
+- `reload()` upsert 时 `where: { id: config.provider }`（不再用 'default'）
+- `getAllConfigs()` 改为 `findMany()` 返回所有 3 行
+- seed.ts 更新为 3 条独立记录
+
+### Bug #28 — GET /llm/config 硬编码返回，不读数据库
+
+🟠 严重
+
+**现象**：前端进入 Settings，`GET /llm/config` 永远返回 `{ provider: 'ollama', model: 'qwen3:8b', temperature: 0 }`，无法显示已保存配置。
+
+**根因**：`LlmController.getConfig()` 直接返回硬编码对象，没有调用 `llmService.getAllConfigs()`。
+
+**修复**：`getConfig()` 改用 `llmService.getAllConfigs()` 返回数据库实际内容。
+
+### Bug #29 — GET /llm/health 用 process.env 而非数据库 API Key
+
+🟠 严重
+
+**现象**：健康检查永远用 `process.env.OPENAI_API_KEY`，用户在前端填的 Key 存到数据库里但从未被健康检查使用，导致健康状态不准确。
+
+**根因**：`llm.controller.ts` 的 `getHealth()` 方法直接引用 `process.env`。
+
+**修复**：`getHealth()` 调用 `llmService.getAllConfigs()` 获取每个 provider 的 `apiKey` + `baseUrl`，用数据库里的配置发真实请求。无 apiKey 的 provider 返回 `{ ok: false, error: 'No API key configured' }`。
+
+### Bug #30 — 保存按钮无防重放，空 Model 也能保存
+
+🟡 中等
+
+**现象**：保存按钮可重复点击；删除 model 值后点击保存，空字符串写入数据库。
+
+**修复**：
+- `handleSave()` 头部校验 `if (!form.model.trim()) { setMessage({type:'err',text:'模型名称不能为空'}); return; }`
+- 按钮 `disabled={saving || testingHealth || !form.model.trim()}`
+
+### Bug #31 — 健康检查自动触发，用户应手动控制
+
+🟡 中等
+
+**现象**：进入 Settings 页面时自动调用 `fetchLlmHealth()`，无 API Key 时发无效请求浪费资源。
+
+**修复**：
+- 移除 `useEffect` 中的 `fetchLlmHealth()` 自动调用
+- Tab 区域下方增加"测试连接"按钮，点击后触发全量 health 检查
+- 结果展示在按钮下方（Ollama / OpenAI / Anthropic 三行状态文字）
+
+---
+
+### 经验教训（Phase 8 整体）
+
+1. **Schema 设计要避免单行配置**。如果要支持多实例/多配置，单行设计必然导致 upsert 覆盖问题。提前考虑可扩展性。
+
+2. **健康检查不应依赖环境变量**。API Key 等运行时配置应存数据库，健康检查从数据库读，而非 env——否则前端配置永远无法"激活"健康检查。
+
+3. **表单提交必须有防重放**。用 `disabled` + 状态标记是最简有效的 UX，不需要复杂的请求取消逻辑。
+
+---
+
+### Phase 8 修复状态
+
+| Bug | 严重度 | 状态 |
+|-----|--------|------|
+| #27 LLMConfig 单行问题 | 🔴 | ✅ Schema 改 provider 作主键 + seed 更新 |
+| #28 getConfig 硬编码 | 🟠 | ✅ 改为 getAllConfigs() |
+| #29 health 用 env | 🟠 | ✅ 改为从 DB 读 apiKey |
+| #30 保存无防护 | 🟡 | ✅ 加 model 校验 + disabled |
+| #31 自动 health | 🟡 | ✅ 改为手动测试按钮 |
+
+---
+
+## Next Goal: 前端体验边界优化
+
+**目标**：提升 Settings 页面和 Chat 交互的细节体验，修复以下边界问题：
+
+### Goal A: React StrictMode 导致 useEffect 双调用（暂不处理）
+
+**现象**：进入 Settings 页面时 `GET /llm/config` 发送两次。
+
+**根因**：React 18 StrictMode 在开发模式下故意双调用 `useEffect`（mount → unmount → remount），属于框架设计行为，非 bug。
+
+**状态**：暂不修复（接受开发期行为，不影响生产）。
+
+---
+
+## 文档更新记录
+
+| 日期 | 更新内容 |
+|------|---------|
+| 2026-06-23 | Phase 8 完成（Bug #27–#31 全部修复）；更新 CONFIG.md LLM API 说明 |
+| 2026-06-23 | 新增 Next Goal：前端体验边界优化 |
+
+

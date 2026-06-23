@@ -41,7 +41,7 @@ function HealthDot({ ok }: { ok: boolean | undefined }) {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { llmConfig, llmHealth, isLoadingConfig, fetchLlmConfig, saveLlmConfig, fetchLlmHealth } =
+  const { llmConfigs, activeProvider, llmHealth, isLoadingConfig, fetchLlmConfig, saveLlmConfig, fetchLlmHealth } =
     useAppStore();
 
   const [form, setForm] = useState<FormState>({
@@ -53,36 +53,44 @@ export default function SettingsPage() {
   });
 
   const [saving, setSaving] = useState(false);
+  const [testingHealth, setTestingHealth] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
+  // Load config once on mount
   useEffect(() => {
     fetchLlmConfig();
-    fetchLlmHealth();
   }, []);
 
-  // Populate form when config loads
+  // When configs finish loading, pre-fill the currently selected provider
   useEffect(() => {
-    if (llmConfig) {
-      setForm({
-        provider: llmConfig.provider,
-        apiKey: llmConfig.apiKey ?? '',
-        baseUrl: llmConfig.baseUrl ?? BASE_URLS[llmConfig.provider],
-        model: llmConfig.model,
-        temperature: llmConfig.temperature,
-      });
+    const saved = llmConfigs[form.provider];
+    if (saved) {
+      setForm((f) => ({
+        ...f,
+        apiKey: saved.apiKey ?? '',
+        baseUrl: saved.baseUrl ?? BASE_URLS[saved.provider],
+        model: saved.model,
+        temperature: saved.temperature,
+      }));
     }
-  }, [llmConfig]);
+  }, [llmConfigs]);
 
   const handleProviderChange = (p: LLMProvider) => {
-    setForm((f) => ({
-      ...f,
+    const saved = llmConfigs[p];
+    setForm({
       provider: p,
-      baseUrl: BASE_URLS[p],
-      model: DEFAULT_MODELS[p],
-    }));
+      apiKey: saved?.apiKey ?? '',
+      baseUrl: saved?.baseUrl ?? BASE_URLS[p],
+      model: saved?.model ?? DEFAULT_MODELS[p],
+      temperature: saved?.temperature ?? 0,
+    });
   };
 
   const handleSave = async () => {
+    if (!form.model.trim()) {
+      setMessage({ type: 'err', text: '模型名称不能为空' });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     const config: LLMConfig = {
@@ -101,6 +109,19 @@ export default function SettingsPage() {
     if (result.ok) {
       setTimeout(() => navigate('/'), 1200);
     }
+  };
+
+  const handleTestHealth = async () => {
+    setTestingHealth(true);
+    await fetchLlmHealth();
+    setTestingHealth(false);
+  };
+
+  const healthForProvider = (p: LLMProvider): boolean | undefined => {
+    if (!llmHealth) return undefined;
+    if (p === LLMProvider.OPENAI) return llmHealth.openai;
+    if (p === LLMProvider.ANTHROPIC) return llmHealth.anthropic;
+    return llmHealth.ollama;
   };
 
   return (
@@ -138,35 +159,67 @@ export default function SettingsPage() {
           </p>
           <div className="flex gap-2">
             {([LLMProvider.OLLAMA, LLMProvider.OPENAI, LLMProvider.ANTHROPIC] as LLMProvider[]).map(
-              (p) => (
-                <button
-                  key={p}
-                  onClick={() => handleProviderChange(p)}
-                  className="flex flex-col items-center gap-1 rounded-xl border px-4 py-3 text-xs transition-all"
-                  style={{
-                    borderColor:
-                      form.provider === p ? 'var(--accent)' : 'var(--border)',
-                    background: form.provider === p ? 'var(--accent-light)' : 'var(--bg-secondary)',
-                    color:
-                      form.provider === p ? 'var(--accent)' : 'var(--text-secondary)',
-                  }}
-                >
-                  {PROVIDER_LABELS[p]}
-                  {llmHealth && (
-                    <HealthDot
-                      ok={
-                        p === LLMProvider.OPENAI
-                          ? llmHealth.openai
-                          : p === LLMProvider.ANTHROPIC
-                            ? llmHealth.anthropic
-                            : llmHealth.ollama
-                      }
-                    />
-                  )}
-                </button>
-              ),
+              (p) => {
+                const isActiveTab = form.provider === p;
+                const isActiveProvider = activeProvider === p;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => handleProviderChange(p)}
+                    className="flex flex-col items-center gap-1 rounded-xl border px-4 py-3 text-xs transition-all"
+                    style={{
+                      borderColor: isActiveTab ? 'var(--accent)' : 'var(--border)',
+                      background: isActiveTab ? 'var(--accent-light)' : 'var(--bg-secondary)',
+                      color: isActiveTab ? 'var(--accent)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    <span className="flex items-center gap-1">
+                      {PROVIDER_LABELS[p]}
+                      {isActiveProvider && (
+                        <span
+                          className="rounded px-1 py-0.5 text-[10px] font-medium"
+                          style={{ background: 'var(--accent)', color: '#fff' }}
+                        >
+                          使用中
+                        </span>
+                      )}
+                    </span>
+                    {llmHealth && (
+                      <HealthDot ok={healthForProvider(p)} />
+                    )}
+                  </button>
+                );
+              },
             )}
           </div>
+        </section>
+
+        {/* Manual health test button */}
+        <section className="mb-6">
+          <button
+            onClick={handleTestHealth}
+            disabled={testingHealth}
+            className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs transition-all"
+            style={{
+              borderColor: 'var(--border)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+            {testingHealth ? '测试中...' : '测试连接'}
+          </button>
+          {llmHealth && (
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+              Ollama: {healthForProvider(LLMProvider.OLLAMA) === true ? '✓ 可用' : healthForProvider(LLMProvider.OLLAMA) === false ? '✗ 不可用' : '未测试'}
+              {' · '}
+              OpenAI: {healthForProvider(LLMProvider.OPENAI) === true ? '✓ 可用' : healthForProvider(LLMProvider.OPENAI) === false ? '✗ ' + (llmHealth ? 'API Key 未配置' : '不可用') : '未测试'}
+              {' · '}
+              Anthropic: {healthForProvider(LLMProvider.ANTHROPIC) === true ? '✓ 可用' : healthForProvider(LLMProvider.ANTHROPIC) === false ? '✗ ' + (llmHealth ? 'API Key 未配置' : '不可用') : '未测试'}
+            </p>
+          )}
         </section>
 
         {/* API Key */}
@@ -259,7 +312,7 @@ export default function SettingsPage() {
         {/* Save button */}
         <button
           onClick={handleSave}
-          disabled={saving || !form.model}
+          disabled={saving || testingHealth || !form.model.trim()}
           className="w-full rounded-xl py-2.5 text-sm font-medium text-white transition-opacity disabled:opacity-50"
           style={{ background: 'var(--accent)' }}
         >

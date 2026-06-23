@@ -2,7 +2,10 @@ import { create } from 'zustand';
 import { LLMProvider, type LLMConfig } from '@workspace/types';
 
 interface AppState {
-  llmConfig: LLMConfig | null;
+  /** All provider configs keyed by provider name */
+  llmConfigs: Record<LLMProvider, LLMConfig | null>;
+  /** Currently active provider (set after POST /llm/config or on load) */
+  activeProvider: LLMProvider;
   llmHealth: {
     openai: boolean;
     anthropic: boolean;
@@ -17,8 +20,19 @@ interface AppState {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
+const defaultConfigs: Record<LLMProvider, LLMConfig | null> = {
+  [LLMProvider.OPENAI]: null,
+  [LLMProvider.ANTHROPIC]: null,
+  [LLMProvider.OLLAMA]: {
+    provider: LLMProvider.OLLAMA,
+    model: 'qwen3:8b',
+    temperature: 0,
+  },
+};
+
 export const useAppStore = create<AppState>((set) => ({
-  llmConfig: null,
+  llmConfigs: { ...defaultConfigs },
+  activeProvider: LLMProvider.OLLAMA,
   llmHealth: null,
   isLoadingConfig: false,
 
@@ -27,8 +41,16 @@ export const useAppStore = create<AppState>((set) => ({
     try {
       const res = await fetch(`${API_BASE}/llm/config`);
       if (res.ok) {
-        const data = await res.json();
-        set({ llmConfig: data, isLoadingConfig: false });
+        const data: { configs: LLMConfig[]; activeProvider: string } = await res.json();
+        const llmConfigs = { ...defaultConfigs } as Record<LLMProvider, LLMConfig | null>;
+        for (const cfg of data.configs) {
+          llmConfigs[cfg.provider] = cfg;
+        }
+        set({
+          llmConfigs,
+          activeProvider: data.activeProvider as LLMProvider,
+          isLoadingConfig: false,
+        });
       } else {
         set({ isLoadingConfig: false });
       }
@@ -45,7 +67,10 @@ export const useAppStore = create<AppState>((set) => ({
     });
     const data = await res.json();
     if (data.ok) {
-      set({ llmConfig: config });
+      set((state) => ({
+        llmConfigs: { ...state.llmConfigs, [config.provider]: config },
+        activeProvider: config.provider,
+      }));
     }
     return data;
   },

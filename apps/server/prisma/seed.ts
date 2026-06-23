@@ -18,6 +18,38 @@ async function main() {
     await prisma.sales.create({ data: sale });
   }
 
+  // Seed LLM configs — one row per provider
+  await prisma.lLMConfig.upsert({
+    where: { id: 'ollama' },
+    update: {},
+    create: {
+      id: 'ollama',
+      model: 'qwen3:8b',
+      temperature: 0,
+      baseUrl: 'http://localhost:11434',
+    },
+  });
+
+  await prisma.lLMConfig.upsert({
+    where: { id: 'openai' },
+    update: {},
+    create: {
+      id: 'openai',
+      model: 'gpt-4o',
+      temperature: 0,
+    },
+  });
+
+  await prisma.lLMConfig.upsert({
+    where: { id: 'anthropic' },
+    update: {},
+    create: {
+      id: 'anthropic',
+      model: 'claude-3-5-sonnet-20240620',
+      temperature: 0,
+    },
+  });
+
   console.log('Seeding completed.');
 }
 
