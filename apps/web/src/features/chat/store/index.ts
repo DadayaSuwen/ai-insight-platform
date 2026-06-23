@@ -8,7 +8,17 @@ interface ChatState {
   /** Update the last assistant message in place (used during streaming) */
   updateLastAssistant: (updater: (msg: import('../types').AssistantMessage) => import('../types').AssistantMessage) => void;
   clearMessages: () => void;
+  /** Dark mode */
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
+
+const getInitialTheme = (): 'light' | 'dark' => {
+  if (typeof window === 'undefined') return 'light';
+  const stored = localStorage.getItem('theme') as 'light' | 'dark' | null;
+  if (stored) return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
@@ -31,4 +41,13 @@ export const useChatStore = create<ChatState>((set) => ({
       };
     }),
   clearMessages: () => set({ messages: [] }),
+
+  theme: getInitialTheme(),
+  toggleTheme: () =>
+    set((state) => {
+      const next = state.theme === 'light' ? 'dark' : 'light';
+      localStorage.setItem('theme', next);
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      return { theme: next };
+    }),
 }));
