@@ -1,8 +1,9 @@
-version: '3.8'
+name: ai-insight-platform
 
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: ai-postgres
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: password
@@ -11,13 +12,65 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d ai_insight"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   ollama:
     image: ollama/ollama:latest
+    container_name: ai-ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    # Healthcheck only verifies the HTTP API responds — does NOT require any model to be pulled.
+    # If you switch to API-based LLMs entirely, this service can be removed.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:11434/api/version >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  server:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.server
+    container_name: ai-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://app:password@postgres:5432/ai_insight
+      DATABASE_HOST: postgres
+      DB_USER: app
+      DB_PASSWORD: password
+      DB_NAME: ai_insight
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.web
+      args:
+        VITE_API_BASE_URL: /
+    container_name: ai-web
+    depends_on:
+      server:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

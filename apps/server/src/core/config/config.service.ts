@@ -10,7 +10,7 @@ export class ConfigService extends NestConfigService {
   }
 
   get OLLAMA_MODEL(): string {
-    return this.get<string>('OLLAMA_MODEL') || 'qwen2.5-coder:7b';
+    return this.get<string>('OLLAMA_MODEL') || 'qwen3:8b';
   }
 }
 

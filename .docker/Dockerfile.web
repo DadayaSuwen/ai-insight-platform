@@ -1,16 +1,46 @@
-FROM node:20-alpine
+# syntax=docker/dockerfile:1.6
+ARG VITE_API_BASE_URL=/
 
-WORKDIR /app
+# ---------- 1. base ----------
+FROM node:20-bullseye-slim AS base
+WORKDIR /repo
+ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH" CI=true
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dumb-init \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable pnpm \
+    && corepack prepare pnpm@9.0.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile
+# ---------- 2. deps ----------
+FROM base AS deps
+WORKDIR /repo
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc* ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/eslint-config/package.json ./packages/eslint-config/package.json
+RUN --mount=type=cache,id=pnpm-web,target=/pnpm/store \
+    pnpm install --frozen-lockfile --ignore-scripts
 
-COPY apps/web ./apps/web
+# ---------- 3. build ----------
+FROM deps AS build
+WORKDIR /repo
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 COPY packages/types ./packages/types
+COPY packages/eslint-config ./packages/eslint-config
+COPY apps/web ./apps/web
+COPY turbo.json ./
+RUN pnpm --filter @workspace/types build \
+    && pnpm --filter @ai-insight/web build
 
-WORKDIR /app/apps/web
-RUN pnpm build
+# ---------- 4. runtime (nginx) ----------
+FROM nginx:1.27-alpine AS runtime
+RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
+COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
+COPY .docker/nginx.conf /etc/nginx/conf.d/app.conf
 
-EXPOSE 5173
+EXPOSE 80
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
+    CMD wget -qO- http://127.0.0.1/ || exit 1
 
-CMD ["pnpm", "dev", "--host"]
+CMD ["nginx", "-g", "daemon off;"]

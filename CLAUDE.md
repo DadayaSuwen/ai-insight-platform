@@ -60,6 +60,14 @@ pnpm dev:all
 | `pnpm db:up` | 启动 PostgreSQL 数据库 |
 | `pnpm db:seed` | 初始化数据库 (push + seed) |
 | `pnpm db:studio` | 打开 Prisma Studio |
+| `pnpm docker:build` | 构建 server/web Docker 镜像 |
+| `pnpm docker:up` | 后台启动全部 Docker 服务（postgres + ollama + server + web） |
+| `pnpm docker:down` | 停止并移除容器（保留卷） |
+| `pnpm docker:logs` | 跟踪所有容器日志 |
+| `pnpm docker:reset` | 销毁卷并重新启动 |
+| `pnpm docker:rebuild` | 不缓存重建镜像 |
+| `pnpm docker:seed` | 在运行中的 server 容器内手动执行 seed |
+| `pnpm docker:infra` | 仅启动 postgres + ollama |
 
 ## Environment Variables
 
@@ -105,7 +113,7 @@ VITE_API_BASE_URL=http://localhost:3000
 3. **Phase 3: Agent 链路开发** ✅ 完成 (51 测试通过)
 4. **Phase 4: SSE 流式输出** ✅ 完成 (58 测试通过)
 5. **Phase 5: 前端 UI 对接** ✅ 完成
-6. **Phase 6: Docker 化** ⏳ 待开始
+6. **Phase 6: Docker 化** ✅ 完成
 
 ## Documentation
 
@@ -116,3 +124,23 @@ VITE_API_BASE_URL=http://localhost:3000
 - [开发指南](./docs/guides/SETUP.md)
 - [调试指南](./docs/guides/DEBUG.md)
 - [配置说明](./docs/guides/CONFIG.md)
+- [Docker 部署](./docs/guides/DOCKER.md)
+
+## Docker 快速启动
+
+```bash
+# 准备 .env
+cp .env.example .env
+
+# 构建并启动全部服务
+pnpm docker:build
+pnpm docker:up
+
+# 拉取 Ollama 模型（首次）
+docker compose exec ollama ollama pull qwen3:8b
+
+# 浏览器访问
+open http://localhost:8080
+```
+
+详见 [Docker 部署指南](./docs/guides/DOCKER.md)。

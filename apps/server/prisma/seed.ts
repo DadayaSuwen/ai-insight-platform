@@ -24,7 +24,8 @@ async function main() {
 main()
   .catch((e) => {
     console.error(e);
-    process.exit(1);
+    const proc = (globalThis as any).process;
+    if (proc) proc.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
