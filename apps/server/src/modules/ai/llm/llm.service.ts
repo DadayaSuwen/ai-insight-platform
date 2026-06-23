@@ -8,9 +8,9 @@ import { ConfigService } from '@nestjs/config';
 import { ChatOllama } from '@langchain/community/chat_models/ollama';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
+import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { LLMProvider, type LLMConfig } from '@workspace/types';
-import type { PrismaService } from '../../../core/prisma/prisma.service';
 import { createChatModel } from './llm-factory';
 
 /**
@@ -61,10 +61,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
    */
   private chatReady: Promise<void>;
 
-  constructor(
-    private readonly config: ConfigService,
-    private readonly prisma: PrismaService,
-  ) {
+  constructor(private readonly config: ConfigService) {
     this.chatReady = this.initFromDatabase();
   }
 
@@ -154,7 +151,8 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
 
   private async initFromDatabase(): Promise<void> {
     try {
-      const row = await this.prisma.lLMConfig.findUnique({
+      const prisma = new PrismaClient();
+      const row = await prisma.lLMConfig.findUnique({
         where: { id: 'default' },
       });
 
