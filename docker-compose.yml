@@ -25,10 +25,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Healthcheck only verifies the HTTP API responds — does NOT require any model to be pulled.
-    # If you switch to API-based LLMs entirely, this service can be removed.
+    # Healthcheck uses ollama CLI itself (no wget/curl in the image) to verify
+    # the HTTP API responds. Absolute path because Docker healthcheck exec
+    # env may not include /usr/bin in PATH.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:11434/api/version >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "/usr/bin/ollama list || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

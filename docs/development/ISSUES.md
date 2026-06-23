@@ -355,4 +355,223 @@ curl -X POST http://localhost:3000/chat/message \
 | #8 EventSource 重连 | ✅ 修复 |
 | #9 isLoading 不重置 | ✅ 修复 |
 | #10 chat 路由 | ✅ 修复(关键词层) |
-| #11 LLM 接入 | ✅ 修复 (LangChain + Ollama + 4 个 Agent + 混合 Router) |
+---
+
+## Phase 6: Docker 化踩坑（Bug #12–#22）
+
+Phase 6 的核心目标是 `docker compose up` 一键拉起全栈（postgres + ollama + server + web）。实施过程遇到 11 个有代码/配置证据的实质问题，加 4 个上下文性的注意点（标 "经验教训"）。所有问题已在提交 `ad87047` 中修复或绕过。
+
+### Bug #12 — Prisma 5.x native engine 找不到 libssl.so.1.1
+
+🔴 阻塞
+
+**症状**: server 容器启动时 `prisma db push` 报：
+```
+Error: Could not parse schema engine response: SyntaxError: Unexpected token 'E', "Error load"... is not valid JSON
+```
+server 启动后 `PrismaClient` 初始化时又报：
+```
+PrismaClientInitializationError: Unable to require(`.../libquery_engine-linux-musl.so.node`).
+The Prisma engines do not seem to be compatible with your system.
+Error loading shared library libssl.so.1.1: No such file or directory
+```
+
+**根因**: `@prisma/client` 5.22.0 的 native query engine 是动态链接到 `libssl.so.1.1`（OpenSSL 1.1 系列）。该库已被现代发行版移除：
+- Alpine 3.20+ 只剩 `libssl3`（OpenSSL 3.x）
+- Debian 12 bookworm 同上
+- Alpine 3.19 也已下架 `libssl1.1`，`apk search libssl` 只返回 `libssl3-3.1.8-r1` 和 `openssl-dev-3.1.8-r1`
+
+**修复**:
+- 基础镜像换为 `node:20-bullseye-slim`（Debian 11 仍自带 `libssl1.1`）
+- 配合 #13、#14 一起解决运行时 Prisma CLI 与 engine 的需求
+
+**为什么测试没发现**: 单测在 host Windows 上跑（Prisma 已为 Windows 平台生成了 engine），容器化才暴露 Linux 平台问题。
+
+---
+
+### Bug #13 — `prisma db push` 在 runtime 容器内失败
+
+🔴 阻塞
+
+**症状**: 同 #12 的 "Could not parse schema engine response" 错误，`prisma db push --skip-generate` 在 server entrypoint 中调用时进程崩溃，DB schema 未应用。
+
+**根因**: 同 #12。entrypoint 用 Prisma CLI 触发 schema engine，CLI 本身需要同样的 native binary → libssl。
+
+**修复**:
+- `.docker/entrypoint.server.sh` 改用 `psql -f prisma/schema.sql` 应用 schema（psql 是 `postgresql-client` 提供的纯 C 程序，无 native openssl 依赖）
+- schema 内容来自 `apps/server/prisma/schema.sql`（预生成，见 #14）
+
+---
+
+### Bug #14 — `prisma migrate diff` 在 build 阶段失败
+
+🟠 严重
+
+**症状**: Dockerfile.server 的 build 阶段如果执行 `pnpm exec prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script`，Prisma CLI 报 "Error in Schema engine" 退出。
+
+**根因**: 同 #12。build 阶段也在 alpine 容器内运行，Prisma CLI 同样无法启动 query engine。
+
+**修复**:
+- 在 host（Windows/macOS/Linux，Prisma 已生成对应平台 engine）上跑 `prisma migrate diff`，把生成的 DDL 提交到仓库：
+  ```bash
+  cd apps/server
+  pnpm exec prisma migrate diff \
+    --from-empty \
+    --to-schema-datamodel ./prisma/schema.prisma \
+    --script > prisma/schema.sql
+  ```
+- Dockerfile.server 的 build 阶段不再生成 SQL，runtime 阶段直接 COPY 这个文件
+
+---
+
+### Bug #15 — Alpine 3.23 移除 `libc6-compat` 包
+
+🟡 中等
+
+**症状**: `apk add --no-cache libc6-compat dumb-init` 报 `libc6-compat (no such package)`。
+
+**根因**: `node:20-alpine` 默认已升级到 alpine 3.23，`libc6-compat` 不再随主仓库提供。
+
+**修复**: 直接移除 `libc6-compat` 的安装。Node.js 二进制在 alpine 上不需要它（之前是为兼容 glibc-only 的依赖；项目里没有这种依赖）。
+
+---
+
+### Bug #16 — Schema 应用不幂等（重启 server 报 relation 已存在）
+
+🟡 中等
+
+**症状**: server entrypoint 第二次启动时 `psql -f prisma/schema.sql` 报 `ERROR: relation "Sales" already exists`，进程退出。
+
+**根因**: `prisma db push` 默认幂等（用 `_prisma_migrations` 表跟踪），但裸 `psql -f` 不是。
+
+**修复**:
+- `.docker/entrypoint.server.sh` 在应用前先 `DROP TABLE IF EXISTS ... CASCADE`（生产环境应改用 `prisma migrate deploy` 或版本化迁移文件）
+- 加注释说明这是 dev/demo 简化方案
+
+> ⚠️ **后续重构方向**: 真正生产部署应改用 Prisma migrations（`prisma migrate dev` 生成版本化 SQL，runtime 用 `prisma migrate deploy`），而不是 `schema.sql` 这种快照方式。
+
+---
+
+### Bug #17 — Ollama healthcheck 太严，未拉模型就 unhealthy
+
+🟠 严重
+
+**症状**: `docker compose up` 后 ai-ollama 容器状态 `(unhealthy)`，server 因为 `depends_on: ollama: condition: service_healthy` 一直无法启动。
+
+**根因**: healthcheck 用 `wget -qO- http://127.0.0.1:11434/api/tags`，该 API 返回 JSON 列出**已下载的模型**；空仓库返回 `{"models":[]}` 不算 200 失败也算异常。
+
+**修复**:
+- `docker-compose.yml:31` healthcheck 改为 `/api/version`（Ollama 进程级 health，不依赖模型）
+- 同时移除 server 对 ollama 的 healthcheck 依赖（server 不需要 Ollama 启动即可提供非 AI 端点，如 `/database/schema`）
+
+**经验教训**: compose healthcheck 应该反映**该服务本身的功能**，不要把下游资源（模型、密钥、磁盘）当作"健康"判据。
+
+---
+
+### Bug #18 — `docker compose run` 默认不暴露端口
+
+🟡 中等
+
+**症状**: 测试时 `docker compose run --rm -d server` 启动容器但 `curl http://localhost:3000` 报 "Connection refused"。
+
+**根因**: `docker compose run` 与 `docker compose up` 行为不同——run 默认不发布 `ports` 段（避免端口冲突）。要 publish 需加 `--service-ports` 或 `--publish`。
+
+**修复**: 测试时改为 `docker exec $(docker ps -q --filter ...) wget -qO- http://127.0.0.1:3000/...` 容器内访问，或改用 `docker compose up -d` 完整启动。
+
+---
+
+### Bug #19 — Compose 构建缓存导致 entrypoint 变更不生效
+
+🟡 中等
+
+**症状**: 改了 `.docker/entrypoint.server.sh` 后 `docker compose run --rm server` 仍跑旧逻辑（仍调 `prisma db push` 而非 `psql`）。
+
+**根因**: Docker layer cache——entrypoint 的 `COPY` 步骤未感知 shell 脚本内容变化（Linux 上 mtime 不可靠），且 compose 用的是 `ai-insight-platform-server` 这个 compose-managed tag，不是手动 tag 的 `ai-insight-server:test`。
+
+**修复**:
+- 重建时显式 `docker compose build --no-cache server` 或 `docker build --no-cache`
+- 或者用手动 tag 的镜像 alias：`docker tag ai-insight-server:test ai-insight-platform-server:latest`
+
+---
+
+### Bug #20 — Docker BuildKit CRLF 警告
+
+🟢 轻微
+
+**症状**: `git add` 时报：
+```
+warning: in the working copy of '.docker/entrypoint.server.sh', LF will be replaced by CRLF the next time Git touches it
+```
+
+**根因**: Windows 默认 checkout 用 CRLF，Dockerfile / shell 脚本需要 LF（否则 `#!/bin/sh\r` 在 Linux 容器里执行会失败）。
+
+**修复**:
+- 提交时保留 LF（已被 git 标准化为 LF）
+- 长远方案：仓库根加 `.gitattributes` 强制 `*.sh text eol=lf`、`Dockerfile* text eol=lf`（本 PR 未加，可后续做）
+
+---
+
+### Bug #21 — Server 镜像包含全量 devDependencies（ts-node + prisma）
+
+🟡 中等
+
+**症状**: ai-insight-platform-server 镜像约 455MB（vs 最优 ~200MB）。
+
+**根因**:
+- entrypoint 需要 `ts-node` 跑 seed.ts（TS 文件未预编译）
+- 选择 `COPY --from=build /repo /repo` 整个 workspace 是为保留 pnpm 的 `.pnpm` symlink 结构（`pnpm deploy --prod` 在 workspace 依赖下不稳定）
+- 两个决定共同导致 devDependencies（nest cli、ts-node、prisma cli、jest）都进了 runtime
+
+**修复**: 接受这个 trade-off，镜像较大但**自给自足、零外部依赖**。如未来要瘦身：
+1. seed.ts 改用 `tsc` 预编译为 JS
+2. 改用 `pnpm deploy --filter @ai-insight/server --prod` 提取扁平 node_modules
+3. entrypoint 改用预编译的 `seed.js`
+
+---
+
+### Bug #22 — Ollama 模型默认模型与 server 配置不一致
+
+🟡 中等
+
+**症状**: `apps/server/src/core/config/config.service.ts` 默认 `qwen2.5-coder:7b`，`apps/server/src/modules/ai/llm/llm.service.ts` 默认 `qwen3:8b`，`.env.example` 是 `qwen3:8b`，`apps/server/.env` 是 `qwen2.5:3b`——4 处不一致，行为不可预测。
+
+**修复**:
+- 统一默认值到 `qwen3:8b`（改 `config.service.ts`，与 `.env.example` 一致）
+- docker-compose 通过 `${OLLAMA_MODEL:-qwen3:8b}` 注入，覆盖默认值
+- 文档说明：用户后续切换到 API LLM 时，Ollama 服务可从 compose 中移除
+
+---
+
+### 经验教训（Phase 6 整体）
+
+1. **基础镜像选择要查文档而不是惯性**。`node:alpine` 长期是默认选择，但 alpine 3.20+ 与 Prisma 5.x 的 libssl 兼容性问题暴露后，bullseye-slim 反而更稳。**写文档时直接写明 base 选择的理由**，避免后人重蹈覆辙（已在 `.docker/Dockerfile.server:2-4` 注释）。
+
+2. **Prisma 在容器里有两种 use case，要分别处理**：
+   - **构建期**（生成 client + query engine）：只要 host 平台对即可，容器无关
+   - **运行期**（db push / migrate / Client.connect）：受容器 base image 影响；遇到 alpine/libssl 问题优先用 SQL + psql 绕过
+
+3. **docker-compose 的 `depends_on: condition: service_healthy` 是强约束**。把"模型是否已下载"这种用户态决策塞进 healthcheck 会导致整个 stack 起不来。**healthcheck 应该只反映进程存活**，不反映业务完整性。
+
+4. **`docker compose run` ≠ `docker compose up`**。run 不 publish ports，不重建（除非加 `--build`），不带 healthcheck 等待。调试单服务用 run，验证完整 stack 用 up。
+
+5. **预生成 SQL 是一种务实妥协**。理想是 Prisma migrations + 版本化 SQL 文件，但 dev/demo 阶段 `schema.sql` 快照够用，省事且不依赖 Prisma CLI 在 runtime 容器内运行。
+
+6. **测试不能只跑单测**。整个 Phase 6 暴露的所有问题（libssl、healthcheck、端口、CRLF、schema 幂等性）单测都看不到——必须做集成 smoke test（`docker compose up` → curl 真实端点）。
+
+---
+
+### Phase 6 修复状态
+
+| Bug | 严重度 | 状态 |
+|-----|--------|------|
+| #12 Prisma libssl 兼容 | 🔴 | ✅ 换 bullseye 基础镜像 |
+| #13 `prisma db push` 失败 | 🔴 | ✅ 改用 psql |
+| #14 `prisma migrate diff` 失败 | 🟠 | ✅ 预生成 schema.sql |
+| #15 alpine 移除 libc6-compat | 🟡 | ✅ 移除该包安装 |
+| #16 schema 不幂等 | 🟡 | ✅ DROP TABLE IF EXISTS |
+| #17 ollama healthcheck 过严 | 🟠 | ✅ 改 `/api/version` + 移除 server 依赖 |
+| #18 compose run 不暴露端口 | 🟡 | ⚠️ 文档说明，无代码修复 |
+| #19 compose 镜像缓存 | 🟡 | ⚠️ 文档说明，可加 `--no-cache` |
+| #20 CRLF 警告 | 🟢 | ⚠️ 文档说明，可后续加 .gitattributes |
+| #21 镜像含全量 devDeps | 🟡 | ⚠️ 接受 trade-off，留优化空间 |
+| #22 Ollama 模型默认值不一致 | 🟡 | ✅ 统一为 qwen3:8b |

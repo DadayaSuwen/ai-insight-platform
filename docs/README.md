@@ -39,13 +39,14 @@ docs/
 | `guides/SETUP.md` | 开发环境设置、快速启动 |
 | `guides/DEBUG.md` | 调试指南、常见问题解决 |
 | `guides/CONFIG.md` | TypeScript 配置说明 |
+| `guides/DOCKER.md` | Docker 部署指南、架构、故障排查 |
 
 ### 开发过程文档
 
 | 文档 | 描述 |
 |------|------|
 | `development/AGENT.md` | Agent 链路开发文档、测试用例 |
-| `development/ISSUES.md` | Phase 3/4/5 实际运行发现的问题与根因 |
+| `development/ISSUES.md` | Phase 3/4/5/6 实际运行发现的问题与根因 (含 LLM 接入、Docker 化踩坑) |
 
 ## 开发阶段
 
@@ -57,7 +58,7 @@ docs/
 | Phase 4 | ✅ | SSE 流式输出 - 58 个测试用例通过 (含 ChatService 流) |
 | Phase 5 | ✅ | 前端 UI 对接 - 4 个组件完整实现 (MessageBubble/ChatInput/DynamicChart/ChatWindow) |
 | **LLM 接入** (#11) | ✅ | **LangChain + Ollama** - LlmService 封装 + 4 个 Agent 接入 + 混合 Router - 80 测试通过 |
-| Phase 6 | ⏳ | Docker 化 |
+| Phase 6 | ✅ | Docker 化 - 4 服务编排 (postgres+ollama+server+web) + 多阶段镜像 + nginx 反代 + entrypoint 自动 init |
 
 ## 快速链接
 
