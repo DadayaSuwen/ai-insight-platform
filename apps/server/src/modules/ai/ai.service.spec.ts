@@ -38,7 +38,7 @@ describe('AiService', () => {
         },
         {
           provide: SqlAgent,
-          useValue: { generate: jest.fn() },
+          useValue: { generate: jest.fn(), summarize: jest.fn() },
         },
         {
           provide: ChartAgent,
@@ -95,6 +95,7 @@ describe('AiService', () => {
     it('should run sql pipeline and return rows', async () => {
       routerAgent.recognize.mockResolvedValue('sql');
       sqlAgent.generate.mockResolvedValue('SELECT 1');
+      sqlAgent.summarize.mockResolvedValue('查询返回 2 条数据，最高金额 ¥1000');
       databaseService.executeQuery.mockResolvedValue(mockRows);
 
       const result = await service.process('查询所有数据');
@@ -104,6 +105,7 @@ describe('AiService', () => {
       expect(result.executed).toBe(true);
       expect(result.rows).toEqual(mockRows);
       expect(result.message).toContain('2');
+      expect(sqlAgent.summarize).toHaveBeenCalledWith(mockRows, '查询所有数据');
       expect(chartAgent.generate).not.toHaveBeenCalled();
       expect(analysisAgent.generate).not.toHaveBeenCalled();
     });

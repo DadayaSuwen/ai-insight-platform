@@ -3,6 +3,8 @@ import {
   SQL_SYSTEM_PROMPT,
   SQL_TABLE_INFO,
   buildSQLUserMessage,
+  SQL_SUMMARY_SYSTEM_PROMPT,
+  buildSQLSummaryUserMessage,
 } from "../prompts/sql.prompt";
 import { LlmService } from "../llm/llm.service";
 
@@ -70,6 +72,46 @@ export class SqlAgent {
       this.logger.warn(`LLM SQL gen failed (${errMsg}); falling back`);
       return this.simpleGenerate(message);
     }
+  }
+
+  /**
+   * Summarize query rows as natural language.
+   * Called by AiService.handleSql so the user sees real insights instead of
+   * the canned "查询成功,共返回 N 条" message.
+   */
+  async summarize(
+    rows: unknown[],
+    originalMessage: string,
+  ): Promise<string> {
+    if (rows.length === 0) {
+      return '查询完成，未返回任何数据。';
+    }
+
+    try {
+      const summary = await this.llm.invoke({
+        system: SQL_SUMMARY_SYSTEM_PROMPT,
+        human: buildSQLSummaryUserMessage(originalMessage, rows),
+        timeoutMs: 30_000,
+        temperature: 0.2,
+      });
+      this.logger.log(`LLM generated summary: ${summary.slice(0, 80)}...`);
+      return summary;
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`LLM summary failed (${errMsg}); using fallback`);
+      return this.fallbackSummary(rows);
+    }
+  }
+
+  /**
+   * Pattern-based summary when LLM is unavailable.
+   */
+  private fallbackSummary(rows: unknown[]): string {
+    if (rows.length === 0) return '查询完成，未返回任何数据。';
+    const count = rows.length;
+    const first = rows[0] as Record<string, unknown>;
+    const cols = Object.keys(first);
+    return `查询返回 ${count} 条数据，涵盖 ${cols.join('、')} 等字段。`;
   }
 
   /**

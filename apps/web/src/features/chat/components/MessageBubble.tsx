@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import DynamicChart from './DynamicChart';
+import DataTable from './DataTable';
 import type { ChatMessage } from '../types';
 import { isAssistant } from '../types';
+import type { SSESQLData } from '@workspace/types';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -147,7 +149,13 @@ function MessageBubble({ message }: MessageBubbleProps) {
           )}
 
           {/* SQL block (collapsible) */}
-          {message.sql && <SqlBlock sql={message.sql.sql} executed={message.sql.executed} />}
+          {message.sql && (
+            <SqlBlock
+              sql={message.sql.sql}
+              executed={message.sql.executed}
+              rows={message.sql.rows}
+            />
+          )}
 
           {/* Chart */}
           {message.chart && <DynamicChart chart={message.chart} />}
@@ -190,7 +198,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
   );
 }
 
-function SqlBlock({ sql, executed }: { sql: string; executed: boolean }) {
+function SqlBlock({ sql, executed, rows }: { sql: string; executed: boolean; rows?: SSESQLData['rows'] }) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -227,16 +235,23 @@ function SqlBlock({ sql, executed }: { sql: string; executed: boolean }) {
         </span>
       </button>
       {open && (
-        <pre
-          className="overflow-x-auto border-t px-3 py-2 font-mono leading-relaxed"
-          style={{
-            borderColor: 'var(--border)',
-            background: 'var(--bg-primary)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          <code>{sql}</code>
-        </pre>
+        <>
+          <pre
+            className="overflow-x-auto border-t px-3 py-2 font-mono leading-relaxed"
+            style={{
+              borderColor: 'var(--border)',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <code>{sql}</code>
+          </pre>
+          {rows && rows.length > 0 && (
+            <div className="border-t" style={{ borderColor: 'var(--border)' }}>
+              <DataTable rows={rows} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );

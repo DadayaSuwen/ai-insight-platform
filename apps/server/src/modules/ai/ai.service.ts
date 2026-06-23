@@ -137,9 +137,11 @@ export class AiService {
   private async handleSql(message: string): Promise<AiProcessResult> {
     const sql = await this.sqlAgent.generate(message);
     const rows = await this.databaseService.executeQuery(sql);
+    // Generate natural-language summary via LLM so the user gets real insights
+    const summary = await this.sqlAgent.summarize(rows, message);
     return {
       intent: 'sql',
-      message: `查询成功,共返回 ${rows.length} 条结果。`,
+      message: summary,
       sql,
       executed: true,
       rows,

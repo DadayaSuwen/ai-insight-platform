@@ -133,6 +133,7 @@ export type SSETokenData = z.infer<typeof SSETokenDataSchema>;
 export const SSESQLDataSchema = z.object({
   sql: z.string(),
   executed: z.boolean().default(false),
+  rows: z.array(z.record(z.string(), z.any())).optional(),
 });
 
 export type SSESQLData = z.infer<typeof SSESQLDataSchema>;

@@ -83,6 +83,7 @@ export class ChatService {
       const sqlData: SSESQLData = {
         sql: result.sql,
         executed: result.executed ?? false,
+        rows: result.rows as SSESQLData['rows'],
       };
       events.push({ type: SSEEventType.SQL, data: sqlData });
     }
