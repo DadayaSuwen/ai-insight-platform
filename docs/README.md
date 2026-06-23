@@ -46,7 +46,7 @@ docs/
 | 文档 | 描述 |
 |------|------|
 | `development/AGENT.md` | Agent 链路开发文档、测试用例 |
-| `development/ISSUES.md` | Phase 3/4/5/6 实际运行发现的问题与根因 (含 LLM 接入、Docker 化踩坑) |
+| `development/ISSUES.md` | Phase 3/4/5/6/7 实际运行发现的问题与根因 (含 LLM 接入、Docker 化踩坑、SQL 摘要增强) |
 
 ## 开发阶段
 
@@ -59,6 +59,7 @@ docs/
 | Phase 5 | ✅ | 前端 UI 对接 - 4 个组件完整实现 (MessageBubble/ChatInput/DynamicChart/ChatWindow) |
 | **LLM 接入** (#11) | ✅ | **LangChain + Ollama** - LlmService 封装 + 4 个 Agent 接入 + 混合 Router - 80 测试通过 |
 | Phase 6 | ✅ | Docker 化 - 4 服务编排 (postgres+ollama+server+web) + 多阶段镜像 + nginx 反代 + entrypoint 自动 init |
+| Phase 7 | ✅ | 企业级 UI + SQL 结果增强 - 流式光标/快捷指令/深浅主题/LLM 自然语言摘要/DataTable 表格渲染 |
 
 ## 快速链接
 

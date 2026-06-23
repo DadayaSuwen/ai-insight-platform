@@ -68,6 +68,7 @@ pnpm dev:all
 | `pnpm docker:rebuild` | 不缓存重建镜像 |
 | `pnpm docker:seed` | 在运行中的 server 容器内手动执行 seed |
 | `pnpm docker:infra` | 仅启动 postgres + ollama |
+| `pnpm docker:rebuild` | 不缓存重建镜像 |
 
 ## Environment Variables
 
@@ -99,8 +100,8 @@ VITE_API_BASE_URL=http://localhost:3000
 
 | Event | Description |
 |-------|-------------|
-| token | 普通文字流 |
-| sql | 生成的 SQL |
+| token | 普通文字流（自然语言摘要） |
+| sql | 生成的 SQL + 原始数据行（DataTable 渲染） |
 | chart | 图表配置 |
 | analysis | 分析报告 |
 | error | 错误信息 |
@@ -113,7 +114,8 @@ VITE_API_BASE_URL=http://localhost:3000
 3. **Phase 3: Agent 链路开发** ✅ 完成 (51 测试通过)
 4. **Phase 4: SSE 流式输出** ✅ 完成 (58 测试通过)
 5. **Phase 5: 前端 UI 对接** ✅ 完成
-6. **Phase 6: Docker 化** ✅ 完成
+6. **Phase 6: Docker 化** ✅ 完成 (11 个 bug 修复，4 服务编排)
+7. **Phase 7: 企业级 UI + SQL 结果增强** ✅ 完成 (流式光标/快捷指令/深浅主题/LLM 摘要/DataTable)
 
 ## Documentation
 

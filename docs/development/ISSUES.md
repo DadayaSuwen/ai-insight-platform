@@ -575,3 +575,101 @@ warning: in the working copy of '.docker/entrypoint.server.sh', LF will be repla
 | #20 CRLF 警告 | 🟢 | ⚠️ 文档说明，可后续加 .gitattributes |
 | #21 镜像含全量 devDeps | 🟡 | ⚠️ 接受 trade-off，留优化空间 |
 | #22 Ollama 模型默认值不一致 | 🟡 | ✅ 统一为 qwen3:8b |
+
+---
+
+## Phase 7: 企业级 UI + SQL 结果增强（Bug #23–#26）
+
+Phase 7 目标：改进 SQL 查询结果的用户体验（空洞的"查询成功，共返回 N 条" → LLM 自然语言摘要 + DataTable 表格展示），以及企业级前端 UI（深浅主题、快捷指令、流式光标）。
+
+共 4 个代码改动（提交 `6e1c797`）。
+
+### Bug #23 — `intent='sql'` 返回空洞消息
+
+🟡 中等（功能增强）
+
+**症状**: 用户发送"按类别显示销售额"后，AI 只返回"查询成功,共返回 5 条结果。"，没有实际数据摘要。
+
+**根因**: `ai.service.ts:handleSql()` 在 SQL 执行拿到 rows 后，直接拼接固定文案作为 `message`，rows 数据从未被利用。
+
+**修复**:
+- `SqlAgent.summarize(rows, originalMessage)` — 新方法，调用 Ollama 生成 2-4 句中文自然语言摘要
+- `handleSql` → 改为调用 `sqlAgent.summarize()`，将 LLM 生成的摘要作为 `result.message`
+- fallback：Ollama 不可用时走模板摘要（提及字段名、数据条数）
+
+**示例**:
+```
+之前: 查询成功,共返回 5 条结果。
+之后: 查询到 5 条销售记录，总金额 ¥125,800。
+     其中电子产品类贡献最高（¥48,000），
+     服装类次之（¥35,200），平均单笔 ¥25,160。
+```
+
+---
+
+### Bug #24 — SSE SQL 事件不含 rows，前端无法渲染 DataTable
+
+🟡 中等（功能增强）
+
+**症状**: `SSESQLData` 只含 `{ sql, executed }`，前端 MessageBubble 无法渲染结构化数据表格。
+
+**根因**: `chat.service.ts` 的 `resultToEvents()` 在构建 SQL SSE 事件时没有传入 `result.rows`。
+
+**修复**:
+- `packages/types/src/chat.ts` — `SSESQLDataSchema` 加 `rows?: z.array(z.record(z.string(), z.any()))`
+- `chat.service.ts` — SQL SSE 事件携带 `result.rows`
+- 前端 `MessageBubble.tsx` SqlBlock → 展开时渲染 `DataTable`
+- 新建 `DataTable.tsx`：自动推断列头、数字右对齐 + ¥格式化、超 10 行折叠
+
+---
+
+### Bug #25 — useSSEChat 用 EventSource（GET only）有 URL 长度限制
+
+🟡 中等（架构改进）
+
+**症状**: EventSource 只支持 GET 请求，无法传递 body。
+
+**根因**: 原 `useSSEChat` 用原生 `EventSource`，URL 携带 query 参数有长度限制，且不支持 POST。
+
+**修复**:
+- 改为 `fetch()` + `ReadableStream` 消费 SSE，GET URL 传参保持兼容
+- 流式解析 SSE 双换行分隔消息块，处理多行 `data:` 拼接
+
+---
+
+### Bug #26 — 前端无企业级 UI（无主题、无快捷指令、无流式光标）
+
+🟡 中等（用户体验）
+
+**症状**: 前端 UI 简陋：无深浅主题、无快捷指令预设、流式状态用脉冲圆点不直观。
+
+**修复**:
+- 深浅主题：CSS 变量 + `localStorage` 持久化 + OS 偏好监听，Header 太阳/月亮切换图标
+- 快捷指令：`ChatWindow` 空状态显示 6 个预设 chip（按类目统计/月度趋势/Top5 客户等）
+- 流式光标：`message.content` 渲染完毕后追加 `▋` 闪烁光标（streaming-cursor CSS animation）
+- 消息气泡：Bot/User 双侧头像 + HH:mm 时间戳
+- 输入区：`ChatInput` 加字符计数器、spinner 发送按钮、键盘提示
+- DataTable：行悬停高亮、数字右对齐、¥ 格式化
+
+---
+
+### 经验教训（Phase 7 整体）
+
+1. **Phase A+B 要联动才能体验闭环**。Phase A（LLM 摘要）单独看只是让文字更长了，Phase B（DataTable）单独看用户还得自己读数字。两者联动——摘要文字 + 下方表格——才是完整体验。
+
+2. **测试 mock 要及时更新**。新增 `SqlAgent.summarize()` 方法后，`ai.service.spec.ts` 的 mock 没有该方法，导致 1 个测试失败。增删方法时要同步检查所有使用点的 mock。
+
+3. **类型变更要双向传播**。`SSESQLDataSchema` 加 `rows` 字段后，前端 `AssistantMessage.sql` 的类型自动跟着变（复用同一类型），改动成本极低——证明了共享类型的价值。
+
+4. **fetch + ReadableStream 是 SSE 的正确客户端姿势**。原生 `EventSource` 有 3 个根本限制：GET only、无 body、auto-reconnect 导致 token 重复。切到 fetch+stream 彻底解决。
+
+---
+
+### Phase 7 修复状态
+
+| Bug | 严重度 | 状态 |
+|-----|--------|------|
+| #23 sql intent 空洞消息 | 🟡 | ✅ SqlAgent.summarize + handleSql 更新 |
+| #24 SSE SQL 无 rows | 🟡 | ✅ SSESQLData 加 rows 字段 + DataTable.tsx |
+| #25 EventSource GET 限制 | 🟡 | ✅ 改用 fetch + ReadableStream |
+| #26 前端 UI 简陋 | 🟡 | ✅ 深浅主题/快捷指令/流式光标/DataTable |
