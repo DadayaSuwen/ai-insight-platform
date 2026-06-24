@@ -1,10 +1,8 @@
-import { Module } from '@nestjs/common';
-import { DatabaseController } from './database.controller';
-import { DatabaseService } from './database.service';
+import { Module } from "@nestjs/common";
+import { DatabaseService } from "./database.service";
 
 @Module({
-  controllers: [DatabaseController],
   providers: [DatabaseService],
-  exports: [DatabaseService],
+  exports: [DatabaseService], // ★ 必须有这行
 })
 export class DatabaseModule {}

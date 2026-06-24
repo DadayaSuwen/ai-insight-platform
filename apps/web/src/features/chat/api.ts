@@ -1,0 +1,34 @@
+import { axiosInstance } from "../../core/api";
+import type {
+  ChatSession,
+  ChatMessageRecord,
+  CreateSessionResponse,
+  DeleteSessionResponse,
+  RenameSessionResponse,
+} from "../../types/chat";
+
+/** Thin Axios-based client for chat session CRUD. SSE remains on native fetch. */
+export const chatSessionApi = {
+  list: () =>
+    axiosInstance.get<ChatSession[]>("/chat/sessions").then((r) => r.data),
+
+  create: (title: string = "新对话") =>
+    axiosInstance
+      .post<CreateSessionResponse>("/chat/sessions", { title })
+      .then((r) => r.data.data),
+
+  messages: (id: string) =>
+    axiosInstance
+      .get<ChatMessageRecord[]>(`/chat/sessions/${id}/messages`)
+      .then((r) => r.data),
+
+  remove: (id: string) =>
+    axiosInstance
+      .delete<DeleteSessionResponse>(`/chat/sessions/${id}`)
+      .then((r) => r.data),
+
+  rename: (id: string, title: string) =>
+    axiosInstance
+      .put<RenameSessionResponse>(`/chat/sessions/${id}`, { title })
+      .then((r) => r.data),
+};

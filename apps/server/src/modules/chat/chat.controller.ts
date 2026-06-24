@@ -12,20 +12,20 @@ export class ChatController {
    * 直接透传 PlannerAgent 产生的所有事件 (tool_call, tool_result, text, error, done)。
    */
   @Sse("stream")
-  stream(@Query("message") message: string): Observable<MessageEvent> {
-    if (!message || typeof message !== "string") {
+  stream(
+    @Query("message") message: string,
+    @Query("sessionId") sessionId: string, // ★ 新增
+  ): Observable<MessageEvent> {
+    if (!message || !sessionId) {
       return new Observable<MessageEvent>((subscriber) => {
-        const errorData = {
-          code: "INVALID_MESSAGE",
-          message: "message query param is required",
-        };
-        // 直接使用字符串字面量，不再依赖旧枚举
-        subscriber.next({ type: "error", data: errorData });
+        subscriber.next({
+          type: "error",
+          data: { code: "INVALID_PARAMS", message: "参数缺失" },
+        });
         subscriber.next({ type: "done", data: {} });
         subscriber.complete();
       });
     }
-
-    return this.chatService.processMessageStream(message);
+    return this.chatService.processMessageStream(sessionId, message);
   }
 }

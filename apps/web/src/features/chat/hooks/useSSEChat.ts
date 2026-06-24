@@ -24,7 +24,7 @@ interface UseSSEChatOptions {
 }
 
 interface UseSSEChatReturn {
-  sendMessage: (message: string) => void;
+  sendMessage: (message: string, sessionId: string) => void;
   isLoading: boolean;
   error: string | null;
   abort: () => void;
@@ -102,9 +102,14 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   }, []);
 
   const sendMessage = useCallback(
-    (message: string) => {
+    // ★ 新增 sessionId 参数
+    (message: string, sessionId: string) => {
       if (!message?.trim()) {
         setError("消息不能为空");
+        return;
+      }
+      if (!sessionId) {
+        setError("会话 ID 丢失，请刷新页面重试");
         return;
       }
 
@@ -114,7 +119,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
 
       const baseURL =
         import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
-      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(message)}`;
+      // ★ URL 中拼接 sessionId
+      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(message)}&sessionId=${sessionId}`;
 
       const controller = new AbortController();
       abortControllerRef.current = controller;

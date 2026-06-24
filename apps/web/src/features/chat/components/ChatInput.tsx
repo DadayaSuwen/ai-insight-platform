@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
+  onStop?: () => void;
   isLoading: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -15,13 +16,24 @@ const PLACEHOLDERS = [
 ];
 
 /**
- * ChatInput — textarea + submit.
+ * ChatInput — Claude-style composer.
  *
- * Enter to send, Shift+Enter for newline.
- * Shows placeholder cycling hint, character count, and send state.
+ * Layout (matches Claude.ai):
+ *   ┌──────────────────────────────────────┐  ← single rounded container
+ *   │  textarea (auto-grow, no border)     │     border + bg, no internal borders
+ *   │                                      │
+ *   │  ──────────────────────────────────  │
+ *   │  [tools…]              [count]       │     bottom row: tools + char count
+ *   └──────────────────────────────────────┘
+ *                                              ↑ send button is a separate
+ *                                                floating element, absolutely
+ *                                                positioned bottom-right inside
+ *                                                the container so it never
+ *                                                competes with textarea height.
  */
 function ChatInput({
   onSend,
+  onStop,
   isLoading,
   disabled,
   placeholder,
@@ -33,12 +45,13 @@ function ChatInput({
   );
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea (no hard cap — scrollbar appears when content overflows)
+  // Auto-resize textarea — capped at ~6 lines, then scrolls internally
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    // ~24px line-height × 6 = 144px cap
+    el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
   }, [value]);
 
   // Focus on mount
@@ -51,7 +64,6 @@ function ChatInput({
     if (!trimmed || isLoading) return;
     onSend(trimmed);
     setValue("");
-    // Reset height
     if (ref.current) ref.current.style.height = "auto";
   };
 
@@ -66,6 +78,14 @@ function ChatInput({
   const isOverLimit = charCount > maxLength;
   const canSend =
     value.trim().length > 0 && !isLoading && !disabled && !isOverLimit;
+
+  const handleButtonClick = () => {
+    if (isLoading) {
+      onStop?.();
+    } else {
+      submit();
+    }
+  };
 
   return (
     <div
@@ -82,9 +102,18 @@ function ChatInput({
         </div>
       )}
 
-      <div className="flex items-end gap-2 p-3">
-        {/* Textarea */}
-        <div className="relative flex-1">
+      {/* Composer — single rounded container, absolutely-positioned send button */}
+      <div className="px-4 pt-3 pb-3">
+        <div
+          className="relative flex flex-col rounded-3xl border transition-colors"
+          style={{
+            background: "var(--bg-secondary)",
+            borderColor: "var(--border)",
+          }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
+          onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+        >
+          {/* Textarea — fills the container, leaves room on the right for the send button */}
           <textarea
             ref={ref}
             value={value}
@@ -94,83 +123,88 @@ function ChatInput({
             disabled={disabled || isLoading}
             rows={1}
             maxLength={maxLength}
-            className="w-full resize-none rounded-xl border px-3 py-2 pr-16 text-sm leading-relaxed transition-colors placeholder:!text-xs"
+            className="block w-full resize-none border-0 bg-transparent text-base transition-colors placeholder:text-[13px] placeholder:font-normal focus:outline-none focus:ring-0"
             style={{
-              background: "var(--bg-secondary)",
-              borderColor: "var(--border)",
               color: "var(--text-primary)",
-              outline: "none",
-              minHeight: "40px",
-              maxHeight: "200px",
+              lineHeight: "18px",
+              padding: "14px 56px 8px 18px",
+              margin: 0,
+              minHeight: "18px",
+              maxHeight: "144px",
               overflowY: "auto",
+              boxShadow: "none",
             }}
-            onFocus={(e) =>
-              (e.currentTarget.style.borderColor = "var(--accent)")
-            }
-            onBlur={(e) =>
-              (e.currentTarget.style.borderColor = "var(--border)")
-            }
           />
 
-          {/* Character count badge */}
-          <span
-            className="absolute bottom-2 right-3 text-[10px] tabular-nums"
-            style={{
-              color: isOverLimit
-                ? "var(--error)"
-                : charCount > maxLength * 0.9
-                  ? "var(--warning)"
-                  : "var(--text-muted)",
-            }}
+          {/* Bottom toolbar row — tools on the left, char count on the right */}
+          <div
+            className="flex items-center justify-between gap-2 px-3 pb-2"
+            style={{ color: "var(--text-muted)" }}
           >
-            {charCount > maxLength * 0.8 ? `${charCount}/${maxLength}` : ""}
-          </span>
-        </div>
+            <div className="flex items-center gap-1 text-xs">
+              {/* Reserved for future tools (model picker, attach, mic, etc.) */}
+            </div>
+            <div className="flex items-center gap-3 text-[11px] tabular-nums">
+              {charCount > maxLength * 0.8 && (
+                <span
+                  style={{
+                    color: isOverLimit
+                      ? "var(--error)"
+                      : charCount > maxLength * 0.9
+                        ? "var(--warning)"
+                        : "var(--text-muted)",
+                  }}
+                >
+                  {charCount}/{maxLength}
+                </span>
+              )}
+            </div>
+          </div>
 
-        {/* Send button */}
-        <button
-          onClick={submit}
-          disabled={!canSend}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm transition-all active:scale-95 disabled:cursor-not-allowed"
-          style={{
-            background: canSend ? "var(--accent)" : "var(--bg-tertiary)",
-            color: canSend ? "white" : "var(--text-muted)",
-          }}
-          title="发送 (Enter)"
-        >
-          {isLoading ? (
-            /* Spinner */
-            <svg
-              className="animate-spin"
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-            </svg>
-          ) : (
-            /* Send arrow */
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          )}
-        </button>
+          {/* Send / Stop button — absolute, bottom-right, never collides with text */}
+          <button
+            onClick={handleButtonClick}
+            disabled={!canSend && !isLoading}
+            className="absolute bottom-2.5 right-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm transition-all active:scale-95 disabled:cursor-not-allowed"
+            style={{
+              background: isLoading
+                ? "var(--error)"
+                : canSend
+                  ? "var(--accent)"
+                  : "var(--bg-tertiary)",
+              color: isLoading || canSend ? "white" : "var(--text-muted)",
+            }}
+            title={isLoading ? "停止生成" : "发送 (Enter)"}
+          >
+            {isLoading ? (
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            ) : (
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Keyboard hint */}
       <div
-        className="flex items-center justify-end gap-4 px-3 pb-2 text-[10px]"
+        className="flex items-center justify-end gap-4 px-4 pb-2 text-[10px]"
         style={{ color: "var(--text-muted)" }}
       >
         <span>Enter 发送</span>

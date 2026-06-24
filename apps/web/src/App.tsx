@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ChatWindow from './features/chat/components/ChatWindow';
 import SettingsPage from './features/settings/SettingsPage';
 import { useChatStore } from './features/chat/store';
+import { ToastContainer } from './components/ToastContainer';
 
 function App() {
   const theme = useChatStore((s) => s.theme);
@@ -18,6 +19,7 @@ function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <ToastContainer />
     </BrowserRouter>
   );
 }

@@ -16,15 +16,14 @@ export class AiService {
    */
   async *processStream(
     message: string,
+    historyMessages: any[] = [],
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     this.logger.log(`[stream] Processing message: ${message}`);
 
     try {
-      // 刷新数据库 schema (如果 PlannerAgent 需要)
       await this.plannerAgent.refreshSchema();
-
-      // 直接透传所有事件给 Controller
-      yield* this.plannerAgent.invokeStream(message);
+      // 将历史记录传给 PlannerAgent
+      yield* this.plannerAgent.invokeStream(message, historyMessages);
     } catch (error: unknown) {
       // 捕获未预期的同步/异步错误，防止 SSE 流静默中断
       const msg = error instanceof Error ? error.message : String(error);

@@ -1,6 +1,30 @@
 // apps/server/src/core/kysely/types.ts
 import { Generated } from "kysely";
+export interface ChatSessionTable {
+  id: Generated<string>;
+  title: string;
+  createdAt: Generated<Date>;
+  updatedAt: Generated<Date>;
+}
 
+export interface ChatMessageTable {
+  id: Generated<string>;
+  sessionId: string;
+  role: string; // 'user' | 'assistant'
+  content: string;
+  metadata: string | null; // 存储工具调用和结果的 JSON 字符串
+  createdAt: Generated<Date>;
+}
+
+// 更新 Database 接口
+export interface Database {
+  Customer: CustomerTable;
+  Product: ProductTable;
+  SalesOrder: SalesOrderTable;
+  SalesOrderItem: SalesOrderItemTable;
+  ChatSession: ChatSessionTable;
+  ChatMessage: ChatMessageTable;
+}
 export interface CustomerTable {
   id: string;
   name: string;
@@ -35,11 +59,3 @@ export interface SalesOrderItemTable {
   profit: number;
 }
 
-// Kysely 的根 Database 接口
-// 这里的 key 必须与数据库里的表名完全一致
-export interface Database {
-  Customer: CustomerTable;
-  Product: ProductTable;
-  SalesOrder: SalesOrderTable;
-  SalesOrderItem: SalesOrderItemTable;
-}
