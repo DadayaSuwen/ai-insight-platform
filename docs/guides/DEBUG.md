@@ -1,6 +1,6 @@
 # 调试指南
 
-> **重要提醒**:`pnpm test` + `pnpm build` 通过 ≠ 系统能跑。真实运行时 (`pnpm start`) 会暴露单元测试看不到的 bug。Phase 3/4/5 共发现并修复了 10 个 bug,详见 [`../development/ISSUES.md`](../development/ISSUES.md)。
+> **重要提醒**:`pnpm test` + `pnpm build` 通过 ≠ 系统能跑。真实运行时 (`pnpm start`) 会暴露单元测试看不到的问题。
 
 ## 常见问题
 
@@ -34,7 +34,7 @@ pnpm prisma generate
 
 **问题**: `pnpm start` 报 `Cannot find module '@workspace/types/chat'`
 
-**根因**: types 包以前 `main` 指向源文件,Node 解析不了无扩展名 import。详见 [ISSUES.md #1](../development/ISSUES.md)。
+**根因**: types 包以前 `main` 指向源文件,Node 解析不了无扩展名 import。详见 [archived/ISSUES.md #1](../archived/ISSUES.md)。
 
 **解决**: types 包已改造为 dual (CJS + ESM) 产物:
 - CJS 输出 → `packages/types/dist/cjs/index.js`
@@ -50,7 +50,7 @@ cd packages/types && pnpm build
 
 **问题**: `No 'Access-Control-Allow-Origin' header is present on the requested resource`
 
-**根因**: NestJS 默认不开 CORS。详见 [ISSUES.md #3](../development/ISSUES.md)。
+**根因**: NestJS 默认不开 CORS。详见 [archived/ISSUES.md #3](../archived/ISSUES.md)。
 
 **解决**: `apps/server/src/main.ts` 已配置:
 ```typescript
@@ -66,7 +66,7 @@ app.enableCors({
 
 **问题**: UI 一直显示重复 token / SQL / 图表。
 
-**根因**: EventSource 协议默认 3 秒自动重连,服务端 `done` 后关闭 TCP 会触发客户端重连 → 服务端重新跑 pipeline → 死循环。详见 [ISSUES.md #8](../development/ISSUES.md)。
+**根因**: EventSource 协议默认 3 秒自动重连,服务端 `done` 后关闭 TCP 会触发客户端重连 → 服务端重新跑 pipeline → 死循环。详见 [archived/ISSUES.md #8](../archived/ISSUES.md)。
 
 **解决**: `done` 事件时客户端**显式** `eventSource.close()`,阻断自动重连。
 
@@ -74,7 +74,7 @@ app.enableCors({
 
 **问题**: `Encountered two children with the same key`
 
-**根因**: 流式草稿用了 ref + state 双轨管理。详见 [ISSUES.md #6](../development/ISSUES.md)。
+**根因**: 流式草稿用了 ref + state 双轨管理。详见 [archived/ISSUES.md #6](../archived/ISSUES.md)。
 
 **解决**: 助手草稿也直接进 zustand store,单一数据源。
 
@@ -123,39 +123,32 @@ pnpm --filter @ai-insight/server dev
 ollama ps
 ```
 
-**超时阈值** 在 `LlmService.invoke()` 调用方控制:
-- RouterAgent: 20s (单次分类)
-- SqlAgent / ChartAgent: 30s
-- AnalysisAgent: 45s (数据 + 报告更长)
-- chat 分支: 20s
+**超时阈值** 在 `LlmService` 调用方控制:
+- PlannerAgent 循环: 最多 5 次迭代,单次工具调用 30s
+- LLM 通用对话: 20s
+- 详见 `architecture/SYSTEM.md`
 
-### LLM 返回纯文本而不是 JSON
+### Planner 工具调用问题
 
-**问题**: 后端日志 `LLM returned non-JSON: Unexpected token 's', "sql" is not valid JSON`。
+**问题**: LLM 不调用工具,直接返回文本。
 
-**根因**: 小模型 (qwen2.5:3b) 经常忽略 prompt 里的"返回 JSON"指令,直接吐意图单词 `sql`/`chart`。
+**根因**: 模型不支持 tool_calls 或 prompt 未正确注入工具定义。
 
-**解决**: LlmService 已经内置纯文本兜底 (`coercePlainWord` 方法),自动识别 ZodEnum 的纯单词输出并包装成 `{ intent: 'xxx' }` 通过 schema 校验。**如果还是报错**,说明 LLM 返回的单词不在 ZodEnum 的可选列表里,需要检查 prompt 是否明确列出了所有可能值。
+**解决**: 检查 `planner.agent.ts` 的 `bindTools` 是否正确绑定;检查 `prompts/planner.prompt.ts` 是否包含完整工具说明书。
 
 ### SQL 报 `relation "xxx" does not exist`
 
-**问题**: LLM 生成的 SQL 写成 `FROM Sales` (没有双引号),PostgreSQL 把未加引号的标识符折叠成小写 → 实际查 `sales` 表,而数据库里是带引号的 `Sales`。
+**问题**: 生成的 SQL 查不到表。
 
-**根因**: LLM 不熟悉 PostgreSQL 的大小写敏感规则。
+**根因**: 旧架构中 LLM 生成 SQL 不带双引号。**新架构下 Prisma 查询不生成原始 SQL**,此问题已消除。
 
-**解决**: `SqlAgent.assertSafe()` 已经强制 `FROM` 子句必须带双引号表名 (`/FROM\s+"[^"]+"/i`),不满足就抛错触发模板回退。**如果遇到合法 SQL 被误拒**,放宽规则或在 prompt 里更明确强调引号。
+### 旧架构问题参考
 
-### Router 误判 (chart/analysis 被分类为 sql)
-
-**问题**: 用户问"分析趋势"但 Router 返回 `sql` 走纯查询路径,没有 analysis 文案。
-
-**根因**: 3B 模型的 4-way 分类能力有限,对模糊 query 倾向选 `sql`(最常见的兜底)。
-
-**解决**: RouterAgent 已经升级为**混合 Router**:
-1. 强关键词 (图表/分析/你好) 走快路径,不调 LLM。
-2. 无强关键词才调 LLM,LLM 失败再回退到关键词。
-
-**如果还是误判**,在 `router.agent.ts` 的 `strongKeywordMatch` 里补关键词。
+**Phase 3-9 的 bug 记录已归档至 [`../archived/ISSUES.md`](../archived/ISSUES.md)**:
+- 类型包加载、DI 导出、CORS 等 Phase 3-5 问题
+- Docker 化踩坑 (libssl、healthcheck 等) Phase 6 问题
+- 企业级 UI、LLM Settings 问题 Phase 7-8 问题
+- 流式输出、Provider 兼容性 Phase 9 问题
 
 ### LLM 模块依赖解析失败 (`Cannot find module '@langchain/core/messages'`)
 

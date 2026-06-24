@@ -8,34 +8,74 @@ datasource db {
 }
 
 // Business data tables
-model Sales {
-  id          Int      @id @default(autoincrement())
-  productName String
+model Customer {
+  id      String       @id
+  name    String
+  segment String
+  region  String
+  state   String
+  city    String
+  orders  SalesOrder[]
+}
+
+model Product {
+  id          String           @id
+  name        String
   category    String
-  amount      Decimal
-  quantity    Int
-  region      String
-  saleDate    DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  subCategory String
+  orderItems  SalesOrderItem[]
+}
+
+model SalesOrder {
+  id         String           @id
+  orderDate  DateTime
+  shipDate   DateTime?
+  shipMode   String
+  customerId String
+  customer   Customer         @relation(fields: [customerId], references: [id])
+  orderItems SalesOrderItem[]
+}
+
+model SalesOrderItem {
+  id        String     @id @default(cuid())
+  orderId   String
+  order     SalesOrder @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product    @relation(fields: [productId], references: [id])
+  sales     Float
+  quantity  Int
+  discount  Float
+  profit    Float
 }
 
 // Chat history tables
 model ChatSession {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   userId    String?
   title     String?
   messages  ChatMessage[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 }
 
 model ChatMessage {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
   sessionId String
-  role      String   // 'user' | 'assistant'
+  role      String // 'user' | 'assistant'
   content   String
   metadata  Json?
   session   ChatSession @relation(fields: [sessionId], references: [id])
-  createdAt DateTime @default(now())
+  createdAt DateTime    @default(now())
+}
+
+// ─── LLM Configuration ─────────────────────────────────────────────────────────
+
+model LLMConfig {
+  id          String   @id // "openai" | "anthropic" | "ollama"
+  apiKey      String?
+  baseUrl     String?
+  model       String   @default("qwen3:8b")
+  temperature Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

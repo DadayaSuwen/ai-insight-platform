@@ -8,12 +8,16 @@ import { z } from 'zod';
  * SSE event types for streaming responses
  */
 export enum SSEEventType {
-  TOKEN = 'token',
+  TEXT = 'text',
   SQL = 'sql',
   CHART = 'chart',
   ANALYSIS = 'analysis',
   ERROR = 'error',
   DONE = 'done',
+  // Planner tool-calling events
+  TOOL_CALL = 'tool_call',
+  TOOL_RESULT = 'tool_result',
+  THINKING = 'thinking',
 }
 
 // ============================================
@@ -133,6 +137,7 @@ export type SSETokenData = z.infer<typeof SSETokenDataSchema>;
 export const SSESQLDataSchema = z.object({
   sql: z.string(),
   executed: z.boolean().default(false),
+  rows: z.array(z.record(z.string(), z.any())).optional(),
 });
 
 export type SSESQLData = z.infer<typeof SSESQLDataSchema>;
@@ -170,6 +175,43 @@ export const SSEErrorDataSchema = z.object({
 });
 
 export type SSEErrorData = z.infer<typeof SSEErrorDataSchema>;
+
+/**
+ * SSE tool_call event data
+ */
+export const SSEToolCallDataSchema = z.object({
+  name: z.string(),
+  args: z.record(z.string(), z.any()),
+});
+
+export type SSEToolCallData = z.infer<typeof SSEToolCallDataSchema>;
+
+/**
+ * SSE tool_result event data
+ */
+export const SSEToolResultDataSchema = z.object({
+  name: z.string(),
+  result: z.object({
+    sql: z.string().optional(),
+    rows: z.array(z.record(z.string(), z.any())).optional(),
+    chart: z.record(z.string(), z.any()).optional(),
+    analysis: z.string().optional(),
+    rowCount: z.number().optional(),
+    reply: z.string().optional(),
+    error: z.string().optional(),
+  }),
+});
+
+export type SSEToolResultData = z.infer<typeof SSEToolResultDataSchema>;
+
+/**
+ * SSE thinking event data (optional — LLM intermediate reasoning)
+ */
+export const SSEThinkingDataSchema = z.object({
+  content: z.string(),
+});
+
+export type SSEThinkingData = z.infer<typeof SSEThinkingDataSchema>;
 
 // ============================================
 // API Response Schemas

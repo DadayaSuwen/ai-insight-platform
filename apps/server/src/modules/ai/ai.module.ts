@@ -1,17 +1,15 @@
-import { Module } from '@nestjs/common';
-import { AiController } from './ai.controller';
-import { AiService } from './ai.service';
-import { RouterAgent } from './agents/router.agent';
-import { SqlAgent } from './agents/sql.agent';
-import { ChartAgent } from './agents/chart.agent';
-import { AnalysisAgent } from './agents/analysis.agent';
-import { DatabaseModule } from '../database/database.module';
-import { LlmModule } from './llm/llm.module';
+import { Module } from "@nestjs/common";
+import { AiService } from "./ai.service";
+import { ChartHelper } from "./tools/chart.helper";
+import { PlannerAgent } from "./agents/planner.agent";
+import { DatabaseModule } from "../database/database.module";
+import { LlmModule } from "./llm/llm.module";
+import { LlmController } from "./llm/llm.controller";
 
 @Module({
   imports: [DatabaseModule, LlmModule],
-  controllers: [AiController],
-  providers: [AiService, RouterAgent, SqlAgent, ChartAgent, AnalysisAgent],
+  controllers: [LlmController],
+  providers: [AiService, ChartHelper, PlannerAgent],
   exports: [AiService],
 })
 export class AiModule {}

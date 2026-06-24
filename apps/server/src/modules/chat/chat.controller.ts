@@ -1,51 +1,31 @@
-import {
-  Controller,
-  Post,
-  Body,
-  Sse,
-  Query,
-  MessageEvent,
-} from '@nestjs/common';
-import { Observable } from 'rxjs';
-import {
-  ChatMessageRequestSchema,
-  SSEEventType,
-  SSEErrorData,
-} from '@workspace/types';
-import { ChatService } from './chat.service';
+import { Controller, Sse, Query, MessageEvent } from "@nestjs/common";
+import { Observable } from "rxjs";
+import { ChatService } from "./chat.service";
 
-@Controller('chat')
+@Controller("chat")
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   /**
-   * Sync (non-streaming) endpoint.
-   * Returns the full AiProcessResult.
-   */
-  @Post('message')
-  async sendMessage(@Body() body: unknown) {
-    const request = ChatMessageRequestSchema.parse(body);
-    return this.chatService.processMessage(request.message);
-  }
-
-  /**
    * SSE stream endpoint.
    * GET /chat/stream?message=...
-   * Emits events per the SSE contract (token/sql/chart/analysis/error/done).
+   * 直接透传 PlannerAgent 产生的所有事件 (tool_call, tool_result, text, error, done)。
    */
-  @Sse('stream')
-  stream(@Query('message') message: string): Observable<MessageEvent> {
-    if (!message || typeof message !== 'string') {
+  @Sse("stream")
+  stream(
+    @Query("message") message: string,
+    @Query("sessionId") sessionId: string, // ★ 新增
+  ): Observable<MessageEvent> {
+    if (!message || !sessionId) {
       return new Observable<MessageEvent>((subscriber) => {
-        const errorData: SSEErrorData = {
-          code: 'INVALID_MESSAGE',
-          message: 'message query param is required',
-        };
-        subscriber.next({ type: SSEEventType.ERROR, data: errorData });
-        subscriber.next({ type: SSEEventType.DONE, data: {} });
+        subscriber.next({
+          type: "error",
+          data: { code: "INVALID_PARAMS", message: "参数缺失" },
+        });
+        subscriber.next({ type: "done", data: {} });
         subscriber.complete();
       });
     }
-    return this.chatService.processMessageStream(message);
+    return this.chatService.processMessageStream(sessionId, message);
   }
 }

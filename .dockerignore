@@ -1,0 +1,73 @@
+# VCS
+.git
+.github
+.gitignore
+
+# Editor / IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules
+**/node_modules
+.pnpm-store
+pnpm-store
+**/pnpm-store
+
+# Build outputs
+dist
+**/dist
+build
+.next
+.turbo
+**/.turbo
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test / coverage
+coverage
+**/coverage
+*.test.ts
+**/*.test.ts
+*.spec.ts
+**/*.spec.ts
+
+# Local databases / caches
+*.db
+prisma/dev.db
+apps/server/node_modules/.cache
+
+# Docs & Claude workspace
+docs
+.claude
+**/*.md
+!apps/server/prisma/schema.prisma
+!apps/server/prisma/seed.ts
+!packages/types/package.json
+!packages/types/tsconfig*.json
+!packages/types/src/**
+!packages/eslint-config/package.json
+!packages/eslint-config/index.js
+!packages/eslint-config/src/**
+
+# Existing Docker artifacts
+.docker/compose.*
+docker-compose.override.yml

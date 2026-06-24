@@ -1,31 +1,53 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@/core/prisma';
+import { Injectable, OnModuleDestroy, Logger } from "@nestjs/common";
+import { Kysely, PostgresDialect, sql } from "kysely";
+import { Pool } from "pg";
+import type { Database } from "../../core/kysely/types";
 
 @Injectable()
-export class DatabaseService {
+export class DatabaseService implements OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
+  public readonly db: Kysely<Database>;
 
-  constructor(private readonly prisma: PrismaService) {}
-
-  async executeQuery(sql: string): Promise<unknown[]> {
-    try {
-      // WARNING: This is a simple implementation for demo purposes
-      // In production, use parameterized queries or a query builder
-      const result = await this.prisma.$queryRawUnsafe(sql);
-      return result as unknown[];
-    } catch (error) {
-      this.logger.error(`Query execution failed: ${error.message}`);
-      throw error;
-    }
+  constructor() {
+    this.db = new Kysely<Database>({
+      dialect: new PostgresDialect({
+        pool: new Pool({
+          connectionString: process.env.DATABASE_URL,
+        }),
+      }),
+    });
+    this.logger.log("Kysely database connection established");
   }
 
-  async getSchema(): Promise<unknown> {
-    const tables = await this.prisma.$queryRawUnsafe(`
-      SELECT table_name, column_name, data_type, is_nullable
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-      ORDER BY table_name, ordinal_position
-    `);
-    return tables;
+  async onModuleDestroy() {
+    await this.db.destroy();
+  }
+
+  // 获取数据库 Schema 结构，供未来动态映射使用
+  async getSchema() {
+    const result = await sql<{
+      table_name: string;
+      column_name: string;
+      data_type: string;
+    }>`SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public'`.execute(
+      this.db,
+    );
+    return result.rows;
+  }
+
+  // 兼容旧接口的原生 SQL 执行方法
+  async executeQuery(querySql: string) {
+    try {
+      const result = await sql`${sql.raw(querySql)}`.execute(this.db);
+      return {
+        rows: result.rows,
+        rowCount: result.numAffectedRows ?? result.rows.length,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Query execution failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 }

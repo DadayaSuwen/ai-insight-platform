@@ -1,16 +1,64 @@
-FROM node:20-alpine
+# syntax=docker/dockerfile:1.6
+# Use Debian bullseye (11) because @prisma/client's native query engine still
+# links against libssl.so.1.1, which is not in current alpine or Debian bookworm.
+# ---------- 1. base ----------
+FROM node:20-bullseye-slim AS base
+WORKDIR /repo
+ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH" CI=true
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dumb-init \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable pnpm \
+    && corepack prepare pnpm@9.0.0 --activate
 
-WORKDIR /app
+# ---------- 2. deps (workspace install, cached) ----------
+FROM base AS deps
+WORKDIR /repo
+# Only workspace metadata — re-uses cache layer when only source changes
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc* ./
+COPY apps/server/package.json ./apps/server/package.json
+COPY packages/types/package.json ./packages/types/package.json
+COPY packages/eslint-config/package.json ./packages/eslint-config/package.json
+RUN --mount=type=cache,id=pnpm-server,target=/pnpm/store \
+    pnpm install --frozen-lockfile --ignore-scripts
 
-COPY package.json pnpm-lock.yaml ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile
-
-COPY apps/server ./apps/server
+# ---------- 3. build (compile types + nest + prisma client) ----------
+FROM deps AS build
+WORKDIR /repo
 COPY packages/types ./packages/types
+COPY packages/eslint-config ./packages/eslint-config
+COPY apps/server ./apps/server
+COPY turbo.json ./
+# Order matters: types → prisma generate → nest build.
+# schema.sql is pre-generated and committed to apps/server/prisma/ to avoid
+# running Prisma CLI on alpine (its native engine has musl/openssl issues).
+RUN pnpm --filter @workspace/types build \
+    && pnpm --filter @ai-insight/server exec prisma generate \
+    && pnpm --filter @ai-insight/server build
 
-WORKDIR /app/apps/server
-RUN pnpm build
+# ---------- 4. runtime ----------
+FROM node:20-bullseye-slim AS runtime
+ENV NODE_ENV=production PORT=3000
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dumb-init wget netcat-openbsd postgresql-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app \
+    && useradd --system --gid app --create-home --home-dir /home/app app
 
+# Copy the entire built workspace — preserves pnpm symlinks to .pnpm store,
+# so @workspace/types and @prisma/client resolve correctly without a separate
+# `pnpm deploy` step. Trade-off: image is larger, but the runtime is self-contained.
+COPY --from=build --chown=app:app /repo /repo
+
+# Entrypoint
+COPY --chown=app:app .docker/entrypoint.server.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+USER app
+WORKDIR /repo/apps/server
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
+    CMD wget -qO- http://127.0.0.1:3000/database/schema || exit 1
+
+ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/entrypoint.sh"]

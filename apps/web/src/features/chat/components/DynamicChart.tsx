@@ -1,39 +1,46 @@
-import ReactECharts from 'echarts-for-react';
-import type { CSSProperties } from 'react';
-import type { SSEChartData } from '@workspace/types';
+import ReactECharts from "echarts-for-react";
+import type { CSSProperties } from "react";
 
 interface DynamicChartProps {
-  chart: SSEChartData;
+  option: Record<string, unknown>;
   style?: CSSProperties;
 }
 
 /**
- * DynamicChart - render an SSE chart payload as an ECharts instance.
+ * DynamicChart — 直接接收 EChartsOption 并渲染。
  *
- * The backend packs the full EChartsOption under `chart.data.option` and
- * the raw rows under `chart.data.rows`; we prefer `option` when available.
+ * 适配新的 Agent 架构，不再需要旧的外层包装结构。
  */
-function DynamicChart({ chart, style }: DynamicChartProps) {
-  const option = (chart.data?.['option'] as Record<string, unknown> | undefined) ?? null;
+function DynamicChart({ option, style }: DynamicChartProps) {
+  const isDark = document.documentElement.classList.contains("dark");
 
-  if (!option) {
+  if (!option || Object.keys(option).length === 0) {
     return (
-      <div className="rounded border border-dashed border-gray-300 p-3 text-sm text-gray-500">
+      <div
+        className="flex items-center justify-center rounded-xl border p-6 text-sm"
+        style={{
+          borderColor: "var(--border)",
+          color: "var(--text-muted)",
+          background: "var(--bg-primary)",
+        }}
+      >
         图表数据为空
       </div>
     );
   }
 
   return (
-    <div className="rounded border bg-white p-2">
-      {chart.title && (
-        <div className="mb-1 text-xs text-gray-500">{chart.title}</div>
-      )}
+    <div
+      className="overflow-hidden rounded-xl border p-2"
+      style={{ borderColor: "var(--border)", background: "var(--bg-primary)" }}
+    >
       <ReactECharts
         option={option}
         notMerge={true}
         lazyUpdate={true}
-        style={{ height: 280, width: '100%', ...style }}
+        theme={isDark ? "dark" : "light"}
+        style={{ height: 300, width: "100%", ...style }}
+        opts={{ renderer: "canvas" }}
       />
     </div>
   );

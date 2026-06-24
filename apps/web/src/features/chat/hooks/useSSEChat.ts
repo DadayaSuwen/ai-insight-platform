@@ -1,169 +1,193 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { SSEEventType } from '@workspace/types';
-import type {
-  SSEMessage,
-  SSETokenData,
-  SSESQLData,
-  SSEChartData,
-  SSEAnalysisData,
-  SSEErrorData,
-} from '@workspace/types';
+import { useState, useCallback, useRef, useEffect } from "react";
+
+interface ToolCallData {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+interface ToolResultData {
+  name: string;
+  result: Record<string, unknown>;
+}
+
+interface ErrorData {
+  code: string;
+  message: string;
+}
 
 interface UseSSEChatOptions {
-  onToken?: (data: SSETokenData) => void;
-  onSQL?: (data: SSESQLData) => void;
-  onChart?: (data: SSEChartData) => void;
-  onAnalysis?: (data: SSEAnalysisData) => void;
-  onError?: (data: SSEErrorData) => void;
+  onText?: (data: { content: string }) => void;
+  onToolCall?: (data: ToolCallData) => void;
+  onToolResult?: (data: ToolResultData) => void;
+  onError?: (data: ErrorData) => void;
   onDone?: () => void;
 }
 
 interface UseSSEChatReturn {
-  sendMessage: (message: string) => void;
+  sendMessage: (message: string, sessionId: string) => void;
   isLoading: boolean;
   error: string | null;
   abort: () => void;
 }
 
 /**
- * useSSEChat - subscribe to backend SSE stream
+ * useSSEChat — stream responses from the backend using fetch + ReadableStream.
  *
- * Endpoint: GET {API_BASE}/chat/stream?message=...
- * Each emitted MessageEvent is parsed and dispatched to the matching callback.
- *
- * Connection-error handling:
- * - EventSource's built-in 'error' event (no data) = connection problem
- *   (network drop, server gone, intentional close). We ignore it if the close
- *   was triggered by a received 'done' event.
- * - Server-sent 'error' SSE event (with data) = application error → dispatched
- *   to onError callback.
+ * 在新架构下，只处理 5 种核心事件：text, tool_call, tool_result, error, done。
  */
 export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  // When true, ignore the next EventSource 'error' event because we triggered
-  // it ourselves by calling source.close() after receiving 'done'.
-  const closingIntentionallyRef = useRef(false);
-
   const close = useCallback(() => {
-    if (eventSourceRef.current) {
-      closingIntentionallyRef.current = true;
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
   }, []);
 
-  const dispatch = useCallback((msg: SSEMessage) => {
+  const parseSSELine = (line: string): { event?: string; data?: string } => {
+    if (line.startsWith("event:")) {
+      return { event: line.slice(6).trim() };
+    }
+    if (line.startsWith("data:")) {
+      return { data: line.slice(5).trim() };
+    }
+    return {};
+  };
+
+  const dispatch = useCallback((eventType: string, rawData: string) => {
+    if (!rawData) return;
+
     let data: unknown;
     try {
-      data = JSON.parse(msg.data);
+      data = JSON.parse(rawData);
     } catch (err) {
-      console.error('Failed to parse SSE event data', err, msg);
+      console.error(
+        "[useSSEChat] Failed to parse SSE event data",
+        err,
+        rawData,
+      );
       return;
     }
+
     const opts = optionsRef.current;
-    switch (msg.event) {
-      case SSEEventType.TOKEN:
-        opts.onToken?.(data as SSETokenData);
+
+    switch (eventType) {
+      case "text":
+        opts.onText?.(data as { content: string });
         break;
-      case SSEEventType.SQL:
-        opts.onSQL?.(data as SSESQLData);
+      case "tool_call":
+        opts.onToolCall?.(data as ToolCallData);
         break;
-      case SSEEventType.CHART:
-        opts.onChart?.(data as SSEChartData);
+      case "tool_result":
+        opts.onToolResult?.(data as ToolResultData);
         break;
-      case SSEEventType.ANALYSIS:
-        opts.onAnalysis?.(data as SSEAnalysisData);
+      case "error":
+        opts.onError?.(data as ErrorData);
+        setError((data as ErrorData).message);
         break;
-      case SSEEventType.ERROR:
-        opts.onError?.(data as SSEErrorData);
-        setError((data as SSEErrorData).message);
-        break;
-      case SSEEventType.DONE:
-        // Server closed its end of the stream after 'done'. We must
-        // explicitly close the EventSource here — otherwise it will
-        // auto-reconnect (default retry ~3s) and re-trigger the whole
-        // pipeline, causing token events to be appended repeatedly.
-        closingIntentionallyRef.current = true;
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-          eventSourceRef.current = null;
-        }
+      case "done":
+        abortControllerRef.current = null;
         setIsLoading(false);
         opts.onDone?.();
+        break;
+      default:
+        // 忽略未知事件类型
         break;
     }
   }, []);
 
   const sendMessage = useCallback(
-    (message: string) => {
+    // ★ 新增 sessionId 参数
+    (message: string, sessionId: string) => {
       if (!message?.trim()) {
-        setError('消息不能为空');
+        setError("消息不能为空");
+        return;
+      }
+      if (!sessionId) {
+        setError("会话 ID 丢失，请刷新页面重试");
         return;
       }
 
       close();
       setError(null);
       setIsLoading(true);
-      closingIntentionallyRef.current = false;
 
       const baseURL =
-        import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(message)}`;
-      const source = new EventSource(url);
-      eventSourceRef.current = source;
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+      // ★ URL 中拼接 sessionId
+      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(message)}&sessionId=${sessionId}`;
 
-      const handle = (event: MessageEvent) => {
-        // Server-sent SSE event with data payload
-        if (!event.data) return; // skip events without data
-        const parsed: SSEMessage = {
-          event: event.type as SSEMessage['event'],
-          data: event.data,
-        };
-        dispatch(parsed);
-      };
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-      // Register listeners for all SSE event types EXCEPT 'error',
-      // which is reserved by EventSource for connection-level failures.
-      Object.values(SSEEventType)
-        .filter((evt) => evt !== SSEEventType.ERROR)
-        .forEach((evt) => {
-          source.addEventListener(evt, handle as EventListener);
-        });
+      fetch(url, { signal: controller.signal })
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const reader = res.body?.getReader();
+          if (!reader) {
+            throw new Error("Response body is not readable");
+          }
 
-      // Connection-level error handler. Distinguishes between:
-      //  - Server-sent 'error' SSE event (has data) → dispatch to onError
-      //  - EventSource built-in connection error (no data) → mark connection lost
-      source.addEventListener(SSEEventType.ERROR, ((event: MessageEvent) => {
-        if (event.data) {
-          // Server-sent error event, dispatch normally
-          handle(event);
-        } else {
-          // Connection-level error
-          if (closingIntentionallyRef.current) {
-            closingIntentionallyRef.current = false;
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          const readChunk = () => {
+            reader.read().then(({ done, value }) => {
+              if (done || controller.signal.aborted) {
+                return;
+              }
+
+              buffer += decoder.decode(value, { stream: true });
+
+              const messages: string[] = [];
+              let start = 0;
+              let idx: number;
+              while ((idx = buffer.indexOf("\n\n", start)) !== -1) {
+                messages.push(buffer.slice(start, idx));
+                start = idx + 2;
+              }
+              buffer = buffer.slice(start);
+
+              for (const raw of messages) {
+                let rawEvent = "";
+                let rawData = "";
+
+                for (const line of raw.split("\n")) {
+                  const parsed = parseSSELine(line);
+                  if (parsed.event !== undefined) rawEvent = parsed.event;
+                  if (parsed.data !== undefined) {
+                    rawData = rawData
+                      ? `${rawData}\n${parsed.data}`
+                      : parsed.data;
+                  }
+                }
+
+                if (rawEvent && rawData) {
+                  dispatch(rawEvent, rawData);
+                }
+              }
+
+              readChunk();
+            });
+          };
+
+          readChunk();
+        })
+        .catch((err: Error) => {
+          if (err.name === "AbortError") {
             return;
           }
-          if (source.readyState === EventSource.CLOSED) {
-            setIsLoading(false);
-          } else {
-            setError('连接中断');
-            setIsLoading(false);
-            source.close();
-          }
-        }
-      }) as EventListener);
-
-      // 'open' connection event — fires when the EventSource handshake completes.
-      // We don't act on it, but registering a no-op keeps the connection from
-      // being treated as idle by some browsers.
-      source.addEventListener('open', () => {
-        // no-op
-      });
+          console.error("[useSSEChat] Connection error", err);
+          setError(err.message || "连接中断");
+          setIsLoading(false);
+        });
     },
     [close, dispatch],
   );
@@ -171,9 +195,9 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
   const abort = useCallback(() => {
     close();
     setIsLoading(false);
+    setError(null);
   }, [close]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => close();
   }, [close]);

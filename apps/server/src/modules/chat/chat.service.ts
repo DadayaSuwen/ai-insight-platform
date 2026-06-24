@@ -1,133 +1,145 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Observable, from } from 'rxjs';
-import { catchError, mergeMap } from 'rxjs';
-import { MessageEvent } from '@nestjs/common';
-import {
-  SSEEventType,
-  SSETokenData,
-  SSESQLData,
-  SSEChartData,
-  SSEAnalysisData,
-  SSEErrorData,
-} from '@workspace/types';
-import { AiService, AiProcessResult } from '../ai/ai.service';
-import { EChartsOption, ChartType } from '../ai/agents/chart.agent';
+import { Injectable, Logger } from "@nestjs/common";
+import { Observable } from "rxjs";
+import { MessageEvent } from "@nestjs/common";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AiService } from "../ai/ai.service";
+import { ChatSessionService } from "./chat-session.service";
 
-/**
- * ChatService - Chat streaming and orchestration
- *
- * Wraps AiService and exposes a non-streaming sync call plus an SSE stream.
- * The stream emits events in the contract order:
- *   token → (error) → (sql) → (chart) → (analysis) → done
- */
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
 
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly sessionService: ChatSessionService,
+  ) {}
 
-  /**
-   * Synchronous call - returns the full AiProcessResult.
-   * Useful for callers that don't need streaming.
-   */
-  async processMessage(message: string): Promise<AiProcessResult> {
-    return this.aiService.process(message);
+  processMessageStream(
+    sessionId: string,
+    message: string,
+  ): Observable<MessageEvent> {
+    this.logger.log(`SSE stream start for session ${sessionId}: ${message}`);
+
+    return new Observable<MessageEvent>((subscriber) => {
+      (async () => {
+        try {
+          // 1. 保存用户消息
+          await this.sessionService.saveMessage(sessionId, "user", message);
+
+          // 2. 拉取历史记忆
+          const history =
+            await this.sessionService.getMessagesBySessionId(sessionId);
+          const historyMessages = this.buildHistoryMessages(history);
+
+          // 3. 定义收集器，用于保存最终的助手消息
+          let assistantText = "";
+          const assistantToolCalls: any[] = [];
+          const assistantToolResults: any[] = [];
+
+          // 4. 消费 AiService 的流
+          for await (const event of this.aiService.processStream(
+            message,
+            historyMessages,
+          )) {
+            subscriber.next({
+              type: event.type,
+              data: event.data,
+            });
+
+            // 收集助手的数据用于落库
+            if (event.type === "text") {
+              assistantText += (event.data as any).content;
+            } else if (event.type === "tool_call") {
+              assistantToolCalls.push(event.data);
+            } else if (event.type === "tool_result") {
+              assistantToolResults.push(event.data);
+            }
+          }
+
+          // 5. 流结束后，保存助手消息
+          await this.sessionService.saveMessage(
+            sessionId,
+            "assistant",
+            assistantText,
+            {
+              toolCalls: assistantToolCalls,
+              toolResults: assistantToolResults,
+            },
+          );
+
+          // 5.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
+          await this.sessionService.touchSession(sessionId);
+
+          // 6. 如果是第一句话，自动更新会话标题
+          if (history.length <= 1 && message.length > 0) {
+            const title =
+              message.substring(0, 20) + (message.length > 20 ? "..." : "");
+            await this.sessionService.updateSessionTitle(sessionId, title);
+          }
+
+          subscriber.complete();
+        } catch (err: unknown) {
+          this.logger.error(`SSE stream error: ${err}`);
+          subscriber.next({
+            type: "error",
+            data: { code: "STREAM_FAILED", message: String(err) },
+          });
+          subscriber.next({ type: "done", data: {} });
+          subscriber.complete();
+        }
+      })();
+    });
   }
 
-  /**
-   * SSE stream - converts AiProcessResult into a sequence of MessageEvent
-   * matching the SSE contract defined in packages/types.
-   */
-  processMessageStream(message: string): Observable<MessageEvent> {
-    this.logger.log(`SSE stream start: ${message}`);
-    return from(this.aiService.process(message)).pipe(
-      mergeMap((result: AiProcessResult) => from(this.resultToEvents(result))),
-      catchError((err: unknown) => {
-        this.logger.error(`SSE pipeline error: ${err}`);
-        const errorData: SSEErrorData = {
-          code: 'STREAM_FAILED',
-          message: err instanceof Error ? err.message : String(err),
-        };
-        return from<MessageEvent[]>([
-          { type: SSEEventType.ERROR, data: errorData },
-          { type: SSEEventType.DONE, data: {} },
-        ]);
-      }),
-    );
-  }
+  // 将数据库记录转为 LangChain BaseMessage 数组
+  private buildHistoryMessages(history: any[]): any[] {
+    const messages: any[] = [];
+    for (const record of history) {
+      if (record.role === "user") {
+        messages.push(new HumanMessage(record.content));
+      } else if (record.role === "assistant") {
+        // pg 驱动对 JSONB 列会自动解析为对象（Kysely 类型声明为 string 但运行时是 object）
+        // 这里兼容两种形态：对象直接使用，字符串则 parse
+        const rawMeta = record.metadata;
+        const toolData =
+          rawMeta == null
+            ? null
+            : typeof rawMeta === "string"
+              ? JSON.parse(rawMeta)
+              : rawMeta;
 
-  /**
-   * Map AiProcessResult to an ordered list of MessageEvent.
-   */
-  private resultToEvents(result: AiProcessResult): MessageEvent[] {
-    const events: MessageEvent[] = [];
+        // 如果有工具调用，先压入带 tool_calls 的 AIMessage
+        if (toolData?.toolCalls?.length > 0) {
+          messages.push(
+            new AIMessage({
+              content: "",
+              tool_calls: toolData.toolCalls.map((tc: any) => ({
+                id: tc.name, // 与 planner.agent.ts 中 toolCall.id 保持一致
+                name: tc.name,
+                args: tc.args,
+                type: "tool_call",
+              })),
+            }),
+          );
 
-    // 1. Token - always first, carries the user-facing summary text
-    const tokenData: SSETokenData = {
-      content: result.message,
-      isFinal: false,
-    };
-    events.push({ type: SSEEventType.TOKEN, data: tokenData });
+          // 压入对应的 ToolMessage（必须用 LangChain 的类，序列化时会带 name 字段）
+          for (const tr of toolData?.toolResults ?? []) {
+            messages.push(
+              new ToolMessage({
+                tool_call_id: tr.name,
+                name: tr.name,
+                content: JSON.stringify(tr.result),
+              }),
+            );
+          }
+        }
 
-    // 2. Error - emit before data events so the UI can stop rendering
-    if (result.error) {
-      const errorData: SSEErrorData = {
-        code: result.error.code,
-        message: result.error.message,
-      };
-      events.push({ type: SSEEventType.ERROR, data: errorData });
+        // 压入最终的文本回复
+        if (record.content) {
+          messages.push(new AIMessage(record.content));
+        }
+      }
     }
-
-    // 3. SQL - emitted when a query was generated
-    if (result.sql !== undefined) {
-      const sqlData: SSESQLData = {
-        sql: result.sql,
-        executed: result.executed ?? false,
-      };
-      events.push({ type: SSEEventType.SQL, data: sqlData });
-    }
-
-    // 4. Chart - emitted when a chart was generated
-    if (result.chart) {
-      const chartData = this.toChartData(result.chart, result.rows);
-      events.push({ type: SSEEventType.CHART, data: chartData });
-    }
-
-    // 5. Analysis - emitted when an analysis report was generated
-    if (result.analysis) {
-      const analysisData: SSEAnalysisData = {
-        content: result.analysis,
-      };
-      events.push({ type: SSEEventType.ANALYSIS, data: analysisData });
-    }
-
-    // 6. Done - always last
-    events.push({ type: SSEEventType.DONE, data: {} });
-
-    return events;
-  }
-
-  /**
-   * Convert internal EChartsOption to the SSE contract shape.
-   * The full ECharts config travels in `data` for the frontend to render.
-   */
-  private toChartData(
-    chart: EChartsOption,
-    rows?: unknown[],
-  ): SSEChartData {
-    const series = (chart.series as Array<{ type?: string }>) ?? [];
-    const firstSeries = series[0];
-    const chartType: ChartType = (firstSeries?.type as ChartType) ?? 'bar';
-
-    // The contract wants a `data` map; we pack the full chart + rows
-    // so the frontend can render either via the option or via the data.
-    return {
-      chartType,
-      title: chart.title?.text,
-      data: {
-        option: chart,
-        rows: rows ?? [],
-      },
-    };
+    return messages;
   }
 }

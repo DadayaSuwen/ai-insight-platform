@@ -34,6 +34,73 @@
 
 ---
 
+## LLM 配置 API
+
+后端提供 4 个 LLM 相关端点，均在 `/llm` 路径下：
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/llm/config` | 返回所有 3 个 Provider 的保存配置（apiKey 脱敏为 `***`）|
+| `POST` | `/llm/config` | 保存指定 Provider 配置，upsert 到数据库，热重载 LLM 实例 |
+| `GET` | `/llm/health` | 从数据库读取各 Provider API Key，发真实 ping 请求 |
+| `GET` | `/llm/models` | 返回各 Provider 的可用模型列表（固定）|
+
+### GET /llm/config
+
+响应体：
+```json
+{
+  "configs": [
+    {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "temperature": 0,
+      "baseUrl": "http://localhost:11434"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "temperature": 0.7,
+      "apiKey": "***"
+    }
+  ],
+  "activeProvider": "openai"
+}
+```
+
+**注意**：`apiKey` 字段直接返回真实 Key（如 `sk-...`），需要自行妥善保管，不要在前端日志中暴露。`activeProvider` 表示当前服务使用的 Provider（每次 POST /llm/config 后更新）。
+
+### POST /llm/config
+
+请求体（以 OpenAI 为例）：
+```json
+{
+  "provider": "openai",
+  "apiKey": "sk-...",
+  "baseUrl": "https://api.openai.com/v1",
+  "model": "gpt-4o",
+  "temperature": 0.7
+}
+```
+
+响应：
+```json
+{ "ok": true, "message": "Config updated" }
+```
+
+### GET /llm/health
+
+健康检查**从数据库读取 API Key**，而非 `process.env`。返回示例：
+```json
+{
+  "ollama": { "ok": true, "latencyMs": 12 },
+  "openai": { "ok": true, "latencyMs": 143 },
+  "anthropic": { "ok": false, "error": "No API key configured" }
+}
+```
+
+---
+
 # TypeScript 配置指南
 
 本文档解释项目中三个 `tsconfig.json` 配置文件的设计理由。

@@ -47,3 +47,30 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 export function buildSQLUserMessage(userMessage: string): string {
   return `用户问题: ${userMessage}\n\n请生成 SQL 查询语句。`;
 }
+
+// ─── SQL Summary ──────────────────────────────────────────────────────────────
+
+export const SQL_SUMMARY_SYSTEM_PROMPT = `你是一个数据分析助手。根据查询结果，用 2-4 句话用中文总结关键发现。要求：
+- 语言简洁、自然，适合直接展示给用户
+- 提及具体数字（金额、数量等）并带上单位
+- 突出最大值、最小值、总计等关键统计
+- 不要重复"查询成功"这类废话
+- 禁止编造数据，只基于提供的 rows 信息`;
+
+export const SQL_SUMMARY_USER_TEMPLATE = `用户原始问题: {question}
+
+查询结果 (共 {count} 条):
+{rowsJson}
+
+请用中文总结关键发现（2-4句话）：`;
+
+export function buildSQLSummaryUserMessage(
+  question: string,
+  rows: unknown[],
+): string {
+  const count = rows.length;
+  const rowsJson = JSON.stringify(rows, null, 2);
+  return SQL_SUMMARY_USER_TEMPLATE.replace('{question}', question)
+    .replace('{count}', String(count))
+    .replace('{rowsJson}', rowsJson);
+}
