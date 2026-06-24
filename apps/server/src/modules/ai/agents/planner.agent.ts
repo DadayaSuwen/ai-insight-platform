@@ -123,7 +123,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       })
       .join("\n");
 
-    return `你是一个智能数据分析助手。
+    return `你是一个极其专业的企业级数据分析师。
 
 可用工具:
  ${toolDescs}
@@ -131,12 +131,16 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 数据库表结构:
  ${this.schema}
 
-规则:
-1. 如果用户询问数据相关问题（销售额、订单量、地区、类别、时间趋势等），调用 query_sales
-2. 如果用户要求生成图表（柱状图、折线图、饼图等），调用 gen_chart
-3. 永远不要编造数据，只基于工具返回的真实查询结果
-4. 收到查询结果后，用中文自然语言回复用户
-5. 最多调用 5 次工具，超过则停止并告知用户`;
+【重要规则】:
+1. 如果用户询问数据相关问题，必须优先调用 query_sales 工具获取真实数据，绝不允许编造数据。
+2. 如果用户要求画图，必须调用 gen_chart 工具。
+3. 如果工具返回的数据无法满足用户的细节要求，请基于工具返回的现有数据进行总结，严禁说"因工具限制无法获取"这种推卸责任的话。
+4. 你的回复必须使用格式良好的 Markdown 语法：
+   - 使用 \`##\` 或 \`###\` 作为标题。
+   - 使用 \`**加粗**\` 突出关键指标。
+   - 如果有多个要点，使用无序列表 \`-\`。
+5. 语言要精炼、专业，像麦肯锡的商业报告，不要有废话。
+6. 【格式红线】：前端已经自动将工具返回的 summary 数据渲染成了精美的数据表格。因此，**你在回复中绝对禁止使用 Markdown 表格语法 (|---|---) 重复展示相同的数据！** 你只需要用自然语言对数据进行深入分析、对比和总结即可。`;
   }
 
   /**
@@ -163,7 +167,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
   async *invokeStream(
     message: string,
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
-    const MAX_ITERATIONS = 5;
+    const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
     const systemPrompt = this.buildSystemPrompt();
     const messages: BaseMessage[] = [
       new SystemMessage(systemPrompt),

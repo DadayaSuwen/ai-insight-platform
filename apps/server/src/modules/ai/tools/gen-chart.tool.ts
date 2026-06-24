@@ -1,48 +1,95 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { sql } from "kysely";
 import { GenChartArgsSchema } from "./schemas";
 import { DatabaseService } from "../../database/database.service";
-import { ChartDataItem, ChartHelper } from "./chart.helper";
-import { buildSalesWhereClause } from "./sales-query.helper";
+import { ChartHelper } from "./chart.helper";
 
 export function createGenChartTool(
   db: DatabaseService,
-  chartHelper: ChartHelper, // 1. 修正命名
+  chartHelper: ChartHelper,
 ) {
   return tool(
     async (input: z.infer<typeof GenChartArgsSchema>) => {
       const { region, category, timeRange, groupBy, chartType } = input;
-
-      // 2. 使用公共的过滤条件构建器
-      const where = buildSalesWhereClause({ region, category, timeRange });
-
-      // 3. 断言 groupField 类型，让 Prisma 满意
-      const groupField = (groupBy ?? "category") as "region" | "category";
+      const groupField = (groupBy ?? "category") as
+        | "region"
+        | "category"
+        | "month";
 
       try {
-        const result = await db.prisma.sales.groupBy({
-          by: [groupField],
-          where,
-          _sum: { amount: true, quantity: true },
-          orderBy: { _sum: { amount: "desc" } },
-        });
+        let dateFilter = sql<boolean>`1=1`;
+        const now = new Date();
+        if (timeRange === "本月")
+          dateFilter = sql`o."orderDate" >= ${new Date(now.getFullYear(), now.getMonth(), 1)}`;
+        else if (timeRange === "今年")
+          dateFilter = sql`o."orderDate" >= ${new Date(now.getFullYear(), 0, 1)}`;
 
-        if (result.length === 0) {
-          return { error: "未查询到相关数据，无法生成图表" };
+        let rawResult: { name: string; value: number }[] = [];
+
+        if (groupField === "month") {
+          const result = await db.db
+            .selectFrom("SalesOrderItem as s")
+            .innerJoin("SalesOrder as o", "o.id", "s.orderId")
+            .select([
+              sql<string>`to_char(o."orderDate", 'YYYY-MM')`.as("name"),
+              sql<number>`SUM(s.sales)`.as("value"),
+            ])
+            .where(dateFilter)
+            .groupBy(sql`to_char(o."orderDate", 'YYYY-MM')`)
+            .orderBy("name", "asc")
+            .execute();
+
+          rawResult = result.map((r: any) => ({
+            name: r.name,
+            value: Number(r.value),
+          }));
+        } else if (groupField === "category") {
+          let query = db.db
+            .selectFrom("SalesOrderItem as s")
+            .innerJoin("Product as p", "p.id", "s.productId")
+            .innerJoin("SalesOrder as o", "o.id", "s.orderId")
+            .select([
+              "p.category as name",
+              sql<number>`SUM(s.sales)`.as("value"),
+            ])
+            .where(dateFilter)
+            .groupBy("p.category")
+            .orderBy("value", "desc");
+
+          if (category && category !== "全部")
+            query = query.where("p.category", "=", category);
+
+          const result = await query.execute();
+          rawResult = result.map((r: any) => ({
+            name: r.name,
+            value: Number(r.value),
+          }));
+        } else {
+          let query = db.db
+            .selectFrom("SalesOrderItem as s")
+            .innerJoin("SalesOrder as o", "o.id", "s.orderId")
+            .innerJoin("Customer as c", "c.id", "o.customerId")
+            .select(["c.region as name", sql<number>`SUM(s.sales)`.as("value")])
+            .where(dateFilter)
+            .groupBy("c.region")
+            .orderBy("value", "desc");
+
+          if (region && region !== "全部")
+            query = query.where("c.region", "=", region);
+
+          const result = await query.execute();
+          rawResult = result.map((r: any) => ({
+            name: r.name,
+            value: Number(r.value),
+          }));
         }
 
-        const chartData = result.map((r) => ({
-          name: r[groupField],
-          value: r._sum.amount || 0,
-        })) as ChartDataItem[];
+        if (rawResult.length === 0)
+          return { error: "未查询到相关数据，无法生成图表" };
 
-        // 4. 去掉无意义的 await，直接调用同步方法
-        const chart = chartHelper.generate(chartData, chartType, groupField);
-
-        return {
-          chartType: chartType,
-          chart: chart,
-        };
+        const chart = chartHelper.generate(rawResult, chartType, groupField);
+        return { chartType, chart };
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) };
       }
@@ -50,10 +97,8 @@ export function createGenChartTool(
     {
       name: "gen_chart",
       description:
-        "生成销售数据可视化图表。支持柱状图、折线图、饼图。当用户要求画图、可视化、看趋势时调用此工具。",
+        "生成销售数据可视化图表。支持柱状图、折线图、饼图。看趋势时必须用line图且groupBy填month。",
       schema: GenChartArgsSchema,
     },
   );
 }
-
-export type GenChartTool = ReturnType<typeof createGenChartTool>;

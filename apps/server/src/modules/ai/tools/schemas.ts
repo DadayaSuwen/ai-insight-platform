@@ -18,10 +18,10 @@ export const QuerySalesArgsSchema = z.object({
     .nullish()
     .describe("时间范围，默认为'全部'"),
   groupBy: z
-    .enum(["region", "category", "none"])
+    .enum(["region", "category", "month", "none"])
     .nullish()
     .describe(
-      "聚合维度。如果用户要按地区统计则填region，按类别则填category，否则填none",
+      "聚合维度。按地区填region，按类别填category，按月份趋势填month，不填none",
     ),
 });
 
@@ -39,9 +39,9 @@ export const GenChartArgsSchema = z.object({
     .nullish()
     .describe("时间范围"),
   groupBy: z
-    .enum(["region", "category"])
+    .enum(["region", "category", "month"])
     .nullish()
-    .describe("分组维度，默认category"),
+    .describe("分组维度，默认category。如果看趋势必须填month"),
   chartType: z
     .enum(["bar", "line", "pie"])
     .describe("图表类型：柱状图、折线图、饼图"),

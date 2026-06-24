@@ -20,12 +20,37 @@ function newId(): string {
 
 /** Preset quick-command chips shown in the empty state and below the header */
 const QUICK_COMMANDS = [
-  { label: "按类目统计销售额", icon: "📊", query: "按类别显示销售额" },
-  { label: "月度销售趋势", icon: "📈", query: "展示月度销售趋势" },
-  { label: "Top 5 客户", icon: "👑", query: "销量最高的5个客户" },
-  { label: "地区分布", icon: "🗺️", query: "按地区统计销量分布" },
-  { label: "同比分析", icon: "📉", query: "今年与去年同期的销售对比" },
-  { label: "库存预警", icon: "⚠️", query: "哪些商品库存低于100" },
+  {
+    label: "本月销售总览",
+    icon: "📊",
+    query: "帮我统计本月的总销售额、订单量和销量，并给出一个概览。",
+  },
+  {
+    label: "各品类业绩对比",
+    icon: "📈",
+    query:
+      "对比各类别商品今年的销售额和利润，画出柱状图，并分析哪个品类表现最好。",
+  },
+  {
+    label: "年度销售趋势",
+    icon: "📉",
+    query: "分析今年每个月的销售趋势，画出折线图，找出销售额最高和最低的月份。",
+  },
+  {
+    label: "客户画像洞察",
+    icon: "👥",
+    query: "对比不同客户类型在购买品类上的偏好差异，并给出商业建议。",
+  },
+  {
+    label: "地区利润分析",
+    icon: "🗺️",
+    query: "分析各个地区的利润表现，哪些地区亏损较多？",
+  },
+  {
+    label: "爆款商品盘点",
+    icon: "🔥",
+    query: "查一下今年销量最高的前 5 个商品，以及它们的总销售额。",
+  },
 ];
 
 /** Simulated connection health — in production this would ping /database/schema */
@@ -190,7 +215,7 @@ function ChatWindow() {
       >
         <div className="flex items-center gap-3">
           {/* Logo mark */}
-          <div
+          {/* <div
             className="flex h-9 w-9 items-center justify-center rounded-lg text-white"
             style={{ background: "var(--accent)" }}
           >
@@ -206,7 +231,7 @@ function ChatWindow() {
             >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-          </div>
+          </div> */}
           <div>
             <h1
               className="text-sm font-semibold"
@@ -338,37 +363,6 @@ function ChatWindow() {
       </header>
 
       {/* ── Quick Commands ─────────────────────────────────── */}
-      {isEmpty && (
-        <div
-          className="shrink-0 border-b px-6 py-3"
-          style={{
-            borderColor: "var(--border)",
-            background: "var(--bg-primary)",
-          }}
-        >
-          <div className="mx-auto max-w-5xl">
-            <p
-              className="mb-2.5 text-xs font-medium"
-              style={{ color: "var(--text-muted)" }}
-            >
-              快捷指令
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_COMMANDS.map((cmd) => (
-                <button
-                  key={cmd.query}
-                  className="quick-chip"
-                  onClick={() => handleQuickCommand(cmd.query)}
-                  disabled={isLoading}
-                >
-                  <span>{cmd.icon}</span>
-                  <span>{cmd.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Messages ───────────────────────────────────────── */}
       <div
@@ -377,7 +371,7 @@ function ChatWindow() {
         className="flex-1 overflow-y-auto"
         style={{ background: "var(--bg-secondary)" }}
       >
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
+        <div className="mx-auto flex flex-col gap-4 p-4">
           {isEmpty && (
             <div
               className="flex flex-col items-center justify-center py-16 text-center"
@@ -411,7 +405,7 @@ function ChatWindow() {
           )}
           {messages.map((m) => (
             <div key={m.id} className="msg-enter">
-              <MessageBubble message={m} />
+              <MessageBubble message={m} onSuggestionClick={handleSend} />
             </div>
           ))}
         </div>
@@ -448,7 +442,37 @@ function ChatWindow() {
           </button>
         </div>
       )}
-
+      {isEmpty && (
+        <div
+          className="shrink-0 border-b px-6 py-3"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--bg-primary)",
+          }}
+        >
+          <div className="mx-auto">
+            <p
+              className="mb-2.5 text-xs font-medium"
+              style={{ color: "var(--text-muted)" }}
+            >
+              快捷指令
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_COMMANDS.map((cmd) => (
+                <button
+                  key={cmd.query}
+                  className="quick-chip"
+                  onClick={() => handleQuickCommand(cmd.query)}
+                  disabled={isLoading}
+                >
+                  <span>{cmd.icon}</span>
+                  <span>{cmd.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Input ──────────────────────────────────────────── */}
       <ChatInput onSend={handleSend} isLoading={isLoading} />
     </div>

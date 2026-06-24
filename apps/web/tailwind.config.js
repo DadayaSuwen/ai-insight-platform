@@ -1,19 +1,16 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [require("@tailwindcss/typography")],
   // Safelist to ensure Tailwind classes are detected during development
   safelist: [
     // Common utility classes that will be used
-    'bg-white',
-    'text-black',
-    'p-4',
-    'm-2',
+    "bg-white",
+    "text-black",
+    "p-4",
+    "m-2",
   ],
-}
+};
