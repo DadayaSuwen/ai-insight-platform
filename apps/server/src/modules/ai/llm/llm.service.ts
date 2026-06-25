@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ThinkingChatOllama } from "./thinking-chat-ollama";
+import { shouldEnableThinking } from "./thinking-detection";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
@@ -334,12 +335,16 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
 
   private defaultOllamaChat() {
     // 同样使用 ThinkingChatOllama 子类，统一 reasoning_content 处理逻辑
+    // 根据 OLLAMA_MODEL 自动判断是否启用 thinking（qwen2.5 关闭 / qwen3 / deepseek-r1 开启）
+    const model = this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b";
+    const thinking = shouldEnableThinking(model, undefined);
     return new ThinkingChatOllama({
       baseUrl:
         this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
-      model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b",
+      model,
       temperature: 0,
       numCtx: 4096,
+      thinking,
     });
   }
 

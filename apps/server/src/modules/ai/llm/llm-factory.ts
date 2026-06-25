@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { ChatOllama } from "@langchain/ollama";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
 import { ThinkingChatOllama } from "./thinking-chat-ollama";
+import { ThinkingChatOpenAI } from "./thinking-chat-openai";
+import { resolveThinkingEnabled } from "./thinking-detection";
 
 /**
  * Factory — creates the appropriate LangChain chat model from a runtime config.
@@ -11,8 +11,14 @@ import { ThinkingChatOllama } from "./thinking-chat-ollama";
  * of which provider is active.
  */
 export function createChatModel(config: LLMConfig) {
+  // ★ thinking 自动检测：用户没显式配置时按模型名启发式判断
+  const enableThinking = resolveThinkingEnabled(config);
+
   switch (config.provider) {
     case LLMProvider.OPENAI: {
+      // DeepSeek API 走 OpenAI 兼容协议（baseUrl=https://api.deepseek.com/v1）
+      // 用 ThinkingChatOpenAI 子类处理 reasoning_content 透传。
+      // 普通 OpenAI 模型（gpt-4o 等）关闭 thinking 走原版路径。
       const opts: Record<string, unknown> = {
         modelName: config.model,
         temperature: config.temperature ?? 0,
@@ -22,7 +28,10 @@ export function createChatModel(config: LLMConfig) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         opts.configuration = { baseURL: config.baseUrl };
       }
-      return new ChatOpenAI(opts);
+      return new ThinkingChatOpenAI({
+        ...opts,
+        thinking: enableThinking,
+      } as any);
     }
 
     case LLMProvider.ANTHROPIC: {
@@ -50,6 +59,7 @@ export function createChatModel(config: LLMConfig) {
         baseUrl: config.baseUrl || "http://localhost:11434",
         model: config.model,
         temperature: config.temperature ?? 0,
+        thinking: enableThinking,
       });
     }
   }

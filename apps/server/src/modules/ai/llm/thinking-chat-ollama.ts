@@ -21,17 +21,38 @@ import { randomUUID } from "crypto";
  * 用法：直接 new ThinkingChatOllama({...}) 替代 new ChatOllama({...})。
  * 其余 API（bindTools / invoke / stream）与 ChatOllama 完全一致。
  */
+export interface ThinkingChatOllamaFields extends ChatOllamaInput {
+  /**
+   * 是否启用 thinking 模式。
+   *  - true → Ollama 请求顶层加 `think: true`，流式响应包含 thinking 字段
+   *  - false（默认）→ 不开 thinking，原生 ChatOllama 行为
+   */
+  thinking?: boolean;
+}
+
 export class ThinkingChatOllama extends ChatOllama {
-  constructor(fields?: ChatOllamaInput) {
+  private readonly enableThinking: boolean;
+
+  constructor(fields?: ThinkingChatOllamaFields) {
     super(fields);
-    // 强制开启 Ollama 的 thinking 模式（让流式响应包含 thinking 字段）。
-    // Ollama API 0.6+：`think: true` 让 qwen3 / deepseek-r1 输出 reasoning。
-    (this as any).think = true;
+    this.enableThinking = fields?.thinking ?? false;
+    // 把 enableThinking 映射到 Ollama 0.5.18 的顶层 think 字段（与原版 ChatOllama 一致）。
+    (this as any).think = this.enableThinking;
+  }
+
+  /** 用于 factory 判断是否开了 thinking */
+  isThinkingEnabled(): boolean {
+    return this.enableThinking;
   }
 
   /**
    * 覆盖 _streamResponseChunks —— 自己处理 Ollama 原始流，
    * 不依赖 0.2.4 的 utils.js。
+   *
+   * 注意：当 thinking 未启用（enableThinking=false）时，Ollama 不会发 thinking 字段，
+   * 0.2.4 的 utils.js 也能正常工作；这种情况下我们走原生路径（return super._streamResponseChunks）。
+   * 但因为 _streamResponseChunks 是 async generator，无法简单 super 调用，
+   * 所以这里直接重写统一路径：thinking 字段缺失时它就是空字符串，无副作用。
    */
   override async *_streamResponseChunks(
     messages: BaseMessage[],
@@ -48,7 +69,8 @@ export class ThinkingChatOllama extends ChatOllama {
 
     // ★ 出站拦截：把 AIMessage.additional_kwargs.reasoning_content
     // 写入 Ollama 请求的 thinking 字段，并转成 Ollama message 格式。
-    const ollamaMessages = messagesToOllama(messages);
+    // 当 enableThinking=false 时，messagesToOllama 不会写 thinking 字段（向 0.2.4 原版兼容）。
+    const ollamaMessages = messagesToOllama(messages, this.enableThinking);
 
     const usageMetadata = {
       input_tokens: 0,
@@ -77,6 +99,8 @@ export class ThinkingChatOllama extends ChatOllama {
 
       // ★ 入站拦截：自己构造 AIMessageChunk，把 thinking 写入
       // additional_kwargs.reasoning_content（不污染 content）。
+      // 当 enableThinking=false 时，thinking 始终为空字符串（Ollama 不会发），
+      // additional_kwargs 为空对象，与原版行为一致。
       const thinkingRaw = responseMessage?.thinking;
       const contentRaw = responseMessage?.content;
       const thinking = typeof thinkingRaw === "string" ? thinkingRaw.trim() : "";
@@ -84,9 +108,8 @@ export class ThinkingChatOllama extends ChatOllama {
 
       const message = new AIMessageChunk({
         content,
-        additional_kwargs: thinking.length > 0
-          ? { reasoning_content: thinking }
-          : {},
+        additional_kwargs:
+          thinking.length > 0 ? { reasoning_content: thinking } : {},
         tool_call_chunks: responseMessage?.tool_calls?.map((tc: any) => ({
           name: tc.function?.name,
           args: JSON.stringify(tc.function?.arguments ?? {}),
@@ -126,8 +149,11 @@ export class ThinkingChatOllama extends ChatOllama {
  *    其中 thinking 来自 additional_kwargs.reasoning_content（Qwen3 API 必须）。
  *  - ToolMessage → { role:"tool", content }
  *  - HumanMessage / SystemMessage → 标准透传。
+ *
+ * @param enableThinking  false（默认）时不读 reasoning_content，与原版兼容；
+ *                        true 时把 reasoning_content 写入 Ollama thinking 字段。
  */
-function messagesToOllama(messages: BaseMessage[]): any[] {
+function messagesToOllama(messages: BaseMessage[], enableThinking = false): any[] {
   return messages.flatMap((msg) => {
     const type = msg._getType();
     if (type === "system") {
@@ -139,10 +165,11 @@ function messagesToOllama(messages: BaseMessage[]): any[] {
     if (type === "ai") {
       const ai: any = msg as any;
       const content = stringContent(ai.content);
-      const reasoning =
-        ai.additional_kwargs?.reasoning_content ??
-        ai.thinking ??
-        null;
+      // 仅在启用 thinking 时才把 reasoning_content 透传到 Ollama 请求
+      // （关闭 thinking 时不写，避免给非思考模型传多余字段）
+      const reasoning = enableThinking
+        ? (ai.additional_kwargs?.reasoning_content ?? ai.thinking ?? null)
+        : null;
       const toolCalls = ai.tool_calls?.length
         ? ai.tool_calls.map((tc: any) => ({
             id: tc.id,
