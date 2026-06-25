@@ -8,6 +8,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { LlmService } from "../llm/llm.service";
 import { DatabaseService } from "../../database/database.service";
 import { ChartHelper } from "../tools/chart.helper";
@@ -15,11 +16,15 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createQuerySalesTool, createGenChartTool } from "../tools";
 
 export interface PlannerToolCallData {
+  /** 稳定 UUID（chat.service.ts 注入），跨 turn 全局唯一；用于 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id 严格配对 */
+  id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface PlannerToolResultData {
+  /** 同 PlannerToolCallData.id —— 由 chat.service 替换为稳定 UUID */
+  id: string;
   name: string;
   result: Record<string, unknown>;
 }
@@ -185,6 +190,17 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       new HumanMessage(message),
     ];
 
+    // ★ 跨 turn 全局唯一的 id 注入器：
+    // planner 内部推入 messages 数组的 AIMessage.tool_calls[].id / ToolMessage.tool_call_id
+    // 以及 yield 给 chat.service 的 tool_call/tool_result 事件，都用 chat.service 注入的 UUID。
+    // 这样：
+    //   1. Ollama 函数名复用问题彻底根除（同一函数名跨 turn id 也不同）
+    //   2. planner 内部 messages 数组与 DB metadata.toolCalls[].id 完全一致
+    //   3. 下一轮重建历史时不需要任何 id 替换
+    // 用 generator function 闭包确保每次 next() 都拿到新 UUID，跨 turn 全局唯一
+    let idCounter = 0;
+    const idGenerator = () => `${randomUUID()}-${idCounter++}`;
+
     let iterations = 0;
 
     while (true) {
@@ -244,10 +260,27 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       }
 
       // 情况 B: 中间工具调用轮 → 整轮 text 不 yield 给前端
-      // 但**必须**把它作为 AIMessage content 放进 messages 数组
-      // （保留 LLM 上下文记忆），并通过 'thinking' 事件传给 chat.service.ts
-      // 存到 metadata.thinking 供调试。
-      messages.push(new AIMessage(currentTurnTextBuffer));
+      // 但**必须**把 text + tool_calls 作为**同一个** AIMessage 放进 messages 数组
+      // ——LangChain 严格要求 ToolMessage 的 tool_call_id 在它之前最近的 AIMessage.tool_calls[].id 里存在。
+      // 把 text 单独拆成不含 tool_calls 的 AIMessage 会导致 400 "tool must be a response to a preceding message with 'tool_calls'"。
+      // 把整轮 text 通过 'thinking' 事件透传给 chat.service.ts 存到 metadata.thinking 供调试。
+      // ★ 用 planner 自己的 idGenerator 生成稳定 UUID（避免 Ollama 函数名复用）
+      const toolCallsForMessage = finalMessage.tool_calls.map((tc) => {
+        const id = idGenerator();
+        return {
+          id,
+          name: tc.name ?? "",
+          args: tc.args ?? {},
+          type: "tool_call" as const,
+        };
+      });
+
+      messages.push(
+        new AIMessage({
+          content: currentTurnTextBuffer,
+          tool_calls: toolCallsForMessage,
+        }),
+      );
       if (currentTurnTextBuffer.length > 0) {
         yield {
           type: "thinking",
@@ -255,15 +288,19 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         };
       }
 
-      // 5. 执行工具
-      for (const toolCall of finalMessage.tool_calls) {
+      // 5. 执行工具（按 AIMessage.tool_calls 的顺序，复用同一 UUID 保证 ToolMessage.tool_call_id 严格配对）
+      for (let i = 0; i < finalMessage.tool_calls.length; i++) {
+        const toolCall = finalMessage.tool_calls[i];
+        const toolCallMeta = toolCallsForMessage[i];
         const toolName = toolCall.name ?? "";
         // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
         const toolArgs = toolCall.args ?? {};
+        // 复用 AIMessage.tool_calls[i].id（planner 生成的稳定 UUID）
+        const toolCallId = toolCallMeta.id;
 
         yield {
           type: "tool_call",
-          data: { name: toolName, args: toolArgs },
+          data: { id: toolCallId, name: toolName, args: toolArgs },
         };
 
         const tool = this.toolMap.get(toolName);
@@ -285,12 +322,12 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
         yield {
           type: "tool_result",
-          data: { name: toolName, result },
+          data: { id: toolCallId, name: toolName, result },
         };
 
         messages.push(
           new ToolMessage({
-            tool_call_id: toolCall.id ?? toolName,
+            tool_call_id: toolCallId,
             name: toolName,
             content: JSON.stringify(result),
           }),

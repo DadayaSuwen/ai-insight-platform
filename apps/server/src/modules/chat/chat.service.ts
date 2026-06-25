@@ -37,11 +37,12 @@ export class ChatService {
           let assistantThinking = ""; // ★ 中间轮被丢弃的思考文字（不入 content）
           const assistantToolCalls: any[] = [];
           const assistantToolResults: any[] = [];
-          // 配对 token：planner 严格按序发射 tool_call → tool_result，
-          // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
-          // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
-          // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
-          // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
+          // 配对 token：planner 已经自带稳定 UUID（用 crypto.randomUUID 生成），
+          // 我们在 tool_call 时暂存，tool_result 来时复用同一 id。
+          // 这样 metadata 里保存的 {id, name, args/result} 与 planner 内部
+          // AIMessage.tool_calls[].id 完全一致，下一轮 buildHistoryMessages
+          // 重建时 LangChain 校验 AIMessage.tool_calls[].id ↔ ToolMessage.tool_call_id
+          // 严格通过。
           let pendingToolCallId: string | null = null;
 
           // 4. 消费 AiService 的流
@@ -67,19 +68,18 @@ export class ChatService {
                 assistantThinking += event.data.content;
                 break;
               case "tool_call":
-                // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
-                pendingToolCallId = randomUUID();
-                assistantToolCalls.push({
-                  id: pendingToolCallId,
-                  ...event.data,
-                });
+                // planner 已经在 event.data.id 里塞了稳定 UUID（避免 Ollama
+                // 函数名复用导致的 400 Duplicate tool_call_id）。
+                pendingToolCallId = event.data.id ?? null;
+                assistantToolCalls.push({ ...event.data });
                 break;
               case "tool_result":
-                // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
-                // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
+                // planner 严格按序发射 tool_call → tool_result，所以这里
+                // pendingToolCallId 一定非空；万一缺失，做兜底
+                // 强制用 planner 的稳定 UUID 覆盖 event.data.id（避免 id 不一致）
                 assistantToolResults.push({
-                  id: pendingToolCallId ?? randomUUID(),
                   ...event.data,
+                  id: pendingToolCallId ?? event.data.id ?? randomUUID(),
                 });
                 pendingToolCallId = null;
                 break;
