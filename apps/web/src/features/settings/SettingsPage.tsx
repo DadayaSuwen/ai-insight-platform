@@ -7,19 +7,16 @@ import { LLMProvider } from '@workspace/types';
 const PROVIDER_LABELS: Record<LLMProvider, string> = {
   [LLMProvider.OPENAI]: 'OpenAI',
   [LLMProvider.ANTHROPIC]: 'Anthropic',
-  [LLMProvider.OLLAMA]: 'Ollama (本地)',
 };
 
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  [LLMProvider.OPENAI]: 'gpt-4o',
+  [LLMProvider.OPENAI]: 'gpt-4o-mini',
   [LLMProvider.ANTHROPIC]: 'claude-3-5-sonnet-20240620',
-  [LLMProvider.OLLAMA]: 'qwen2.5:3b',
 };
 
 const BASE_URLS: Record<LLMProvider, string> = {
   [LLMProvider.OPENAI]: 'https://api.openai.com/v1',
   [LLMProvider.ANTHROPIC]: 'https://api.anthropic.com',
-  [LLMProvider.OLLAMA]: 'http://localhost:11434',
 };
 
 interface FormState {
@@ -45,10 +42,10 @@ export default function SettingsPage() {
     useAppStore();
 
   const [form, setForm] = useState<FormState>({
-    provider: LLMProvider.OLLAMA,
+    provider: LLMProvider.OPENAI,
     apiKey: '',
-    baseUrl: BASE_URLS[LLMProvider.OLLAMA],
-    model: DEFAULT_MODELS[LLMProvider.OLLAMA],
+    baseUrl: BASE_URLS[LLMProvider.OPENAI],
+    model: DEFAULT_MODELS[LLMProvider.OPENAI],
     temperature: 0,
   });
 
@@ -121,7 +118,7 @@ export default function SettingsPage() {
     if (!llmHealth) return undefined;
     if (p === LLMProvider.OPENAI) return llmHealth.openai;
     if (p === LLMProvider.ANTHROPIC) return llmHealth.anthropic;
-    return llmHealth.ollama;
+    return undefined;
   };
 
   return (
@@ -158,7 +155,7 @@ export default function SettingsPage() {
             提供商
           </p>
           <div className="flex gap-2">
-            {([LLMProvider.OLLAMA, LLMProvider.OPENAI, LLMProvider.ANTHROPIC] as LLMProvider[]).map(
+            {([LLMProvider.OPENAI, LLMProvider.ANTHROPIC] as LLMProvider[]).map(
               (p) => {
                 const isActiveTab = form.provider === p;
                 const isActiveProvider = activeProvider === p;
@@ -213,8 +210,6 @@ export default function SettingsPage() {
           </button>
           {llmHealth && (
             <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-              Ollama: {healthForProvider(LLMProvider.OLLAMA) === true ? '✓ 可用' : healthForProvider(LLMProvider.OLLAMA) === false ? '✗ 不可用' : '未测试'}
-              {' · '}
               OpenAI: {healthForProvider(LLMProvider.OPENAI) === true ? '✓ 可用' : healthForProvider(LLMProvider.OPENAI) === false ? '✗ ' + (llmHealth ? 'API Key 未配置' : '不可用') : '未测试'}
               {' · '}
               Anthropic: {healthForProvider(LLMProvider.ANTHROPIC) === true ? '✓ 可用' : healthForProvider(LLMProvider.ANTHROPIC) === false ? '✗ ' + (llmHealth ? 'API Key 未配置' : '不可用') : '未测试'}
@@ -223,46 +218,42 @@ export default function SettingsPage() {
         </section>
 
         {/* API Key */}
-        {form.provider !== LLMProvider.OLLAMA && (
-          <section className="mb-4">
-            <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-              API Key
-            </label>
-            <input
-              type="password"
-              value={form.apiKey}
-              onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-              placeholder={form.provider === LLMProvider.OPENAI ? 'sk-...' : 'sk-ant-...'}
-              className="w-full rounded-xl border px-3 py-2 text-sm"
-              style={{
-                background: 'var(--bg-secondary)',
-                borderColor: 'var(--border)',
-                color: 'var(--text-primary)',
-              }}
-            />
-          </section>
-        )}
+        <section className="mb-4">
+          <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            API Key
+          </label>
+          <input
+            type="password"
+            value={form.apiKey}
+            onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
+            placeholder={form.provider === LLMProvider.OPENAI ? 'sk-...' : 'sk-ant-...'}
+            className="w-full rounded-xl border px-3 py-2 text-sm"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderColor: 'var(--border)',
+              color: 'var(--text-primary)',
+            }}
+          />
+        </section>
 
         {/* Base URL */}
-        {form.provider !== LLMProvider.OLLAMA && (
-          <section className="mb-4">
-            <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-              Base URL
-            </label>
-            <input
-              type="text"
-              value={form.baseUrl}
-              onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-              placeholder={BASE_URLS[form.provider]}
-              className="w-full rounded-xl border px-3 py-2 text-sm"
-              style={{
-                background: 'var(--bg-secondary)',
-                borderColor: 'var(--border)',
-                color: 'var(--text-primary)',
-              }}
-            />
-          </section>
-        )}
+        <section className="mb-4">
+          <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            Base URL
+          </label>
+          <input
+            type="text"
+            value={form.baseUrl}
+            onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
+            placeholder={BASE_URLS[form.provider]}
+            className="w-full rounded-xl border px-3 py-2 text-sm"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderColor: 'var(--border)',
+              color: 'var(--text-primary)',
+            }}
+          />
+        </section>
 
         {/* Model */}
         <section className="mb-4">
