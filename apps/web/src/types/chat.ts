@@ -14,8 +14,13 @@ export interface ChatMessageRecord {
   sessionId: string;
   role: "user" | "assistant";
   content: string;
-  /** JSON.stringify({ toolCalls, toolResults }) or null */
-  metadata: string | null;
+  /**
+   * ChatMessage.metadata 是 Postgres JSONB 列。
+   * Kysely + pg 驱动读出时自动 JSON.parse 为对象；
+   * 极少数情况（老脏数据 / driver 异常）可能是 string。
+   * 消费方必须 typeof 判断，详见 recordToChatMessage.ts。
+   */
+  metadata: string | Record<string, unknown> | null;
   createdAt: string;
 }
 
