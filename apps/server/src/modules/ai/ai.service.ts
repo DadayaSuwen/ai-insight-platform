@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import type { BaseMessage } from "@langchain/core/messages";
 import { PlannerAgent, type PlannerStreamEvent } from "./agents/planner.agent";
 
 /**
@@ -16,7 +17,7 @@ export class AiService {
    */
   async *processStream(
     message: string,
-    historyMessages: any[] = [],
+    historyMessages: BaseMessage[] = [],
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     this.logger.log(`[stream] Processing message: ${message}`);
 
