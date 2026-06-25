@@ -46,6 +46,7 @@ docs/
 | `development/REFACTOR.md` | 架构重构记录：从 RouterAgent → Planner + Function Calling |
 | `development/PHASE_11_DATA_REFACTOR.md` | Phase 11：Kysely / Superstore CSV / Planner & Tools 完善 |
 | `development/MULTI_TURN_DIALOGUE.md` | **新增** 多轮次对话 & 聊天 UI 增强（侧栏 / Welcome / Toast / 停止按钮 / 折叠） |
+| `development/2026-06-25_LLM_AND_CHAT_PERSISTENCE_FIX.md` | **新增** LLMConfig 持久化 + 多轮上下文 + tool_call_id 修复（Prisma→Kysely 收尾、UUID tool_call id、迁移 SQL） |
 
 ## 过时文档（仅供参考）
 
@@ -82,7 +83,7 @@ LLM 决定调用工具 → 执行 → 结果回灌 → 再次调用 LLM
 **前端特性**：
 
 - ✅ **多轮对话**：侧栏会话列表 / 新建 / 切换 / 删除 / localStorage 持久化
-- ✅ **多轮 tool_calls 历史回放**：修复 3 个后端 Bug 后，LLM 可看到前几轮的工具调用
+- ✅ **多轮 tool_calls 历史回放**：修复 6 个后端 Bug（见 `2026-06-25_LLM_AND_CHAT_PERSISTENCE_FIX.md`）后，LLM 可看到前几轮的工具调用
 - ✅ **Gemini 风格欢迎页**：新用户首次进入显示大标题 + 副标题 + 推荐问题
 - ✅ **Toast 提示**：删除/新建成功失败即时反馈
 - ✅ **发送→停止按钮**：流式生成中可点击中止

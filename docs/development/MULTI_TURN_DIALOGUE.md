@@ -355,3 +355,21 @@ const handleButtonClick = () => {
 4. **导出 / 分享会话** —— 把消息序列化为 Markdown
 5. **多窗口实时同步** —— 当前不同 tab 不会自动同步，刷新即同步
 6. **删除时二次确认改为悬停展开**（避免误删）
+
+---
+
+## 九、后续增量 (2026-06-25)
+
+2026-06-25 在 `fix/llmconfig-persistence-and-multi-turn-context` 分支上提交了 3 个 commit，修复了 6 个后端 Bug，部分与本文档第 3.2 / 第六节列举的 Bug 重复但**根因不同**：
+
+| 新增/修正的 Bug | 与本文档的关联 |
+|---|---|
+| 多轮对话上下文**仍然**丢失 | 第六节 #2（`buildHistoryMessages` 读错列）已修，但 LLM 拿到历史后又被 `planner.agent.ts` 的 dict 协议循环丢弃；属于**契约未对齐**的二次问题 |
+| `tool_call_id` 跨 turn 重复 400 | 第六节 #4 修了 `ToolMessage.name` 缺失，但 Ollama 复用的"函数名 id"在跨 turn 时重复导致 400 |
+| `LLMConfig` 持久化不可用（`prisma.lLMConfig` 报错） | 不在本文档范围内（LLMConfig 之前没单独文档） |
+| `@updatedAt` NOT NULL 约束 | 同上 |
+| `PrismaService` 死代码 | 同上 |
+
+详细记录、commit 拆分、验证清单、迁移 SQL 用法见：
+
+> 📄 [`2026-06-25_LLM_AND_CHAT_PERSISTENCE_FIX.md`](2026-06-25_LLM_AND_CHAT_PERSISTENCE_FIX.md)
