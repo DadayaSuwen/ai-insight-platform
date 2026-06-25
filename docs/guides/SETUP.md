@@ -30,16 +30,11 @@ pnpm install
 # 数据库
 DATABASE_URL=postgresql://app:password@localhost:5432/ai_insight
 
-# Ollama (LLM 提供方)
-OLLAMA_BASE_URL=http://localhost:11434
-# 推荐 qwen2.5:3b (响应 ~1s); qwen3:8b 准确度更高但慢 (28s+)
-OLLAMA_MODEL=qwen2.5:3b
-
 # Server
 PORT=3000
 ```
 
-> **模型选择**: `qwen2.5:3b` 是当前的默认,体积小(~2GB)、响应快(1-3s),适合开发期高频迭代; `qwen3:8b` (~5GB) 在 4-way 意图分类和复杂 SQL 上更稳,但单次响应 20-30s。生产环境可根据硬件条件切换。
+> **LLM API Key 配置**: 不再使用环境变量注入。启动前端后进入 `Settings` 页面,选择 OpenAI 或 Anthropic provider,填入 API Key 和模型名（如 `gpt-4o-mini` / `claude-3-5-sonnet-20240620`）即可。Base URL 可留空使用默认。
 
 ### 4. 启动数据库
 
@@ -47,27 +42,14 @@ PORT=3000
 docker-compose up -d postgres
 ```
 
-### 5. 启动 Ollama (LLM 提供方)
-
-```bash
-# Docker 方式 (推荐)
-docker-compose up -d ollama
-
-# 拉取模型 (默认 qwen2.5:3b,体积小,启动快)
-docker exec ai-insight-platform-ollama-1 ollama pull qwen2.5:3b
-
-# 验证模型可用
-curl http://localhost:11434/api/tags
-```
-
-### 6. 初始化数据库
+### 5. 初始化数据库
 
 ```bash
 # 一键完成: 生成 Prisma Client + 推送 schema + 写入种子数据
 pnpm db:seed
 ```
 
-### 7. 启动开发服务器
+### 6. 启动开发服务器
 
 ```bash
 # 同时启动前后端 (推荐)

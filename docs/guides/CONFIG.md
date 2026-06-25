@@ -11,10 +11,10 @@
 | 变量 | 必填 | 默认 | 说明 |
 |------|------|------|------|
 | `DATABASE_URL` | ✅ | — | PostgreSQL 连接字符串,例如 `postgresql://app:password@localhost:5432/ai_insight` |
-| `OLLAMA_BASE_URL` | ❌ | `http://localhost:11434` | Ollama HTTP 服务地址 |
-| `OLLAMA_MODEL` | ❌ | `qwen3:8b` | Ollama 模型名;开发期推荐 `qwen2.5:3b` (响应 ~1s),生产期用 `qwen3:8b` (准确度更高) |
 | `PORT` | ❌ | `3000` | NestJS 服务端口 |
 | `FRONTEND_ORIGIN` | ❌ | `http://localhost:5173` | CORS 白名单,Vite dev server |
+
+> LLM API Key / 模型 / baseUrl 通过前端 Settings 页面 `POST /llm/config` 写入数据库。不再使用环境变量注入。
 
 ### `apps/web/.env`
 
@@ -22,15 +22,18 @@
 |------|------|------|------|
 | `VITE_API_BASE_URL` | ❌ | `http://localhost:3000` | 后端 API 地址 |
 
-### 模型选择建议
+### 模型选择建议（云端 API）
 
-| 模型 | 体积 | 单次响应 | 适用场景 |
+| 模型 | 提供方 | 单次响应 | 适用场景 |
 |------|------|---------|---------|
-| `qwen2.5:3b` | ~2GB | ~1s | 开发期高频迭代、CI、单测 smoke |
-| `qwen3:8b` | ~5GB | ~20-30s | 生产环境、复杂 SQL、深度分析 |
-| `llama3.2:latest` | ~2GB | ~1s | 备选,Qwen 不可用时降级 |
+| `gpt-4o-mini` | OpenAI | ~1-2s | 开发期高频迭代、CI、单测 smoke（默认） |
+| `gpt-4o` | OpenAI | ~2-4s | 复杂 SQL、深度分析 |
+| `o1-mini` / `o1-preview` | OpenAI | ~10-30s | 强推理任务（默认开启 thinking） |
+| `claude-3-haiku-20240307` | Anthropic | ~1-2s | 轻量任务、成本敏感场景 |
+| `claude-3-5-sonnet-20240620` | Anthropic | ~3-5s | 生产环境、复杂 SQL、深度分析（默认） |
+| `claude-3-opus-20240229` | Anthropic | ~5-10s | 最高质量输出 |
 
-> 模型体积和速度取决于 Ollama 是否用 GPU 推理。CPU 模式下即使是 3B 也可能 3-5s。
+> 响应速度取决于 provider 端负载与网络延迟，thinking 模型（o1 / DeepSeek-R1 等）首 token 延迟更高。
 
 ---
 
@@ -52,16 +55,16 @@
 {
   "configs": [
     {
-      "provider": "ollama",
-      "model": "qwen3:8b",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
       "temperature": 0,
-      "baseUrl": "http://localhost:11434"
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "sk-..."
     },
     {
-      "provider": "openai",
-      "model": "gpt-4o",
-      "temperature": 0.7,
-      "apiKey": "***"
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20240620",
+      "temperature": 0
     }
   ],
   "activeProvider": "openai"
@@ -93,7 +96,6 @@
 健康检查**从数据库读取 API Key**，而非 `process.env`。返回示例：
 ```json
 {
-  "ollama": { "ok": true, "latencyMs": 12 },
   "openai": { "ok": true, "latencyMs": 143 },
   "anthropic": { "ok": false, "error": "No API key configured" }
 }

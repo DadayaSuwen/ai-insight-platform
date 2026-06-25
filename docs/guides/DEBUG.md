@@ -88,40 +88,32 @@ cd apps/web
 npx tsc --noEmit  # 查看具体错误
 ```
 
-### Ollama 连接失败
+### LLM API 连接失败 / 401 Unauthorized
 
-**问题**: `ECONNREFUSED` on port 11434
+**问题**: `401 Unauthorized` 或 `missing API key`
+
+**根因**: 前端 Settings 页面未配置对应 provider 的 API Key,或 Key 无效/过期。
 
 **解决**:
-```bash
-# 启动 Ollama
-docker-compose up -d ollama
+1. 进入前端 `Settings` 页面
+2. 选择 provider（OpenAI / Anthropic）
+3. 填入有效的 API Key 并保存
+4. 用"测试连接"按钮验证
 
-# 拉取模型
-docker exec ai-insight-platform-ollama-1 ollama pull qwen2.5:3b
-
-# 验证
-curl http://localhost:11434/api/tags
-```
+如使用 OpenAI 兼容端点（如 DeepSeek），在 Base URL 字段填入对应端点 URL（如 `https://api.deepseek.com/v1`）。
 
 ### LLM 超时 / 响应慢
 
 **问题**: `LLM timeout after NNNNms`,或者 chat 接口 hang 几十秒。
 
 **根因**:
-- qwen3:8b 模型在 CPU 模式下很慢 (28s+)。默认配置推荐用 `qwen2.5:3b`。
-- Ollama 首次加载模型时需要把权重读进内存,首次调用会慢几秒。
-- 大 prompt (数据 >50 行) 会显著拖慢响应。
+- 云端 LLM 在 prompt 较大（数据 >50 行）时会显著拖慢响应。
+- 高 reasoning 模型（o1 / o3 / DeepSeek-R1）默认开启 thinking，单次响应可能 30s+。
+- 网络抖动或 provider 端偶发 5xx。
 
 **解决**:
-```bash
-# 切到快模型 (推荐开发期)
-echo "OLLAMA_MODEL=qwen2.5:3b" >> apps/server/.env
-pnpm --filter @ai-insight/server dev
-
-# 检查模型是否在 GPU 上跑
-ollama ps
-```
+- 进入 Settings 切换到更轻量的模型（如 `gpt-4o-mini` / `claude-3-haiku-20240307`）。
+- 在 Settings 中显式关闭 `thinking` 字段（若 provider 支持）。
 
 **超时阈值** 在 `LlmService` 调用方控制:
 - PlannerAgent 循环: 最多 5 次迭代,单次工具调用 30s
@@ -250,6 +242,5 @@ EXPLAIN ANALYZE SELECT * FROM "Sales" WHERE ...;
 
 ### SSE 流式输出卡顿
 
-- 检查 `ollama ps` 模型是否在 GPU 上跑 (CPU 模式 8B 模型很慢)
-- `num_predict` 设小一点 (单次回复不需要 4096 tokens)
 - 检查 `pnpm dev:server` 终端是否有重复日志 (说明有重连 bug)
+- 用更轻量的模型 (`gpt-4o-mini` / `claude-3-haiku-20240307`) 加快首 token 延迟

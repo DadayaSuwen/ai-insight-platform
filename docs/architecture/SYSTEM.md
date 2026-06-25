@@ -21,7 +21,7 @@
                          │  HTTP POST / SSE GET
 ┌────────────────────────▼───────────────────────────────────────────┐
 │                       Backend (apps/server)                        │
-│  NestJS + Prisma + LangChain.js + Ollama (qwen2.5:3b)              │
+│  NestJS + Prisma + LangChain.js + OpenAI / Anthropic               │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │ ChatModule     POST /chat/message | GET /chat/stream         │ │
@@ -34,15 +34,15 @@
 │  │                       ├─ gen_analysis.tool.ts (分析报告)      │ │
 │  │                       └─ small_talk.tool.ts (闲聊)            │ │
 │  │                                                                  │ │
-│  │ LlmModule      └─ LlmService (ChatOllama 封装 + 流式 + Zod)   │ │
+│  │ LlmModule      └─ LlmService (ChatOpenAI/ChatAnthropic 封装) │
 │  │                                                                  │ │
 │  │ DatabaseModule └─ DatabaseService (Prisma 封装)               │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 └────────────────────────┬───────────────────────────────────────────┘
-                         │ Prisma / SQL           │  HTTP /api/chat
+                         │ Prisma / SQL           │  HTTPS (OpenAI / Anthropic)
 ┌────────────────────────▼─────────────┐ ┌──────────────────────────┐
-│      PostgreSQL 16 (Docker)           │ │   Ollama (本地/容器)       │
-└──────────────────────────────────────┘ │   qwen2.5:3b / qwen2.5:3b  │
+│      PostgreSQL 16 (Docker)           │ │   OpenAI / Anthropic     │
+└──────────────────────────────────────┘ │   gpt-4o-mini / claude   │
                                           └──────────────────────────┘
 ```
 
@@ -61,7 +61,7 @@
 ```
 用户输入 + schema context
     ↓
-PlannerAgent.invokeStream()  ← ChatOllama.bindTools([4个工具])
+PlannerAgent.invokeStream()  ← ChatOpenAI / ChatAnthropic.bindTools([4个工具])
     ↓
 LLM 返回 tool_calls
     ↓
@@ -268,9 +268,9 @@ apps/server/src/modules/
 │   └── prompts/
 │       └── planner.prompt.ts  System prompt + 工具说明书
 ├── llm/
-│   ├── llm.service.ts         ChatOllama 封装 + 流式 + Zod 结构化
+│   ├── llm.service.ts         ChatOpenAI/ChatAnthropic 封装 + 流式 + Zod 结构化
 │   ├── llm.module.ts
-│   └── llm.factory.ts          LLM 工厂 (Ollama / OpenAI / Anthropic)
+│   └── llm.factory.ts          LLM 工厂 (OpenAI / Anthropic)
 └── database/
     ├── database.service.ts     PrismaClient 封装
     └── database.module.ts
@@ -293,7 +293,7 @@ apps/server/src/modules/
 | NestJS | 强约束架构，适合团队协作 |
 | Prisma | 类型安全的 ORM，迁移可视化 |
 | LangChain.js | LLM 编排框架，bindTools 工具调用 |
-| Ollama | 本地 LLM，无外部 API 依赖 |
+| OpenAI / Anthropic | 云端 LLM API（gpt-4o-mini / claude-3-5-sonnet） |
 | Zod | 数据校验，与 TS 类型双向推导 |
 
 ---
