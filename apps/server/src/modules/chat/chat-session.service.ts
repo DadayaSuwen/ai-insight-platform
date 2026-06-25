@@ -64,15 +64,19 @@ export class ChatSessionService {
   }
 
   async deleteSession(sessionId: string) {
-    // 先删消息（FK 约束是 ON DELETE RESTRICT，不能直接删父表）
-    await this.db.db
-      .deleteFrom("ChatMessage")
-      .where("sessionId", "=", sessionId)
-      .execute();
-    return this.db.db
-      .deleteFrom("ChatSession")
-      .where("id", "=", sessionId)
-      .execute();
+    // 两表强关联（FK RESTRICT），用事务包保证原子性——
+    // 否则中途失败会留孤儿 ChatMessage
+    await this.db.db.transaction().execute(async (trx) => {
+      // 先删消息（FK 约束是 ON DELETE RESTRICT，不能直接删父表）
+      await trx
+        .deleteFrom("ChatMessage")
+        .where("sessionId", "=", sessionId)
+        .execute();
+      await trx
+        .deleteFrom("ChatSession")
+        .where("id", "=", sessionId)
+        .execute();
+    });
   }
 
   /** 刷新 updatedAt，让侧栏按最近活跃排序 */

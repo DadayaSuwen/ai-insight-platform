@@ -1,7 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Observable } from "rxjs";
 import { MessageEvent } from "@nestjs/common";
-import { randomUUID } from "crypto";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AiService } from "../ai/ai.service";
 import { ChatSessionService } from "./chat-session.service";
@@ -28,12 +27,6 @@ export class ChatService {
         let assistantText = "";
         const assistantToolCalls: any[] = [];
         const assistantToolResults: any[] = [];
-        // 配对 token：planner 严格按序发射 tool_call → tool_result，
-        // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
-        // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
-        // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
-        // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
-        let pendingToolCallId: string | null = null;
 
         try {
           // 1. 先拉历史（不含当前用户消息），保证 planner 看到的 history 是"过去"
@@ -55,24 +48,25 @@ export class ChatService {
               data: event.data,
             });
 
-            // 收集助手的数据用于落库
-            if (event.type === "text") {
-              assistantText += (event.data as any).content;
-            } else if (event.type === "tool_call") {
-              // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
-              pendingToolCallId = randomUUID();
-              assistantToolCalls.push({
-                id: pendingToolCallId,
-                ...event.data,
-              });
-            } else if (event.type === "tool_result") {
-              // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
-              // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
-              assistantToolResults.push({
-                id: pendingToolCallId ?? randomUUID(),
-                ...event.data,
-              });
-              pendingToolCallId = null;
+            // 用 exhaustive switch 替 if/else if（TS 通过 PlannerStreamEvent
+            // union 自动 narrow 每个 case 的 event.data 类型）。
+            // planner.agent.ts 已经在 tool_call / tool_result data 里给好 id，
+            // chat 层直接 push 即可，不再需要 randomUUID 兜底。
+            switch (event.type) {
+              case "text":
+                assistantText += event.data.content;
+                break;
+              case "tool_call":
+                assistantToolCalls.push(event.data);
+                break;
+              case "tool_result":
+                assistantToolResults.push(event.data);
+                break;
+              case "error":
+              case "done":
+              case "thinking":
+                // 不需要收集的状态事件，nothing to do
+                break;
             }
           }
 

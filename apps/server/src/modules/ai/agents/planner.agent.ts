@@ -8,6 +8,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { LlmService } from "../llm/llm.service";
 import { DatabaseService } from "../../database/database.service";
 import { ChartHelper } from "../tools/chart.helper";
@@ -15,11 +16,15 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createQuerySalesTool, createGenChartTool } from "../tools";
 
 export interface PlannerToolCallData {
+  /** 跨 turn 全局唯一的工具调用 id。Ollama 返回的是函数名，planner 层洗成 UUID。 */
+  id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface PlannerToolResultData {
+  /** 与对应 tool_call.id 配对，供前端 LangChain ToolMessage.tool_call_id 使用 */
+  id: string;
   name: string;
   result: Record<string, unknown>;
 }
@@ -260,10 +265,14 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
           const toolName = toolCall.name ?? "";
           // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
           const toolArgs = toolCall.args ?? {};
+          // Ollama 复用的 toolCall.id 就是函数名 → 洗成真 UUID，保证跨 turn 唯一。
+          // OpenAI/Anthropic 的 id 已经是真 UUID，跳过覆盖。
+          const toolCallId =
+            toolCall.id && toolCall.id !== toolName ? toolCall.id : randomUUID();
 
           yield {
             type: "tool_call",
-            data: { name: toolName, args: toolArgs },
+            data: { id: toolCallId, name: toolName, args: toolArgs },
           };
 
           const tool = this.toolMap.get(toolName);
@@ -287,12 +296,12 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
           yield {
             type: "tool_result",
-            data: { name: toolName, result },
+            data: { id: toolCallId, name: toolName, result },
           };
 
           messages.push(
             new ToolMessage({
-              tool_call_id: toolCall.id ?? toolName,
+              tool_call_id: toolCallId,
               name: toolName,
               content: JSON.stringify(result),
             }),
