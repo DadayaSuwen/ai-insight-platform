@@ -1,26 +1,17 @@
-import { useState, useCallback } from "react";
 import { ChevronLeft } from "lucide-react";
 import { useChatStore } from "../../store";
 import { useChatActions } from "../../hooks/useChatActions";
 import { SidebarHeader } from "./SidebarHeader";
 import { SessionList } from "./SessionList";
-import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { ScrollArea } from "../../../../components/ui/scroll-area";
 
 export function SessionSidebar() {
   const { selectSession, handleDelete, handleRename } = useChatActions();
   const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
-  const [pendingDelete, setPendingDelete] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
 
-  const onSelect = useCallback(
-    (id: string) => {
-      selectSession(id, {});
-    },
-    [selectSession],
-  );
+  const onSelect = (id: string) => {
+    selectSession(id, {});
+  };
 
   return (
     <aside
@@ -34,10 +25,7 @@ export function SessionSidebar() {
       <ScrollArea className="flex-1 py-2">
         <SessionList
           onSelect={onSelect}
-          onRequestDelete={(id) => {
-            const s = useChatStore.getState().sessions.find((x) => x.id === id);
-            setPendingDelete({ id, title: s?.title ?? "" });
-          }}
+          onConfirmDelete={handleDelete}
           onRename={handleRename}
         />
       </ScrollArea>
@@ -64,16 +52,6 @@ export function SessionSidebar() {
           <ChevronLeft size={15} />
         </button>
       </div>
-      <DeleteSessionDialog
-        open={pendingDelete !== null}
-        title={pendingDelete?.title ?? ""}
-        onOpenChange={(o) => {
-          if (!o) setPendingDelete(null);
-        }}
-        onConfirm={() => {
-          if (pendingDelete) handleDelete(pendingDelete.id);
-        }}
-      />
     </aside>
   );
 }

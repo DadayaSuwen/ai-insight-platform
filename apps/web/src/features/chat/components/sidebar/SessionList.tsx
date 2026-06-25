@@ -3,11 +3,12 @@ import { SessionItem } from "./SessionItem";
 
 interface SessionListProps {
   onSelect: (id: string) => void;
-  onRequestDelete: (id: string) => void;
+  /** 行内"确认删除"按钮回调（不再走 modal） */
+  onConfirmDelete: (id: string) => void;
   onRename: (id: string, title: string) => Promise<boolean>;
 }
 
-export function SessionList({ onSelect, onRequestDelete, onRename }: SessionListProps) {
+export function SessionList({ onSelect, onConfirmDelete, onRename }: SessionListProps) {
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const sessionsLoading = useChatStore((s) => s.sessionsLoading);
@@ -47,7 +48,7 @@ export function SessionList({ onSelect, onRequestDelete, onRename }: SessionList
           session={s}
           active={s.id === currentSessionId}
           onSelect={onSelect}
-          onRequestDelete={onRequestDelete}
+          onConfirmDelete={onConfirmDelete}
           onRename={onRename}
         />
       ))}
