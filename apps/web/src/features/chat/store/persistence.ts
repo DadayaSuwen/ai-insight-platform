@@ -4,6 +4,7 @@ const KEY_SESSIONS = "aiip.chat.sessions.v1";
 const KEY_CURRENT = "aiip.chat.currentSessionId.v1";
 const KEY_SIDEBAR = "aiip.chat.sidebarOpen.v1";
 const KEY_SIDEBAR_COLLAPSED = "aiip.chat.sidebarCollapsed.v1";
+const KEY_SEARCH_QUERY = "aiip.chat.searchQuery.v1";
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -57,6 +58,17 @@ export function loadSidebarCollapsed(): boolean {
 export function saveSidebarCollapsed(b: boolean): void {
   if (!isBrowser()) return;
   localStorage.setItem(KEY_SIDEBAR_COLLAPSED, b ? "1" : "0");
+}
+
+export function loadSearchQuery(): string {
+  if (!isBrowser()) return "";
+  return localStorage.getItem(KEY_SEARCH_QUERY) ?? "";
+}
+
+export function saveSearchQuery(q: string): void {
+  if (!isBrowser()) return;
+  if (q) localStorage.setItem(KEY_SEARCH_QUERY, q);
+  else localStorage.removeItem(KEY_SEARCH_QUERY);
 }
 
 /** Drop a stale currentSessionId that is no longer in the known session list. */
