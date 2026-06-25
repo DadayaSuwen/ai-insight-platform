@@ -49,7 +49,7 @@
 ### 3.1 依赖大升级：统一 LangChain 0.3
 废弃了 `@langchain/community` 中的旧版 `ChatOllama`，全量升级至 0.3.x 生态。
 - `@langchain/core@^0.3`
-- `@langchain/ollama@^0.2` (原生支持 `bindTools`，自动处理 Ollama API 格式转换)
+- `@langchain/openai@0.3.11` / `@langchain/anthropic@0.3.11`（原生支持 `bindTools`）
 
 ### 3.2 工具结构化
 **绝对禁止 LLM 传自然语言给工具，也绝不生成原生 SQL。**
@@ -83,9 +83,9 @@ LLM 只决定“画什么图”（通过 `chartType` 参数），ECharts 的 JSO
 
 | # | 问题 | 根因与解决 |
 |---|------|-----------|
-| 1 | **`bindTools` 报错 `SimpleChatModel` 无此方法** | 混用了 0.2.x 的 `@langchain/community`。解决：全量升级至 0.3.x，使用独立的 `@langchain/ollama` 包。 |
+| 1 | **`bindTools` 报错 `SimpleChatModel` 无此方法** | 混用了 0.2.x 的 `@langchain/community`。解决：全量升级至 0.3.x，使用独立的 `@langchain/openai` / `@langchain/anthropic` 包。 |
 | 2 | **`Received tool input did not match expected schema`** | LLM 流式输出时，`args` JSON 被分片返回。解决：使用 `finalMessage.concat(chunk)` 拼装完整的 `tool_calls`。 |
-| 3 | **OpenAI 警告 `optional without nullable`** | OpenAI/Ollama 对 Structured Output 要求严格。解决：Zod schema 中将 `.optional()` 全部改为 `.nullish()`。 |
+| 3 | **OpenAI 警告 `optional without nullable`** | OpenAI / Anthropic 对 Structured Output 要求严格。解决：Zod schema 中将 `.optional()` 全部改为 `.nullish()`。 |
 | 4 | **Prisma 报错 `Missing fields: saleDate`** | `groupBy` 查询中，`orderBy` 的字段未包含在 `by` 数组中。解决：改为按聚合字段 `orderBy: { _sum: { amount: 'desc' } }`。 |
 | 5 | **打字机效果消失** | `PlannerAgent` 误用了同步的 `invoke()`。解决：改用 `stream()`，并在 `for await` 循环中即时 `yield` 文本片段。 |
 | 6 | **空气泡 UI 丑陋** | LLM 思考期间无内容输出，气泡被挤扁。解决：前端增加 `isEmptyThinking` 判断，渲染“三个点”动画。 |

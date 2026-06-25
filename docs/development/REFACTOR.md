@@ -42,7 +42,7 @@ SqlAgent | ChartAgent | AnalysisAgent | ChatHandler
 ```
 用户输入 + schema context
     ↓
-PlannerAgent.invokeStream()  ← ChatOllama.bindTools([4个工具])
+PlannerAgent.invokeStream()  ← ChatOpenAI / ChatAnthropic.bindTools([4个工具])
     ↓
 LLM 返回 tool_calls
     ↓
@@ -169,7 +169,7 @@ events.push(chartEvent as PlannerStreamEvent);
 
 ### 4. Jest worker 崩溃 (OOM)
 
-**问题**：`ai.service.spec.ts` 测试模块初始化时，`PlannerAgent` 被 NestJS DI 容器实例化为真实对象（而非 mock），导致构造时调用真实 `LlmService`，最终因无法连接 Ollama 而崩溃。
+**问题**：`ai.service.spec.ts` 测试模块初始化时，`PlannerAgent` 被 NestJS DI 容器实例化为真实对象（而非 mock），导致构造时调用真实 `LlmService`，最终因无法连接 LLM API 而崩溃。
 
 **解决**：在测试 `beforeEach` 中显式覆盖 `PlannerAgent` provider 为 mock 对象，确保 NestJS 不实例化真实类。
 
@@ -211,7 +211,7 @@ plannerAgent.invokeStream.mockReturnValue(throwingGen());
 
 ## 九、后续优化建议
 
-1. **Ollama tool_calls 支持度检测**：运行时检查 `response.tool_calls` 是否存在，若模型不支持则回退到纯 chat 模式
+1. **模型 tool_calls 支持度检测**：运行时检查 `response.tool_calls` 是否存在，若模型不支持则回退到纯 chat 模式
 2. **Schema 动态注入**：`PlannerAgent.refreshSchema()` 可在每次请求前从 `information_schema` 重新加载
 3. **并行工具执行**：第一版严格串行，后续可改为 `Promise.all()` 并行执行无依赖的工具调用
 4. **工具错误重试**：目前工具失败后错误被注入 LLM，但 LLM 是否重试取决于模型能力；可增加显式重试逻辑
