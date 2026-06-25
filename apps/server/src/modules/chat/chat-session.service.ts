@@ -40,7 +40,7 @@ export class ChatSessionService {
     sessionId: string,
     role: string,
     content: string,
-    metadata?: any,
+    metadata?: Record<string, unknown>,
   ) {
     return this.db.db
       .insertInto("ChatMessage")
@@ -49,7 +49,10 @@ export class ChatSessionService {
         sessionId,
         role,
         content,
-        metadata: metadata ? JSON.stringify(metadata) : null,
+        // pg 驱动对 JSONB 列自动处理 JS 对象 → JSON 字符串的转换；
+        // 应用层手动 JSON.stringify 是导致后续读取/前端双重 parse 失败的根源。
+        // 直接传对象，让驱动做它该做的事。
+        metadata: metadata ?? null,
       })
       .returningAll()
       .executeTakeFirst();

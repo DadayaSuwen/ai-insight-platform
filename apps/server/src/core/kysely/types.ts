@@ -12,7 +12,10 @@ export interface ChatMessageTable {
   sessionId: string;
   role: string; // 'user' | 'assistant'
   content: string;
-  metadata: string | null; // 存储工具调用和结果的 JSON 字符串
+  // Postgres JSONB 列。pg 驱动自动序列化 JS 对象。
+  // 应用层**禁止**再 JSON.stringify，否则会产生双重转义 + 读取时
+  // Kysely 自动 parse 后前端再次 parse 抛错被吞，导致 toolResults 丢失。
+  metadata: Record<string, unknown> | null;
   createdAt: Generated<Date>;
 }
 
