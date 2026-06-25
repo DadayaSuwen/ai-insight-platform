@@ -131,6 +131,12 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 数据库表结构:
  ${this.schema}
 
+【绝对红线——工具调用规则，最高优先级，违反任一条即视为错误】:
+1. **绝对禁止**在文本中描述你将要调用的工具。禁止输出"我将使用XX工具"、"接下来我调用XX"、"让我查一下"、"我先获取一下"等任何前瞻性废话。
+2. 如果你需要使用工具，**直接输出工具调用**，不要附带任何解释性文字（content 字段必须为空字符串）。
+3. **只有在不使用任何工具、直接回答用户问题时，才输出文本**。一旦决定调工具，content 必须空。
+4. 严禁"只说不做"：不要在文本里叙述你会调用工具，但实际不调用。如果你描述了工具调用，那次调用必须真实发生。
+
 【重要规则】:
 1. 如果用户询问数据相关问题，必须优先调用 query_sales 工具获取真实数据，绝不允许编造数据。
 2. 如果用户要求画图，必须调用 gen_chart 工具。
@@ -202,15 +208,16 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
       // ★ 使用 AIMessageChunk 累积流式碎片
       let finalMessage: AIMessageChunk | undefined;
+      // ★ 单轮 text 缓冲：等本轮流结束再决定是否 yield 给前端
+      // 中间轮（即将调工具）的 text 不暴露给用户，但保留在 messages 数组里
+      // 维持 LLM 上下文记忆。
+      let currentTurnTextBuffer = "";
 
       for await (const chunk of stream) {
-        // 1. 实时输出文本片段（打字机效果）
+        // 1. 累积本轮 text 到 buffer（不 yield；轮末再决定）
         const content = this.extractContent(chunk.content);
         if (content) {
-          yield {
-            type: "text",
-            data: { content },
-          };
+          currentTurnTextBuffer += content;
         }
 
         // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
@@ -223,12 +230,30 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         !finalMessage.tool_calls ||
         finalMessage.tool_calls.length === 0
       ) {
+        // 情况 A: 最终总结轮 → 把整轮 text yield 出去给前端
+        if (currentTurnTextBuffer.length > 0) {
+          yield {
+            type: "text",
+            data: { content: currentTurnTextBuffer },
+          };
+        }
+        // 仍要把 AIMessage 放进历史，保证多轮对话上下文一致
+        messages.push(new AIMessage(currentTurnTextBuffer));
         // 没有工具调用，说明 LLM 已经说完了，退出循环
         break;
       }
 
-      // 4. 把拼接完整的 AIMessage 加入历史记录
-      messages.push(finalMessage as AIMessage);
+      // 情况 B: 中间工具调用轮 → 整轮 text 不 yield 给前端
+      // 但**必须**把它作为 AIMessage content 放进 messages 数组
+      // （保留 LLM 上下文记忆），并通过 'thinking' 事件传给 chat.service.ts
+      // 存到 metadata.thinking 供调试。
+      messages.push(new AIMessage(currentTurnTextBuffer));
+      if (currentTurnTextBuffer.length > 0) {
+        yield {
+          type: "thinking",
+          data: { content: currentTurnTextBuffer },
+        };
+      }
 
       // 5. 执行工具
       for (const toolCall of finalMessage.tool_calls) {
