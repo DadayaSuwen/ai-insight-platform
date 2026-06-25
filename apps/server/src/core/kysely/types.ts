@@ -24,6 +24,7 @@ export interface Database {
   SalesOrderItem: SalesOrderItemTable;
   ChatSession: ChatSessionTable;
   ChatMessage: ChatMessageTable;
+  LLMConfig: LLMConfigTable;
 }
 export interface CustomerTable {
   id: string;
@@ -57,5 +58,18 @@ export interface SalesOrderItemTable {
   quantity: number;
   discount: number;
   profit: number;
+}
+
+export interface LLMConfigTable {
+  // id 是 provider（"openai" | "anthropic" | "ollama"），由应用层写入
+  id: string;
+  apiKey: string | null;
+  baseUrl: string | null;
+  model: string;
+  temperature: number;
+  // 注意：Prisma 把 `updatedAt @updatedAt` 编译成 NOT NULL 列 + UPDATE 触发器，
+  // 没有列默认值。所以必须由应用层写入，Kysely 的 `Generated<T>` 不适用。
+  createdAt: Date;
+  updatedAt: Date;
 }
 
