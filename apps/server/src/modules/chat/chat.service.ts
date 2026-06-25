@@ -35,6 +35,7 @@ export class ChatService {
           // 3. 定义收集器，用于保存最终的助手消息
           let assistantText = "";
           let assistantThinking = ""; // ★ 中间轮被丢弃的思考文字（不入 content）
+          let assistantReasoning = ""; // ★ Qwen3/DeepSeek-R1 reasoning_content（落库供多轮回传）
           const assistantToolCalls: any[] = [];
           const assistantToolResults: any[] = [];
           // 配对 token：planner 已经自带稳定 UUID（用 crypto.randomUUID 生成），
@@ -67,6 +68,12 @@ export class ChatService {
                 // 上下文。
                 assistantThinking += event.data.content;
                 break;
+              case "reasoning":
+                // Qwen3 / DeepSeek-R1 等思考模型的 reasoning_content
+                // 落库供下一轮 buildHistoryMessages 重建时回传给 Ollama API
+                // （不传则 Qwen3 报 400）。
+                assistantReasoning += event.data.content;
+                break;
               case "tool_call":
                 // planner 已经在 event.data.id 里塞了稳定 UUID（避免 Ollama
                 // 函数名复用导致的 400 Duplicate tool_call_id）。
@@ -95,9 +102,16 @@ export class ChatService {
             {
               toolCalls: assistantToolCalls,
               toolResults: assistantToolResults,
-              // 仅当 thinking 非空时存，避免无意义字段
+              // 仅当非空时存，避免无意义字段
               ...(assistantThinking.length > 0
                 ? { thinking: assistantThinking }
+                : {}),
+              // ★ Qwen3/DeepSeek-R1 reasoning_content —— 落库供多轮对话重建时
+              // buildHistoryMessages 读取并写入 AIMessage.additional_kwargs。
+              // ThinkingChatOllama 子类会把 additional_kwargs.reasoning_content
+              // 转成 Ollama 请求的 thinking 字段，Qwen3 API 才不会报 400。
+              ...(assistantReasoning.length > 0
+                ? { reasoning: assistantReasoning }
                 : {}),
             },
           );
@@ -143,6 +157,19 @@ export class ChatService {
               ? JSON.parse(rawMeta)
               : rawMeta;
 
+        // ★ Qwen3 / DeepSeek-R1 多轮对话需要回传 reasoning_content
+        // 从 metadata.reasoning 字段读取（planner 在聊天过程中通过
+        // assistantReasoning collector 收集并保存）。
+        const reasoningContent: string | undefined =
+          toolData?.reasoning &&
+          typeof toolData.reasoning === "string" &&
+          toolData.reasoning.length > 0
+            ? toolData.reasoning
+            : undefined;
+        const additionalKwargs = reasoningContent
+          ? { reasoning_content: reasoningContent }
+          : {};
+
         // 如果有工具调用，先压入带 tool_calls 的 AIMessage
         if (toolData?.toolCalls?.length > 0) {
           const toolCalls = toolData.toolCalls as Array<{
@@ -158,6 +185,7 @@ export class ChatService {
 
           // 直接复用保存时的 UUID —— 跨 turn 全局唯一，
           // 同一 turn 内多次调用同一工具也不会冲突。
+          // ★ 同时附加 reasoning_content（Qwen3 API 校验必需）
           messages.push(
             new AIMessage({
               content: "",
@@ -167,6 +195,7 @@ export class ChatService {
                 args: tc.args,
                 type: "tool_call",
               })),
+              additional_kwargs: additionalKwargs,
             }),
           );
 
@@ -185,9 +214,14 @@ export class ChatService {
           }
         }
 
-        // 压入最终的文本回复
+        // 压入最终的文本回复（AIMessage 也带 reasoning_content 给 Qwen3）
         if (record.content) {
-          messages.push(new AIMessage(record.content));
+          messages.push(
+            new AIMessage({
+              content: record.content,
+              additional_kwargs: additionalKwargs,
+            }),
+          );
         }
       }
     }

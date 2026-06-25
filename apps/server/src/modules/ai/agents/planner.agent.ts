@@ -35,7 +35,8 @@ export type PlannerStreamEvent =
   | { type: "done"; data: Record<string, never> }
   | { type: "tool_call"; data: PlannerToolCallData }
   | { type: "tool_result"; data: PlannerToolResultData }
-  | { type: "thinking"; data: { content: string } };
+  | { type: "thinking"; data: { content: string } }
+  | { type: "reasoning"; data: { content: string } };
 
 @Injectable()
 export class PlannerAgent {
@@ -175,6 +176,16 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
     return "";
   }
 
+  /**
+   * 从 AIMessageChunk 中提取 Qwen3 / DeepSeek-R1 等思考模型的 reasoning_content。
+   * 通过 ThinkingChatOllama 子类，thinking 已经被写入 additional_kwargs.reasoning_content。
+   */
+  private extractReasoning(chunk: AIMessageChunk): string {
+    const v = (chunk as any).additional_kwargs?.reasoning_content;
+    if (typeof v === "string") return v;
+    return "";
+  }
+
   async *invokeStream(
     message: string,
     history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
@@ -228,6 +239,10 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       // 中间轮（即将调工具）的 text 不暴露给用户，但保留在 messages 数组里
       // 维持 LLM 上下文记忆。
       let currentTurnTextBuffer = "";
+      // ★ 推理内容缓冲：Qwen3 / DeepSeek-R1 等思考模型的 reasoning_content。
+      // ThinkingChatOllama 子类把 thinking 写入 additional_kwargs.reasoning_content。
+      // 多轮对话必须回传（Qwen3 API 校验），因此无论本轮是否最终总结，都要进 AIMessage。
+      let currentTurnReasoningBuffer = "";
 
       for await (const chunk of stream) {
         // 1. 累积本轮 text 到 buffer（不 yield；轮末再决定）
@@ -236,11 +251,17 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
           currentTurnTextBuffer += content;
         }
 
-        // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
+        // 2. 累积 reasoning_content（每个 chunk 是一段 reasoning 流式片段）
+        const reasoning = this.extractReasoning(chunk);
+        if (reasoning) {
+          currentTurnReasoningBuffer += reasoning;
+        }
+
+        // 3. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
         finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
       }
 
-      // 3. 流结束后，检查是否有完整的工具调用
+      // 4. 流结束后，检查是否有完整的工具调用
       if (
         !finalMessage ||
         !finalMessage.tool_calls ||
@@ -253,8 +274,22 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
             data: { content: currentTurnTextBuffer },
           };
         }
-        // 仍要把 AIMessage 放进历史，保证多轮对话上下文一致
-        messages.push(new AIMessage(currentTurnTextBuffer));
+        // ★ reasoning_content 也必须进入 messages 数组（Qwen3 多轮校验）
+        messages.push(
+          new AIMessage({
+            content: currentTurnTextBuffer,
+            additional_kwargs:
+              currentTurnReasoningBuffer.length > 0
+                ? { reasoning_content: currentTurnReasoningBuffer }
+                : {},
+          }),
+        );
+        if (currentTurnReasoningBuffer.length > 0) {
+          yield {
+            type: "reasoning",
+            data: { content: currentTurnReasoningBuffer },
+          };
+        }
         // 没有工具调用，说明 LLM 已经说完了，退出循环
         break;
       }
@@ -264,6 +299,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       // ——LangChain 严格要求 ToolMessage 的 tool_call_id 在它之前最近的 AIMessage.tool_calls[].id 里存在。
       // 把 text 单独拆成不含 tool_calls 的 AIMessage 会导致 400 "tool must be a response to a preceding message with 'tool_calls'"。
       // 把整轮 text 通过 'thinking' 事件透传给 chat.service.ts 存到 metadata.thinking 供调试。
+      // ★ reasoning_content 通过 additional_kwargs 持久化（多轮对话 + DB 落库都用）
       // ★ 用 planner 自己的 idGenerator 生成稳定 UUID（避免 Ollama 函数名复用）
       const toolCallsForMessage = finalMessage.tool_calls.map((tc) => {
         const id = idGenerator();
@@ -279,8 +315,20 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         new AIMessage({
           content: currentTurnTextBuffer,
           tool_calls: toolCallsForMessage,
+          additional_kwargs:
+            currentTurnReasoningBuffer.length > 0
+              ? { reasoning_content: currentTurnReasoningBuffer }
+              : {},
         }),
       );
+      if (currentTurnReasoningBuffer.length > 0) {
+        // ★ 把 reasoning_content 透传给 chat.service.ts 落库（供多轮对话重建）。
+        // 注意：前端不展示 reasoning（仅 metadata 调试用），与 'thinking' 事件分开。
+        yield {
+          type: "reasoning",
+          data: { content: currentTurnReasoningBuffer },
+        };
+      }
       if (currentTurnTextBuffer.length > 0) {
         yield {
           type: "thinking",

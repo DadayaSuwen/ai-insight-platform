@@ -3,6 +3,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOllama } from "@langchain/ollama";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
+import { ThinkingChatOllama } from "./thinking-chat-ollama";
 
 /**
  * Factory — creates the appropriate LangChain chat model from a runtime config.
@@ -39,7 +40,13 @@ export function createChatModel(config: LLMConfig) {
 
     case LLMProvider.OLLAMA:
     default: {
-      return new ChatOllama({
+      // ★ qwen3 / deepseek-r1 等思考模型需要 reasoning_content 多轮透传，
+      // @langchain/ollama@0.2.4 把 thinking 塞进 content 字段，破坏 thinking/content 分离
+      // 且不回传 reasoning_content → Qwen3 API 报 400。
+      // ThinkingChatOllama 是覆盖 _streamResponseChunks 的子类，把 thinking
+      // 写入 additional_kwargs.reasoning_content，并支持反向把
+      // AIMessage.additional_kwargs.reasoning_content 写入 Ollama 请求的 thinking 字段。
+      return new ThinkingChatOllama({
         baseUrl: config.baseUrl || "http://localhost:11434",
         model: config.model,
         temperature: config.temperature ?? 0,

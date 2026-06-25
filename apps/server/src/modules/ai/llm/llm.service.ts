@@ -5,7 +5,7 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ChatOllama } from "@langchain/ollama";
+import { ThinkingChatOllama } from "./thinking-chat-ollama";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
@@ -333,7 +333,8 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   }
 
   private defaultOllamaChat() {
-    return new ChatOllama({
+    // 同样使用 ThinkingChatOllama 子类，统一 reasoning_content 处理逻辑
+    return new ThinkingChatOllama({
       baseUrl:
         this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
       model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b",
