@@ -86,15 +86,26 @@ export class ChatService {
           );
 
           // 5.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
-          await this.sessionService.touchSession(sessionId);
+          // returningAll() 直接拿到更新后的整行，避免再 SELECT 一次
+          let finalSession = await this.sessionService.touchSession(sessionId);
 
-          // 6. 如果是第一句话，自动更新会话标题
+          // 6. 如果是第一句话，自动更新会话标题（如果重命名了，finalSession 用新行）
           if (history.length <= 1 && message.length > 0) {
             const title =
               message.substring(0, 20) + (message.length > 20 ? "..." : "");
-            await this.sessionService.updateSessionTitle(sessionId, title);
+            const renamed = await this.sessionService.updateSessionTitle(
+              sessionId,
+              title,
+            );
+            if (renamed) finalSession = renamed;
           }
 
+          // 7. 成功路径显式发 done 事件，把最新 session 一起回给前端，
+          //    前端用 upsertSession 局部更新侧栏，省一次 GET /chat/sessions
+          subscriber.next({
+            type: "done",
+            data: { session: finalSession ?? null },
+          });
           subscriber.complete();
         } catch (err: unknown) {
           this.logger.error(`SSE stream error: ${err}`);

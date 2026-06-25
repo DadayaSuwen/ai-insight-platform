@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import type { ChatSession } from "../../../types/chat";
 
 interface ToolCallData {
   name: string;
@@ -15,12 +16,18 @@ interface ErrorData {
   message: string;
 }
 
+interface DoneData {
+  /** 后端在成功路径上随 done 事件返回的最新 session（已 touch + 可选重命名） */
+  session?: ChatSession | null;
+}
+
 interface UseSSEChatOptions {
   onText?: (data: { content: string }) => void;
   onToolCall?: (data: ToolCallData) => void;
   onToolResult?: (data: ToolResultData) => void;
   onError?: (data: ErrorData) => void;
-  onDone?: () => void;
+  /** 收到 done 事件。payload 可能为空（catch 路径）或包含 session（成功路径） */
+  onDone?: (data: DoneData) => void;
 }
 
 interface UseSSEChatReturn {
@@ -93,7 +100,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
       case "done":
         abortControllerRef.current = null;
         setIsLoading(false);
-        opts.onDone?.();
+        opts.onDone?.(data as DoneData);
         break;
       default:
         // 忽略未知事件类型

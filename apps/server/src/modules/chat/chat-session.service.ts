@@ -55,12 +55,17 @@ export class ChatSessionService {
       .executeTakeFirst();
   }
 
+  /**
+   * 重命名会话，返回更新后的整行。
+   * returningAll() 让调用方拿到新的 updatedAt 一起回给前端，省一次 SELECT。
+   */
   async updateSessionTitle(sessionId: string, title: string) {
     return this.db.db
       .updateTable("ChatSession")
       .set({ title })
       .where("id", "=", sessionId)
-      .execute();
+      .returningAll()
+      .executeTakeFirst();
   }
 
   async deleteSession(sessionId: string) {
@@ -75,12 +80,13 @@ export class ChatSessionService {
       .execute();
   }
 
-  /** 刷新 updatedAt，让侧栏按最近活跃排序 */
+  /** 刷新 updatedAt 并返回新行。 */
   async touchSession(sessionId: string) {
     return this.db.db
       .updateTable("ChatSession")
       .set({ updatedAt: new Date() })
       .where("id", "=", sessionId)
-      .execute();
+      .returningAll()
+      .executeTakeFirst();
   }
 }
