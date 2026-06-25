@@ -167,6 +167,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
   async *invokeStream(
     message: string,
     history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
+    opts: { signal?: AbortSignal } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
     const systemPrompt = this.buildSystemPrompt();
@@ -198,12 +199,19 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         return;
       }
 
-      const stream = await this.getChat().stream(messages);
+      const stream = await this.getChat().stream(messages, {
+        signal: opts.signal,
+      });
 
       // ★ 使用 AIMessageChunk 累积流式碎片
       let finalMessage: AIMessageChunk | undefined;
 
       for await (const chunk of stream) {
+        // 客户端断开 → 立即退出，避免再 yield 一段或继续触发 tool 调用
+        if (opts.signal?.aborted) {
+          this.logger.log("[PlannerAgent] Stream aborted by client");
+          return;
+        }
         // 1. 实时输出文本片段（打字机效果）
         const content = this.extractContent(chunk.content);
         if (content) {

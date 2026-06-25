@@ -18,6 +18,7 @@ export class ChatService {
   processMessageStream(
     sessionId: string,
     message: string,
+    opts: { signal?: AbortSignal } = {},
   ): Observable<MessageEvent> {
     this.logger.log(`SSE stream start for session ${sessionId}: ${message}`);
 
@@ -47,6 +48,7 @@ export class ChatService {
           for await (const event of this.aiService.processStream(
             message,
             historyMessages,
+            { signal: opts.signal },
           )) {
             subscriber.next({
               type: event.type,
