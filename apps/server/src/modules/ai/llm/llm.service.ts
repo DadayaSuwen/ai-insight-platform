@@ -5,7 +5,6 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ChatOllama } from "@langchain/ollama";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
@@ -52,7 +51,7 @@ export interface LlmStructuredOptions<T extends z.ZodTypeAny> {
  * LlmService — runtime-configurable LLM wrapper.
  *
  * All Agents call invoke() / invokeStructured() and are unaware of the active
- * provider (OpenAI / Anthropic / Ollama).  The active adapter is created by
+ * provider (OpenAI / Anthropic).  The active adapter is created by
  * LlmFactory from the config stored in the `LLMConfig` database table.
  *
  * Startup: reads config from LLMConfig table on onModuleInit.
@@ -72,7 +71,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private chatReady: Promise<void>;
 
   /** The provider currently in use — set on startup and after each reload. */
-  private activeProvider: LLMProvider = LLMProvider.OLLAMA;
+  private activeProvider: LLMProvider = LLMProvider.OPENAI;
 
   constructor(
     private readonly config: ConfigService,
@@ -194,23 +193,6 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Ollama-only health check (legacy).
-   * Phase 2 will implement multi-provider health.
-   */
-  async ping(): Promise<boolean> {
-    try {
-      const baseUrl =
-        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434";
-      const res = await fetch(`${baseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Hot-reload the chat model.
    * Called by LlmController after a config update.
    * @param config  Optional new config to use instead of reading from DB.
@@ -282,18 +264,18 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   // ─── Internals ─────────────────────────────────────────────────────────────
 
   private async initFromDatabase(): Promise<void> {
-    this.activeProvider = LLMProvider.OLLAMA;
+    this.activeProvider = LLMProvider.OPENAI;
     try {
       const row = await this.database.db
         .selectFrom("LLMConfig")
         .selectAll()
-        .where("id", "=", LLMProvider.OLLAMA)
+        .where("id", "=", LLMProvider.OPENAI)
         .executeTakeFirst();
 
       if (!row) {
-        this.chat = this.defaultOllamaChat();
+        this.chat = this.defaultOpenAIChat();
         this.logger.warn(
-          "No LLMConfig in DB; using env-default Ollama. Set config via POST /llm/config",
+          "No LLMConfig in DB; using default OpenAI (gpt-4o-mini). Set config via POST /llm/config",
         );
         return;
       }
@@ -312,10 +294,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (err) {
       this.logger.error(
-        "Failed to init LLM from DB, falling back to Ollama",
+        "Failed to init LLM from DB, falling back to default OpenAI",
         err,
       );
-      this.chat = this.defaultOllamaChat();
+      this.chat = this.defaultOpenAIChat();
     }
   }
 
@@ -332,13 +314,11 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private defaultOllamaChat() {
-    return new ChatOllama({
-      baseUrl:
-        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
-      model: this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b",
+  private defaultOpenAIChat() {
+    return createChatModel({
+      provider: LLMProvider.OPENAI,
+      model: "gpt-4o-mini",
       temperature: 0,
-      numCtx: 4096,
     });
   }
 
