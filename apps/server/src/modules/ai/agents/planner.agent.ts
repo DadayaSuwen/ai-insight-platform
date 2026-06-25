@@ -169,118 +169,160 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
     history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
     opts: { signal?: AbortSignal } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
-    const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
-    const systemPrompt = this.buildSystemPrompt();
+    // Planner 绕过 LlmService.invokeStream 直接调 chat.stream()，
+    // 所以它本身没有超时保护。这里补一个本地 timeout（默认 120s），
+    // 用 AbortSignal.any() 把外部 signal（客户端 Stop）和内部 timeout 合并。
+    const STREAM_TIMEOUT_MS = Number(process.env.STREAM_TIMEOUT_MS ?? 120_000);
+    const timeoutController = new AbortController();
+    const timeoutTimer = setTimeout(
+      () => timeoutController.abort(),
+      STREAM_TIMEOUT_MS,
+    );
+    const combinedSignal = opts.signal
+      ? AbortSignal.any([opts.signal, timeoutController.signal])
+      : timeoutController.signal;
 
-    // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
-    // 这里直接展开即可；末尾追加当前用户消息。
-    const messages: BaseMessage[] = [
-      new SystemMessage(systemPrompt),
-      ...history,
-      new HumanMessage(message),
-    ];
+    try {
+      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
+      const systemPrompt = this.buildSystemPrompt();
 
-    let iterations = 0;
+      // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
+      // 这里直接展开即可；末尾追加当前用户消息。
+      const messages: BaseMessage[] = [
+        new SystemMessage(systemPrompt),
+        ...history,
+        new HumanMessage(message),
+      ];
 
-    while (true) {
-      iterations++;
-      if (iterations > MAX_ITERATIONS) {
+      let iterations = 0;
+
+      while (true) {
+        iterations++;
+        if (iterations > MAX_ITERATIONS) {
+          this.logger.warn(
+            `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+          );
+          yield {
+            type: "error",
+            data: {
+              code: "MAX_ITERATIONS_REACHED",
+              message: `已尝试 ${MAX_ITERATIONS} 次，仍无法完成请求，请尝试换一种问法。`,
+            },
+          };
+          yield { type: "done", data: {} };
+          return;
+        }
+
+        const stream = await this.getChat().stream(messages, {
+          signal: combinedSignal,
+        });
+
+        // ★ 使用 AIMessageChunk 累积流式碎片
+        let finalMessage: AIMessageChunk | undefined;
+
+        for await (const chunk of stream) {
+          // 客户端断开 / 内部超时 → 立即退出，避免再 yield 一段或继续触发 tool
+          if (combinedSignal.aborted) {
+            const reason = timeoutController.signal.aborted
+              ? "timeout"
+              : "client_disconnect";
+            this.logger.log(`[PlannerAgent] Stream aborted (${reason})`);
+            return;
+          }
+          // 1. 实时输出文本片段（打字机效果）
+          const content = this.extractContent(chunk.content);
+          if (content) {
+            yield {
+              type: "text",
+              data: { content },
+            };
+          }
+
+          // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
+          finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
+        }
+
+        // 3. 流结束后，检查是否有完整的工具调用
+        if (
+          !finalMessage ||
+          !finalMessage.tool_calls ||
+          finalMessage.tool_calls.length === 0
+        ) {
+          // 没有工具调用，说明 LLM 已经说完了，退出循环
+          break;
+        }
+
+        // 4. 把拼接完整的 AIMessage 加入历史记录
+        messages.push(finalMessage as AIMessage);
+
+        // 5. 执行工具
+        for (const toolCall of finalMessage.tool_calls) {
+          const toolName = toolCall.name ?? "";
+          // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
+          const toolArgs = toolCall.args ?? {};
+
+          yield {
+            type: "tool_call",
+            data: { name: toolName, args: toolArgs },
+          };
+
+          const tool = this.toolMap.get(toolName);
+          let result: Record<string, unknown>;
+
+          try {
+            if (!tool) {
+              result = { error: `Unknown tool: ${toolName}` };
+            } else {
+              const raw = await tool.invoke(toolArgs);
+              result =
+                typeof raw === "string"
+                  ? JSON.parse(raw)
+                  : (raw as Record<string, unknown>);
+            }
+          } catch (err) {
+            result = {
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+
+          yield {
+            type: "tool_result",
+            data: { name: toolName, result },
+          };
+
+          messages.push(
+            new ToolMessage({
+              tool_call_id: toolCall.id ?? toolName,
+              name: toolName,
+              content: JSON.stringify(result),
+            }),
+          );
+        }
+      }
+
+      yield { type: "done", data: {} };
+    } catch (err) {
+      // 捕获 AbortError：分清是 timeout 还是 client_disconnect，
+      // 用 error 事件告知前端，再让 ai.service.ts 走标准 error+done 收尾
+      if (err instanceof Error && err.name === "AbortError") {
+        const reason = timeoutController.signal.aborted
+          ? "timeout"
+          : "client_disconnect";
         this.logger.warn(
-          `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+          `[PlannerAgent] Stream aborted by ${reason} (${STREAM_TIMEOUT_MS}ms timeout)`,
         );
         yield {
           type: "error",
           data: {
-            code: "MAX_ITERATIONS_REACHED",
-            message: `已尝试 ${MAX_ITERATIONS} 次，仍无法完成请求，请尝试换一种问法。`,
+            code: "LLM_ABORTED",
+            message: `LLM stream aborted (${reason})`,
           },
         };
-        yield { type: "done", data: {} };
         return;
       }
-
-      const stream = await this.getChat().stream(messages, {
-        signal: opts.signal,
-      });
-
-      // ★ 使用 AIMessageChunk 累积流式碎片
-      let finalMessage: AIMessageChunk | undefined;
-
-      for await (const chunk of stream) {
-        // 客户端断开 → 立即退出，避免再 yield 一段或继续触发 tool 调用
-        if (opts.signal?.aborted) {
-          this.logger.log("[PlannerAgent] Stream aborted by client");
-          return;
-        }
-        // 1. 实时输出文本片段（打字机效果）
-        const content = this.extractContent(chunk.content);
-        if (content) {
-          yield {
-            type: "text",
-            data: { content },
-          };
-        }
-
-        // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
-        finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
-      }
-
-      // 3. 流结束后，检查是否有完整的工具调用
-      if (
-        !finalMessage ||
-        !finalMessage.tool_calls ||
-        finalMessage.tool_calls.length === 0
-      ) {
-        // 没有工具调用，说明 LLM 已经说完了，退出循环
-        break;
-      }
-
-      // 4. 把拼接完整的 AIMessage 加入历史记录
-      messages.push(finalMessage as AIMessage);
-
-      // 5. 执行工具
-      for (const toolCall of finalMessage.tool_calls) {
-        const toolName = toolCall.name ?? "";
-        // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
-        const toolArgs = toolCall.args ?? {};
-
-        yield {
-          type: "tool_call",
-          data: { name: toolName, args: toolArgs },
-        };
-
-        const tool = this.toolMap.get(toolName);
-        let result: Record<string, unknown>;
-
-        try {
-          if (!tool) {
-            result = { error: `Unknown tool: ${toolName}` };
-          } else {
-            const raw = await tool.invoke(toolArgs);
-            result =
-              typeof raw === "string"
-                ? JSON.parse(raw)
-                : (raw as Record<string, unknown>);
-          }
-        } catch (err) {
-          result = { error: err instanceof Error ? err.message : String(err) };
-        }
-
-        yield {
-          type: "tool_result",
-          data: { name: toolName, result },
-        };
-
-        messages.push(
-          new ToolMessage({
-            tool_call_id: toolCall.id ?? toolName,
-            name: toolName,
-            content: JSON.stringify(result),
-          }),
-        );
-      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutTimer);
     }
-
-    yield { type: "done", data: {} };
   }
 }

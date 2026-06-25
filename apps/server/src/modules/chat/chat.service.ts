@@ -24,6 +24,17 @@ export class ChatService {
 
     return new Observable<MessageEvent>((subscriber) => {
       (async () => {
+        // 收集器声明在 try 之外，让 catch 块能访问 partial 文本
+        let assistantText = "";
+        const assistantToolCalls: any[] = [];
+        const assistantToolResults: any[] = [];
+        // 配对 token：planner 严格按序发射 tool_call → tool_result，
+        // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
+        // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
+        // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
+        // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
+        let pendingToolCallId: string | null = null;
+
         try {
           // 1. 先拉历史（不含当前用户消息），保证 planner 看到的 history 是"过去"
           const history =
@@ -33,18 +44,7 @@ export class ChatService {
           // 2. 再保存当前用户消息
           await this.sessionService.saveMessage(sessionId, "user", message);
 
-          // 3. 定义收集器，用于保存最终的助手消息
-          let assistantText = "";
-          const assistantToolCalls: any[] = [];
-          const assistantToolResults: any[] = [];
-          // 配对 token：planner 严格按序发射 tool_call → tool_result，
-          // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
-          // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
-          // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
-          // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
-          let pendingToolCallId: string | null = null;
-
-          // 4. 消费 AiService 的流
+          // 3. 消费 AiService 的流（收集器已在 try 外声明）
           for await (const event of this.aiService.processStream(
             message,
             historyMessages,
@@ -76,7 +76,7 @@ export class ChatService {
             }
           }
 
-          // 5. 流结束后，保存助手消息
+          // 4. 流结束后，保存助手消息
           await this.sessionService.saveMessage(
             sessionId,
             "assistant",
@@ -87,10 +87,10 @@ export class ChatService {
             },
           );
 
-          // 5.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
+          // 4.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
           await this.sessionService.touchSession(sessionId);
 
-          // 6. 如果是第一句话，自动更新会话标题
+          // 5. 如果是第一句话，自动更新会话标题
           if (history.length <= 1 && message.length > 0) {
             const title =
               message.substring(0, 20) + (message.length > 20 ? "..." : "");
@@ -100,11 +100,32 @@ export class ChatService {
           subscriber.complete();
         } catch (err: unknown) {
           this.logger.error(`SSE stream error: ${err}`);
+          // 流意外中断时保存已生成的 partial 文本，让用户能看到 LLM 想了什么。
+          // 用独立 try/catch 包住 save，避免 save 失败时再次触发本 catch。
+          if (assistantText.trim().length > 0) {
+            try {
+              await this.sessionService.saveMessage(
+                sessionId,
+                "assistant",
+                assistantText + "\n\n[stream interrupted]",
+                {
+                  toolCalls: assistantToolCalls,
+                  toolResults: assistantToolResults,
+                },
+              );
+              await this.sessionService.touchSession(sessionId);
+            } catch (saveErr) {
+              this.logger.error(
+                `Failed to save partial assistant text: ${saveErr}`,
+              );
+            }
+          }
           subscriber.next({
             type: "error",
             data: { code: "STREAM_FAILED", message: String(err) },
           });
-          subscriber.next({ type: "done", data: {} });
+          // session: null 让前端 fallback 到 refreshSessions() 兜底刷新侧栏
+          subscriber.next({ type: "done", data: { session: null } });
           subscriber.complete();
         }
       })();
