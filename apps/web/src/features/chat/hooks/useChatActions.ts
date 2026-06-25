@@ -105,6 +105,31 @@ export function useChatActions() {
     [removeSessionLocal, setCurrentSessionId, setMessages, upsertSession],
   );
 
+  /**
+   * 重命名会话：乐观更新 + 失败回滚 + Toast。
+   * 返回 true 表示成功，false 表示失败或空标题（被忽略）。
+   */
+  const handleRename = useCallback(
+    async (id: string, title: string): Promise<boolean> => {
+      const trimmed = title.trim();
+      if (!trimmed) return false;
+      const before = useChatStore.getState().sessions.find((s) => s.id === id);
+      if (!before) return false;
+      // 乐观更新
+      upsertSession({ ...before, title: trimmed });
+      try {
+        await chatSessionApi.rename(id, trimmed);
+        return true;
+      } catch (err) {
+        console.error("[useChatActions] rename failed, rolling back", err);
+        upsertSession(before);
+        toast.error("重命名失败");
+        return false;
+      }
+    },
+    [upsertSession],
+  );
+
   const sendInCurrentSession = useCallback(
     async (text: string, opts: SendInCurrentSessionOptions) => {
       let sessionId = useChatStore.getState().currentSessionId;
@@ -157,6 +182,7 @@ export function useChatActions() {
     selectSession,
     handleNewChat,
     handleDelete,
+    handleRename,
     sendInCurrentSession,
     refreshSessions,
     closeMobileSidebar,

@@ -4,9 +4,10 @@ import { SessionItem } from "./SessionItem";
 interface SessionListProps {
   onSelect: (id: string) => void;
   onRequestDelete: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<boolean>;
 }
 
-export function SessionList({ onSelect, onRequestDelete }: SessionListProps) {
+export function SessionList({ onSelect, onRequestDelete, onRename }: SessionListProps) {
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const sessionsLoading = useChatStore((s) => s.sessionsLoading);
@@ -47,6 +48,7 @@ export function SessionList({ onSelect, onRequestDelete }: SessionListProps) {
           active={s.id === currentSessionId}
           onSelect={onSelect}
           onRequestDelete={onRequestDelete}
+          onRename={onRename}
         />
       ))}
     </div>

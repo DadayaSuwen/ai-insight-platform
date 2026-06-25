@@ -8,7 +8,7 @@ import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { ScrollArea } from "../../../../components/ui/scroll-area";
 
 export function SessionSidebar() {
-  const { selectSession, handleDelete } = useChatActions();
+  const { selectSession, handleDelete, handleRename } = useChatActions();
   const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
@@ -38,6 +38,7 @@ export function SessionSidebar() {
             const s = useChatStore.getState().sessions.find((x) => x.id === id);
             setPendingDelete({ id, title: s?.title ?? "" });
           }}
+          onRename={handleRename}
         />
       </ScrollArea>
       {/* Collapse toggle — fixed to the bottom of the expanded sidebar */}

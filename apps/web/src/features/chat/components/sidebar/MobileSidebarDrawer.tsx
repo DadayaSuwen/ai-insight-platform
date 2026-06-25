@@ -10,7 +10,7 @@ import { DeleteSessionDialog } from "./DeleteSessionDialog";
 export function MobileSidebarDrawer() {
   const sidebarOpen = useChatStore((s) => s.sidebarOpen);
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen);
-  const { selectSession, handleDelete, closeMobileSidebar } = useChatActions();
+  const { selectSession, handleDelete, handleRename, closeMobileSidebar } = useChatActions();
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
     title: string;
@@ -32,6 +32,7 @@ export function MobileSidebarDrawer() {
                 .sessions.find((x) => x.id === id);
               setPendingDelete({ id, title: s?.title ?? "" });
             }}
+            onRename={handleRename}
           />
         </ScrollArea>
         <DeleteSessionDialog
