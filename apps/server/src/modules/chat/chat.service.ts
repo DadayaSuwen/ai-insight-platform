@@ -34,6 +34,7 @@ export class ChatService {
 
           // 3. 定义收集器，用于保存最终的助手消息
           let assistantText = "";
+          let assistantThinking = ""; // ★ 中间轮被丢弃的思考文字（不入 content）
           const assistantToolCalls: any[] = [];
           const assistantToolResults: any[] = [];
           // 配对 token：planner 严格按序发射 tool_call → tool_result，
@@ -54,23 +55,35 @@ export class ChatService {
             });
 
             // 收集助手的数据用于落库
-            if (event.type === "text") {
-              assistantText += (event.data as any).content;
-            } else if (event.type === "tool_call") {
-              // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
-              pendingToolCallId = randomUUID();
-              assistantToolCalls.push({
-                id: pendingToolCallId,
-                ...event.data,
-              });
-            } else if (event.type === "tool_result") {
-              // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
-              // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
-              assistantToolResults.push({
-                id: pendingToolCallId ?? randomUUID(),
-                ...event.data,
-              });
-              pendingToolCallId = null;
+            switch (event.type) {
+              case "text":
+                assistantText += event.data.content;
+                break;
+              case "thinking":
+                // 中间轮被丢弃的文字（planner 已经决定调工具，所以这轮 text
+                // 不会展示给用户，但保存到 metadata.thinking 供调试 / 未来
+                // 加折叠面板用）。**不**写入 assistantText → 不污染多轮 LLM
+                // 上下文。
+                assistantThinking += event.data.content;
+                break;
+              case "tool_call":
+                // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
+                pendingToolCallId = randomUUID();
+                assistantToolCalls.push({
+                  id: pendingToolCallId,
+                  ...event.data,
+                });
+                break;
+              case "tool_result":
+                // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
+                // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
+                assistantToolResults.push({
+                  id: pendingToolCallId ?? randomUUID(),
+                  ...event.data,
+                });
+                pendingToolCallId = null;
+                break;
+              // error / done 不需要收集
             }
           }
 
@@ -82,6 +95,10 @@ export class ChatService {
             {
               toolCalls: assistantToolCalls,
               toolResults: assistantToolResults,
+              // 仅当 thinking 非空时存，避免无意义字段
+              ...(assistantThinking.length > 0
+                ? { thinking: assistantThinking }
+                : {}),
             },
           );
 
