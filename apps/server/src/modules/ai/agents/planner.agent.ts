@@ -166,30 +166,18 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
   async *invokeStream(
     message: string,
-    history: any[] = [], // ★ 接收历史消息
+    history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
     const systemPrompt = this.buildSystemPrompt();
-    // 组装完整消息列表
-    const messages: BaseMessage[] = [new SystemMessage(systemPrompt)];
 
-    // 将历史消息转换回 LangChain 对象
-    for (const h of history) {
-      if (h.role === "user") messages.push(new HumanMessage(h.content));
-      else if (h.role === "assistant" && h.tool_calls) {
-        messages.push(
-          new AIMessage({ content: h.content, tool_calls: h.tool_calls }),
-        );
-      } else if (h.role === "tool") {
-        messages.push(
-          new ToolMessage({ content: h.content, tool_call_id: h.tool_call_id }),
-        );
-      } else if (h.role === "assistant") {
-        messages.push(new AIMessage(h.content));
-      }
-    }
-    // 压入当前用户的输入
-    messages.push(new HumanMessage(message));
+    // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
+    // 这里直接展开即可；末尾追加当前用户消息。
+    const messages: BaseMessage[] = [
+      new SystemMessage(systemPrompt),
+      ...history,
+      new HumanMessage(message),
+    ];
 
     let iterations = 0;
 

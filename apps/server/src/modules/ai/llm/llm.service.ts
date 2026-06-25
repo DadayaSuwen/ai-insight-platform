@@ -8,9 +8,9 @@ import { ConfigService } from "@nestjs/config";
 import { ChatOllama } from "@langchain/ollama";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
+import { DatabaseService } from "../../database/database.service";
 import { createChatModel } from "./llm-factory";
 
 /**
@@ -55,7 +55,7 @@ export interface LlmStructuredOptions<T extends z.ZodTypeAny> {
  * provider (OpenAI / Anthropic / Ollama).  The active adapter is created by
  * LlmFactory from the config stored in the `LLMConfig` database table.
  *
- * Startup: reads config from Prisma on onModuleInit.
+ * Startup: reads config from LLMConfig table on onModuleInit.
  * Runtime: POST /llm/config calls reload() to hot-reload the adapter.
  */
 @Injectable()
@@ -74,7 +74,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   /** The provider currently in use — set on startup and after each reload. */
   private activeProvider: LLMProvider = LLMProvider.OLLAMA;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly database: DatabaseService,
+  ) {
     this.chatReady = this.initFromDatabase();
   }
 
@@ -215,27 +218,29 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   async reload(config?: LLMConfig): Promise<void> {
     // Persist to DB if provided (called from POST /llm/config)
     if (config) {
-      const prisma = new PrismaClient();
-      try {
-        await prisma.lLMConfig.upsert({
-          where: { id: config.provider },
-          update: {
+      const db = this.database.db;
+      const now = new Date();
+      await db
+        .insertInto("LLMConfig")
+        .values({
+          id: config.provider,
+          apiKey: config.apiKey ?? null,
+          baseUrl: config.baseUrl ?? null,
+          model: config.model,
+          temperature: config.temperature,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflict((oc) =>
+          oc.column("id").doUpdateSet({
             apiKey: config.apiKey ?? null,
             baseUrl: config.baseUrl ?? null,
             model: config.model,
             temperature: config.temperature,
-          },
-          create: {
-            id: config.provider,
-            apiKey: config.apiKey ?? null,
-            baseUrl: config.baseUrl ?? null,
-            model: config.model,
-            temperature: config.temperature,
-          },
-        });
-      } finally {
-        await prisma.$disconnect();
-      }
+            updatedAt: now,
+          }),
+        )
+        .execute();
     }
     this.chatReady = config
       ? this.initWithConfig(config)
@@ -248,19 +253,17 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
    * Used by GET /llm/config to populate the Settings form.
    */
   async getAllConfigs(): Promise<LLMConfig[]> {
-    const prisma = new PrismaClient();
-    try {
-      const rows = await prisma.lLMConfig.findMany();
-      return rows.map((row) => ({
-        provider: row.id as LLMProvider,
-        apiKey: row.apiKey ?? undefined,
-        baseUrl: row.baseUrl ?? undefined,
-        model: row.model,
-        temperature: row.temperature,
-      }));
-    } finally {
-      await prisma.$disconnect();
-    }
+    const rows = await this.database.db
+      .selectFrom("LLMConfig")
+      .selectAll()
+      .execute();
+    return rows.map((row) => ({
+      provider: row.id as LLMProvider,
+      apiKey: row.apiKey ?? undefined,
+      baseUrl: row.baseUrl ?? undefined,
+      model: row.model,
+      temperature: row.temperature,
+    }));
   }
 
   /** Returns the provider that is currently active (last loaded from DB or set via reload). */
@@ -281,11 +284,11 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private async initFromDatabase(): Promise<void> {
     this.activeProvider = LLMProvider.OLLAMA;
     try {
-      const prisma = new PrismaClient();
-      // Default to Ollama row on startup
-      const row = await prisma.lLMConfig.findUnique({
-        where: { id: LLMProvider.OLLAMA },
-      });
+      const row = await this.database.db
+        .selectFrom("LLMConfig")
+        .selectAll()
+        .where("id", "=", LLMProvider.OLLAMA)
+        .executeTakeFirst();
 
       if (!row) {
         this.chat = this.defaultOllamaChat();

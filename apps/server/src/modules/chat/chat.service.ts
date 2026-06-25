@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Observable } from "rxjs";
 import { MessageEvent } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AiService } from "../ai/ai.service";
 import { ChatSessionService } from "./chat-session.service";
@@ -23,18 +24,24 @@ export class ChatService {
     return new Observable<MessageEvent>((subscriber) => {
       (async () => {
         try {
-          // 1. 保存用户消息
-          await this.sessionService.saveMessage(sessionId, "user", message);
-
-          // 2. 拉取历史记忆
+          // 1. 先拉历史（不含当前用户消息），保证 planner 看到的 history 是"过去"
           const history =
             await this.sessionService.getMessagesBySessionId(sessionId);
           const historyMessages = this.buildHistoryMessages(history);
+
+          // 2. 再保存当前用户消息
+          await this.sessionService.saveMessage(sessionId, "user", message);
 
           // 3. 定义收集器，用于保存最终的助手消息
           let assistantText = "";
           const assistantToolCalls: any[] = [];
           const assistantToolResults: any[] = [];
+          // 配对 token：planner 严格按序发射 tool_call → tool_result，
+          // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
+          // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
+          // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
+          // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
+          let pendingToolCallId: string | null = null;
 
           // 4. 消费 AiService 的流
           for await (const event of this.aiService.processStream(
@@ -50,9 +57,20 @@ export class ChatService {
             if (event.type === "text") {
               assistantText += (event.data as any).content;
             } else if (event.type === "tool_call") {
-              assistantToolCalls.push(event.data);
+              // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
+              pendingToolCallId = randomUUID();
+              assistantToolCalls.push({
+                id: pendingToolCallId,
+                ...event.data,
+              });
             } else if (event.type === "tool_result") {
-              assistantToolResults.push(event.data);
+              // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
+              // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
+              assistantToolResults.push({
+                id: pendingToolCallId ?? randomUUID(),
+                ...event.data,
+              });
+              pendingToolCallId = null;
             }
           }
 
@@ -110,11 +128,24 @@ export class ChatService {
 
         // 如果有工具调用，先压入带 tool_calls 的 AIMessage
         if (toolData?.toolCalls?.length > 0) {
+          const toolCalls = toolData.toolCalls as Array<{
+            id: string;
+            name: string;
+            args: Record<string, any>;
+          }>;
+          const toolResults = (toolData.toolResults ?? []) as Array<{
+            id: string | null;
+            name: string;
+            result: unknown;
+          }>;
+
+          // 直接复用保存时的 UUID —— 跨 turn 全局唯一，
+          // 同一 turn 内多次调用同一工具也不会冲突。
           messages.push(
             new AIMessage({
               content: "",
-              tool_calls: toolData.toolCalls.map((tc: any) => ({
-                id: tc.name, // 与 planner.agent.ts 中 toolCall.id 保持一致
+              tool_calls: toolCalls.map((tc) => ({
+                id: tc.id,
                 name: tc.name,
                 args: tc.args,
                 type: "tool_call",
@@ -122,11 +153,14 @@ export class ChatService {
             }),
           );
 
-          // 压入对应的 ToolMessage（必须用 LangChain 的类，序列化时会带 name 字段）
-          for (const tr of toolData?.toolResults ?? []) {
+          // 按 saved id 配对 tool_call / tool_result，不依赖数组下标：
+          // 1) 老数据可能没 id（fallback 跳过，不影响 LLM 校验）
+          // 2) 即使未来 planner 改为并发执行，按 id 配对也不会错位
+          for (const tr of toolResults) {
+            if (!tr.id) continue;
             messages.push(
               new ToolMessage({
-                tool_call_id: tr.name,
+                tool_call_id: tr.id,
                 name: tr.name,
                 content: JSON.stringify(tr.result),
               }),
