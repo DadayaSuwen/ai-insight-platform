@@ -69,10 +69,21 @@ export class PlannerAgent {
   }
 
   private buildDefaultSchema(): string {
-    return `Sales: id, productName, category, amount, quantity, region, saleDate, createdAt, updatedAt
-ChatSession: id, userId, title, createdAt, updatedAt
-ChatMessage: id, sessionId, role, content, metadata, createdAt`;
+    // 兜底：refreshSchema 失败时，planner 仍然能工作。
+    // 通过 getSchema() 动态拿真实 4 张业务表；若 DB 查询也失败，降到空串。
+    return "";
   }
+
+  /**
+   * 业务表白名单——LLM 只能看这 4 张表，ChatSession/ChatMessage/LLMConfig
+   * 是系统内部表，给 LLM 看会污染上下文并增加幻觉。
+   */
+  private static readonly BUSINESS_TABLES = new Set([
+    "Customer",
+    "Product",
+    "SalesOrder",
+    "SalesOrderItem",
+  ]);
 
   async refreshSchema(): Promise<void> {
     try {
@@ -80,23 +91,51 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         table_name: string;
         column_name: string;
         data_type: string;
-      }>;
+        is_nullable: string;
+      }> | undefined;
+
+      const pkMap: Map<string, string[]> =
+        ((await (this.db as any).getPrimaryKeys?.()) as
+          | Map<string, string[]>
+          | undefined) ?? new Map();
 
       if (!rows) return;
 
-      const tables = new Map<string, string[]>();
+      // 按白名单过滤 + 按表名分组
+      const tables = new Map<string, Array<{ col: string; type: string; nullable: boolean; isPk: boolean }>>();
       for (const row of rows) {
+        if (!PlannerAgent.BUSINESS_TABLES.has(row.table_name)) continue;
+        const pkSet = new Set(pkMap.get(row.table_name) ?? []);
         const cols = tables.get(row.table_name) ?? [];
-        cols.push(`${row.column_name} (${row.data_type})`);
+        cols.push({
+          col: row.column_name,
+          type: row.data_type,
+          nullable: row.is_nullable === "YES",
+          isPk: pkSet.has(row.column_name),
+        });
         tables.set(row.table_name, cols);
       }
 
+      // 固定顺序输出，方便日志对比
       const lines: string[] = [];
-      for (const [table, cols] of tables) {
-        lines.push(`${table}: ${cols.join(", ")}`);
+      for (const tableName of [...PlannerAgent.BUSINESS_TABLES]) {
+        const cols = tables.get(tableName);
+        if (!cols) continue;
+        const colDescs = cols
+          .map((c) => {
+            const tags: string[] = [];
+            if (c.isPk) tags.push("PK");
+            if (c.nullable) tags.push("NULL");
+            const tagStr = tags.length > 0 ? ` [${tags.join(",")}]` : "";
+            return `${c.col} (${c.type})${tagStr}`;
+          })
+          .join(", ");
+        lines.push(`${tableName}: ${colDescs}`);
       }
       this.schema = lines.join("\n");
-      this.logger.log("Schema refreshed from database");
+      this.logger.log(
+        `Schema refreshed from database (${tables.size} business tables):\n${this.schema}`,
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to refresh schema: ${err instanceof Error ? err.message : String(err)}`,

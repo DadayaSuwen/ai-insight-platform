@@ -21,11 +21,13 @@ echo "[entrypoint] postgres is reachable"
 echo "[entrypoint] applying schema.sql..."
 # Idempotent: skip "already exists" errors so restarts are safe.
 # For real production migrations use prisma migrate + versioned SQL files.
+# DROP 列表必须覆盖所有 schema.sql 中存在的表（含 4 张业务表），
+# 旧版只 drop 3 张表会导致 SalesOrderItem 残留 FK 阻塞重建。
 PGPASSWORD="${DB_PASSWORD:-password}" psql \
     -h "${DATABASE_HOST:-postgres}" \
     -U "${DB_USER:-app}" \
     -d "${DB_NAME:-ai_insight}" \
-    -c "DROP TABLE IF EXISTS \"ChatMessage\" CASCADE; DROP TABLE IF EXISTS \"ChatSession\" CASCADE; DROP TABLE IF EXISTS \"Sales\" CASCADE;" \
+    -c "DROP TABLE IF EXISTS \"ChatMessage\" CASCADE; DROP TABLE IF EXISTS \"ChatSession\" CASCADE; DROP TABLE IF EXISTS \"LLMConfig\" CASCADE; DROP TABLE IF EXISTS \"SalesOrderItem\" CASCADE; DROP TABLE IF EXISTS \"SalesOrder\" CASCADE; DROP TABLE IF EXISTS \"Product\" CASCADE; DROP TABLE IF EXISTS \"Customer\" CASCADE;" \
     -f prisma/schema.sql
 
 if [ "${SEED_ON_BOOT:-true}" = "true" ]; then
