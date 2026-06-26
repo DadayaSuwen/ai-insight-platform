@@ -154,6 +154,19 @@ export class ChatService {
               ? JSON.parse(rawMeta)
               : rawMeta;
 
+        // ★ Qwen3 / DeepSeek-R1 多轮对话需要回传 reasoning_content
+        // 从 metadata.reasoning 字段读取（planner 在聊天过程中通过
+        // assistantReasoning collector 收集并保存）。
+        const reasoningContent: string | undefined =
+          toolData?.reasoning &&
+          typeof toolData.reasoning === "string" &&
+          toolData.reasoning.length > 0
+            ? toolData.reasoning
+            : undefined;
+        const additionalKwargs = reasoningContent
+          ? { reasoning_content: reasoningContent }
+          : {};
+
         // 如果有工具调用，先压入带 tool_calls 的 AIMessage
         if (toolData?.toolCalls?.length > 0) {
           const toolCalls = toolData.toolCalls as Array<{
@@ -169,6 +182,7 @@ export class ChatService {
 
           // 直接复用保存时的 UUID —— 跨 turn 全局唯一，
           // 同一 turn 内多次调用同一工具也不会冲突。
+          // ★ 同时附加 reasoning_content（Qwen3 API 校验必需）
           messages.push(
             new AIMessage({
               content: "",
@@ -178,6 +192,7 @@ export class ChatService {
                 args: tc.args,
                 type: "tool_call",
               })),
+              additional_kwargs: additionalKwargs,
             }),
           );
 
@@ -196,9 +211,14 @@ export class ChatService {
           }
         }
 
-        // 压入最终的文本回复
+        // 压入最终的文本回复（AIMessage 也带 reasoning_content 给 Qwen3）
         if (record.content) {
-          messages.push(new AIMessage(record.content));
+          messages.push(
+            new AIMessage({
+              content: record.content,
+              additional_kwargs: additionalKwargs,
+            }),
+          );
         }
       }
     }

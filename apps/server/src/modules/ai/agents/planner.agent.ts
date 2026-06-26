@@ -35,7 +35,8 @@ export type PlannerStreamEvent =
   | { type: "done"; data: Record<string, never> }
   | { type: "tool_call"; data: PlannerToolCallData }
   | { type: "tool_result"; data: PlannerToolResultData }
-  | { type: "thinking"; data: { content: string } };
+  | { type: "thinking"; data: { content: string } }
+  | { type: "reasoning"; data: { content: string } };
 
 @Injectable()
 export class PlannerAgent {
@@ -166,6 +167,16 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
         })
         .join("");
     }
+    return "";
+  }
+
+  /**
+   * 从 AIMessageChunk 中提取 Qwen3 / DeepSeek-R1 等思考模型的 reasoning_content。
+   * 通过 ThinkingChatOllama 子类，thinking 已经被写入 additional_kwargs.reasoning_content。
+   */
+  private extractReasoning(chunk: AIMessageChunk): string {
+    const v = (chunk as any).additional_kwargs?.reasoning_content;
+    if (typeof v === "string") return v;
     return "";
   }
 
