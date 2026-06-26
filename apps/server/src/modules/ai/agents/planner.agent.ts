@@ -58,13 +58,13 @@ export class PlannerAgent {
 
   /**
    * Bind tools to the current chat model each call.
-   * In LangChain 0.3.x with @langchain/ollama, we pass the StructuredTool[] directly.
+   * LangChain 0.3.x bindTools() 接受 StructuredTool[] 数组，
+   * ChatOpenAI / ChatAnthropic 会自动处理 tool_calls 协议格式。
    */
   private getChat() {
     const baseChat = this.llm.getChatModel();
     const tools = [...this.toolMap.values()];
 
-    // 直接传递 StructuredTool 数组，@langchain/ollama 会自动处理 Ollama API 所需的格式
     return baseChat.bindTools(tools);
   }
 
@@ -253,10 +253,14 @@ export class PlannerAgent {
       let currentTurnTextBuffer = "";
 
       for await (const chunk of stream) {
-        // 1. 累积本轮 text 到 buffer（不 yield；轮末再决定）
+        // 1. ★ 实时 yield text chunk 增量 → 恢复前端打字机效果
         const content = this.extractContent(chunk.content);
         if (content) {
           currentTurnTextBuffer += content;
+          yield {
+            type: "text",
+            data: { content },
+          };
         }
 
         // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
@@ -269,30 +273,25 @@ export class PlannerAgent {
         !finalMessage.tool_calls ||
         finalMessage.tool_calls.length === 0
       ) {
-        // 情况 A: 最终总结轮 → 把整轮 text yield 出去给前端
-        if (currentTurnTextBuffer.length > 0) {
-          yield {
-            type: "text",
-            data: { content: currentTurnTextBuffer },
-          };
-        }
-        // 仍要把 AIMessage 放进历史，保证多轮对话上下文一致
-        messages.push(new AIMessage(currentTurnTextBuffer));
+        // 情况 A: 最终总结轮 → 整轮 text 已在 for-await 内实时 yield 给前端，
+        // 只需把完整 AIMessage（finalMessage 含 LangChain 拼好的 text）放进历史，
+        // 保持多轮对话上下文一致。
+        // finalMessage 在这里已非空（外层 if 已检查），用 ! 断言。
+        messages.push(finalMessage!);
         // 没有工具调用，说明 LLM 已经说完了，退出循环
         break;
       }
 
-      // 情况 B: 中间工具调用轮 → 整轮 text 不 yield 给前端
-      // 但**必须**把它作为 AIMessage content 放进 messages 数组
-      // （保留 LLM 上下文记忆），并通过 'thinking' 事件传给 chat.service.ts
-      // 存到 metadata.thinking 供调试。
-      messages.push(new AIMessage(currentTurnTextBuffer));
-      if (currentTurnTextBuffer.length > 0) {
-        yield {
-          type: "thinking",
-          data: { content: currentTurnTextBuffer },
-        };
-      }
+      // 情况 B: 中间工具调用轮 → 整轮 text 已在 for-await 内实时 yield 给前端。
+      // 云端模型（gpt-4o-mini 等）遵守 system prompt "调工具时 content 必须空" 红线，
+      // 实际不会输出中间轮 text；若偶发输出，会被前端按打字机展示 —— 当前可接受。
+      // ★ 必须把整轮 AIMessage（content + tool_calls）都放进 messages 数组：
+      // OpenAI 协议严格要求 role:'tool' 消息的前一条 assistant 必须有 tool_calls，
+      // 否则报 400 "Messages with role 'tool' must be a response to a preceding
+      // message with 'tool_calls'"。Ollama 不校验这层，但 OpenAI / Anthropic 严格。
+      // 复用 finalMessage（含 LangChain 拼接好的 tool_calls + tool_call_id），
+      // 下游 ToolMessage 的 tool_call_id 也能与之对得上。
+      messages.push(finalMessage);
 
       // 5. 执行工具
       for (const toolCall of finalMessage.tool_calls) {

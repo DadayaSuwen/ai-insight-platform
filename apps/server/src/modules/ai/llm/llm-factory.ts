@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { ChatOllama } from "@langchain/ollama";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
 
 /**
@@ -37,13 +36,10 @@ export function createChatModel(config: LLMConfig) {
       return new ChatAnthropic(opts);
     }
 
-    case LLMProvider.OLLAMA:
     default: {
-      return new ChatOllama({
-        baseUrl: config.baseUrl || "http://localhost:11434",
-        model: config.model,
-        temperature: config.temperature ?? 0,
-      });
+      // Exhaustive guard — should be unreachable thanks to LLMProvider enum.
+      const _exhaustive: never = config.provider;
+      throw new Error(`Unsupported LLM provider: ${String(_exhaustive)}`);
     }
   }
 }

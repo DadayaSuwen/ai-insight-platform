@@ -67,7 +67,7 @@ export class ChatService {
                 assistantThinking += event.data.content;
                 break;
               case "tool_call":
-                // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
+                // 无论上游 provider 给什么 id，统一洗成 UUID，避免跨 turn 重复
                 pendingToolCallId = randomUUID();
                 assistantToolCalls.push({
                   id: pendingToolCallId,

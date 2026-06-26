@@ -64,7 +64,7 @@ export interface SalesOrderItemTable {
 }
 
 export interface LLMConfigTable {
-  // id 是 provider（"openai" | "anthropic" | "ollama"），由应用层写入
+  // id 是 provider（"openai" | "anthropic"），由应用层写入
   id: string;
   apiKey: string | null;
   baseUrl: string | null;

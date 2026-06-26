@@ -1,12 +1,11 @@
 import { z } from 'zod';
 
 /**
- * Supported LLM providers.
+ * Supported LLM providers (cloud only — local Ollama removed 2026-06-27).
  */
 export enum LLMProvider {
   OPENAI = 'openai',
   ANTHROPIC = 'anthropic',
-  OLLAMA = 'ollama',
 }
 
 /**

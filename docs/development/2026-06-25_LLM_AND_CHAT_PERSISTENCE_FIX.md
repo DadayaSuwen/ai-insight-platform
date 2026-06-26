@@ -15,7 +15,7 @@
 | 后端启动报 `Invalid prisma.lLMConfig.findUnique()` | `llm.service.ts` 残留 `new PrismaClient()`，且 Prisma 客户端从未生成 | 把 LLMConfig 访问迁到 Kysely，删除整个 `core/prisma/` 目录 |
 | `POST /llm/config` 报 `null value in column "updatedAt"` | Prisma 把 `@updatedAt` 编译成 NOT NULL 列 + UPDATE 触发器，**无列默认值** | Kysely 类型用 `Date`（非 `Generated<Date>`），保存时显式 `new Date()` |
 | **单次会话内** LLM 不知道上一句说了什么 | `planner.agent.ts` 用 `h.role` 判断 LangChain `BaseMessage` 实例，永远 false → history 被静默丢弃 | `history: BaseMessage[]` + `...history` 展开；同时把 `saveMessage(user)` 挪到 `getMessagesBySessionId` 之后，避免重复 |
-| LLM API 400 `Duplicate value for 'tool_call_id' of query_sales` | Ollama 复用的 `toolCall.id` 就是函数名，跨 turn 重复 | 保存时 `randomUUID()` 写入 `metadata.toolCalls[i].id` 与 `toolResults[i].id`，重建时按 saved id 配对，**不依赖数组下标** |
+| LLM API 400 `Duplicate value for 'tool_call_id' of query_sales` | 某些 provider 复用的 `toolCall.id` 就是函数名，跨 turn 重复 | 保存时 `randomUUID()` 写入 `metadata.toolCalls[i].id` 与 `toolResults[i].id`，重建时按 saved id 配对，**不依赖数组下标** |
 | 存量老数据有同样的 400 风险 | 老 metadata 没有 `id` 字段 | 加一次性 SQL `one-time-fix-tool-call-ids.sql`（`gen_random_uuid() + WITH ORDINALITY`），或直接 TRUNCATE |
 | 死代码 | `PrismaService` 注册在 `AppModule` 但全代码库无人用 | 删除 `core/prisma/` 整个目录 |
 
@@ -328,8 +328,8 @@ psql -c 'TRUNCATE "ChatSession" CASCADE;'  # 清掉了 2 个 session / 24 条 me
 |---|------|------|
 | 1 | `pnpm db:up && pnpm db:seed` | DB 启动 + 种子数据 OK |
 | 2 | `pnpm dev:server` | 启动日志**没有** `Failed to init LLM from DB`，`LlmService loaded config` 正常出现 |
-| 3 | `curl -X POST http://localhost:3000/llm/config -H "Content-Type: application/json" -d '{"provider":"ollama","model":"qwen2.5:3b","temperature":0,"baseUrl":"http://localhost:11434"}'` | `{"ok":true,...}` 200 OK |
-| 4 | `curl http://localhost:3000/llm/config` | 返回 3 条 config（anthropic/openai/ollama），无 500 |
+| 3 | `curl -X POST http://localhost:3000/llm/config -H "Content-Type: application/json" -d '{"provider":"openai","model":"gpt-4o-mini","temperature":0,"baseUrl":"https://api.openai.com/v1","apiKey":"sk-..."}'` | `{"ok":true,...}` 200 OK |
+| 4 | `curl http://localhost:3000/llm/config` | 返回 2 条 config（anthropic/openai），无 500 |
 | 5 | 前端开新会话，发"销售额最高的 3 个产品是什么？" | 触发 `query_sales` 工具，返回 Top 3 |
 | 6 | 紧接发"第二个产品的销售趋势呢？" | LLM **能识别"第二个"指代的是上一轮排名第二的产品**，触发 `query_sales` 查该产品 |
 | 7 | 同一会话内连续两轮都触发 `query_sales` | 第二轮 LLM 收到的历史里 `tool_call_id` 都是真 UUID，**没有 400 Duplicate value** |

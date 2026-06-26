@@ -4,9 +4,7 @@ import type { SSEChartData, SSESQLData } from "@workspace/types";
 /**
  * 工具调用数据 — 来自后端 planner yield 的 `tool_call` 事件。
  * 与 `apps/server/src/modules/ai/agents/planner.agent.ts` 的 PlannerToolCallData 对齐。
- * `id` 是跨 turn 全局唯一的工具调用 id：
- *   - OpenAI / Anthropic 走真 UUID
- *   - Ollama 复用函数名 → planner 层洗成 UUID（见 planner.agent.ts 注释）
+ * `id` 是跨 turn 全局唯一的工具调用 id：后端在保存时统一洗成 UUID。
  */
 export interface ToolCallData {
   id: string;

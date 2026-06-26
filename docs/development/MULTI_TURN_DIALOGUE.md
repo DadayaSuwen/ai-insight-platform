@@ -119,7 +119,7 @@ CREATE TABLE "ChatMessage" (
 | 重复 `Database` interface 导致 Kysely 类型推断歧义 | `core/kysely/types.ts` | 删除第二份 `Database` 声明，只保留含 6 张表的单一接口 |
 | `buildHistoryMessages` 读 `record.toolData`，但实际列名是 `metadata` —— **多轮 tool_calls 历史完全丢失** | `chat.service.ts:97` | 改为读 `record.metadata` |
 | `record.metadata` 实际是对象（pg 驱动对 JSONB 自动解析），但类型声明为 string，直接 `JSON.parse` 会抛 `TypeError` | `chat.service.ts` | 兼容两种形态：对象直接用，字符串才 parse |
-| `ToolMessage` 缺少 `name` 字段，导致 Ollama 校验失败：`400 Failed to deserialize the JSON body into the target type: messages[2]: missing field name` | `chat.service.ts` | 重放时使用 LangChain `new ToolMessage({tool_call_id, name, content})` 而不是 plain object |
+| `ToolMessage` 缺少 `name` 字段，导致 LLM API 校验失败：`400 Failed to deserialize the JSON body into the target type: messages[2]: missing field name` | `chat.service.ts` | 重放时使用 LangChain `new ToolMessage({tool_call_id, name, content})` 而不是 plain object |
 | `DELETE /chat/sessions/:id` 因 FK RESTRICT 返回 500 | `chat-session.service.ts` | 删除会话前先 `deleteFrom("ChatMessage").where("sessionId", "=", id)` |
 
 ### 3.3 API 端点
@@ -265,7 +265,7 @@ new AIMessage({
     type: "tool_call",
   })),
 })
-// 之后压入每个 ToolMessage（必须有 name 字段，否则 Ollama 校验失败）
+// 之后压入每个 ToolMessage（必须有 name 字段，否则 LLM API 校验失败）
 new ToolMessage({
   tool_call_id: tr.name,
   name: tr.name,
@@ -365,7 +365,7 @@ const handleButtonClick = () => {
 | 新增/修正的 Bug | 与本文档的关联 |
 |---|---|
 | 多轮对话上下文**仍然**丢失 | 第六节 #2（`buildHistoryMessages` 读错列）已修，但 LLM 拿到历史后又被 `planner.agent.ts` 的 dict 协议循环丢弃；属于**契约未对齐**的二次问题 |
-| `tool_call_id` 跨 turn 重复 400 | 第六节 #4 修了 `ToolMessage.name` 缺失，但 Ollama 复用的"函数名 id"在跨 turn 时重复导致 400 |
+| `tool_call_id` 跨 turn 重复 400 | 第六节 #4 修了 `ToolMessage.name` 缺失，但某些 provider 复用的"函数名 id"在跨 turn 时重复导致 400 |
 | `LLMConfig` 持久化不可用（`prisma.lLMConfig` 报错） | 不在本文档范围内（LLMConfig 之前没单独文档） |
 | `@updatedAt` NOT NULL 约束 | 同上 |
 | `PrismaService` 死代码 | 同上 |

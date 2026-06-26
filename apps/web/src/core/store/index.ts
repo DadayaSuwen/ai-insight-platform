@@ -9,7 +9,6 @@ interface AppState {
   llmHealth: {
     openai: boolean;
     anthropic: boolean;
-    ollama: boolean;
   } | null;
   isLoadingConfig: boolean;
 
@@ -25,16 +24,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 const defaultConfigs: Record<LLMProvider, LLMConfig | null> = {
   [LLMProvider.OPENAI]: null,
   [LLMProvider.ANTHROPIC]: null,
-  [LLMProvider.OLLAMA]: {
-    provider: LLMProvider.OLLAMA,
-    model: "qwen2.5:3b",
-    temperature: 0,
-  },
 };
 
 export const useAppStore = create<AppState>((set) => ({
   llmConfigs: { ...defaultConfigs },
-  activeProvider: LLMProvider.OLLAMA,
+  activeProvider: LLMProvider.OPENAI,
   llmHealth: null,
   isLoadingConfig: false,
 
@@ -90,7 +84,6 @@ export const useAppStore = create<AppState>((set) => ({
           llmHealth: {
             openai: data.openai?.ok ?? false,
             anthropic: data.anthropic?.ok ?? false,
-            ollama: data.ollama?.ok ?? false,
           },
         });
       }
