@@ -283,10 +283,13 @@ export class PlannerAgent {
       }
 
       // 情况 B: 中间工具调用轮 → 整轮 text 不 yield 给前端
-      // 但**必须**把它作为 AIMessage content 放进 messages 数组
-      // （保留 LLM 上下文记忆），并通过 'thinking' 事件传给 chat.service.ts
-      // 存到 metadata.thinking 供调试。
-      messages.push(new AIMessage(currentTurnTextBuffer));
+      // 但**必须**把整轮 AIMessage（content + tool_calls）都放进 messages 数组
+      // ——OpenAI 协议严格要求 role:'tool' 消息的前一条 assistant 必须有 tool_calls，
+      // 否则报 400 "Messages with role 'tool' must be a response to a preceding
+      // message with 'tool_calls'"。Ollama 不校验这层，但 OpenAI / Anthropic 严格。
+      // 这里复用 finalMessage（含 LangChain 拼接好的 tool_calls + tool_call_id），
+      // 下游 ToolMessage 的 tool_call_id 也能与之对得上。
+      messages.push(finalMessage);
       if (currentTurnTextBuffer.length > 0) {
         yield {
           type: "thinking",
