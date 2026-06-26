@@ -62,6 +62,10 @@ messages.push(finalMessage);
 - ✅ 修复多轮对话中**第二次**对话（之前已隐式坏掉，本地 Ollama 因不校验也"看起来工作"）
 - ✅ 让中间轮的 `tool_calls` 完整进入多轮上下文，LLM 后续能看到自己刚才调用了哪些工具（有助于 reasoning 类模型维持一致性）
 
+> **补 commit（sse-typing-restore）**：恢复打字机效果。
+> 把 `for-await` 内的"只累积、不 yield"改为"实时 yield 每个 text chunk"；情况 A 删掉整段 yield，情况 B 删掉 thinking 事件。
+> 云端模型遵守 system prompt "调工具时 content 必须空"红线 → 中间轮实际不会输出 text → 打字机回归不影响 user experience。
+
 ## 改动文件
 
 | 文件 | 改动 |
