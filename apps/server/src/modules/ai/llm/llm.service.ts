@@ -5,8 +5,6 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ThinkingChatOllama } from "./thinking-chat-ollama";
-import { shouldEnableThinking } from "./thinking-detection";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
@@ -53,7 +51,7 @@ export interface LlmStructuredOptions<T extends z.ZodTypeAny> {
  * LlmService — runtime-configurable LLM wrapper.
  *
  * All Agents call invoke() / invokeStructured() and are unaware of the active
- * provider (OpenAI / Anthropic / Ollama).  The active adapter is created by
+ * provider (OpenAI / Anthropic).  The active adapter is created by
  * LlmFactory from the config stored in the `LLMConfig` database table.
  *
  * Startup: reads config from LLMConfig table on onModuleInit.
@@ -73,7 +71,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   private chatReady: Promise<void>;
 
   /** The provider currently in use — set on startup and after each reload. */
-  private activeProvider: LLMProvider = LLMProvider.OLLAMA;
+  private activeProvider: LLMProvider = LLMProvider.OPENAI;
 
   constructor(
     private readonly config: ConfigService,
@@ -129,42 +127,40 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
         opts.temperature;
     }
 
-    // 用 AbortController 实现真 abort：超时真正掐断 HTTP socket，
-    // 而不是只翻 flag 让 for-await 自己发现
-    const controller = new AbortController();
-    const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
+    // LangChain's stream() may return a Promise that resolves to AsyncIterable
+    // (e.g. ChatOpenAI returns Promise<IterableReadableStream>).
+    // Wrap sync iterables in an async generator for uniform handling.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await (chat as any).stream(messages);
+    const stream: AsyncIterable<unknown> =
+      raw[Symbol.asyncIterator] != null
+        ? raw
+        : (async function* () {
+            yield* raw;
+          })();
+
+    let timedOut = false;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+    }, timeoutMs);
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = await (chat as any).stream(messages, {
-        signal: controller.signal,
-      });
-      // LangChain's stream() may return a Promise that resolves to AsyncIterable
-      // (e.g. ChatOpenAI returns Promise<IterableReadableStream>).
-      // Wrap sync iterables in an async generator for uniform handling.
-      const stream: AsyncIterable<unknown> =
-        raw[Symbol.asyncIterator] != null
-          ? raw
-          : (async function* () {
-              yield* raw;
-            })();
+      // Track accumulated content to detect new chunks
+      let accumulated = "";
 
       for await (const chunk of stream) {
+        if (timedOut) {
+          throw new Error(`LLM stream timeout after ${timeoutMs}ms`);
+        }
         const content = this.normalizeContent(
           (chunk as { content: unknown }).content,
         );
         if (content) {
+          accumulated += content;
           yield content;
         }
       }
     } catch (err) {
-      // AbortError 是正常路径（超时或外部 abort），静默处理
-      if (err instanceof Error && err.name === "AbortError") {
-        this.logger.warn(
-          `[invokeStream] Aborted (timeout=${timeoutMs}ms or external abort)`,
-        );
-        return;
-      }
       this.logger.error(
         `[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -194,23 +190,6 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     });
 
     return this.parseAndValidate(raw, opts.schema);
-  }
-
-  /**
-   * Ollama-only health check (legacy).
-   * Phase 2 will implement multi-provider health.
-   */
-  async ping(): Promise<boolean> {
-    try {
-      const baseUrl =
-        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434";
-      const res = await fetch(`${baseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
   }
 
   /**
@@ -285,18 +264,18 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   // ─── Internals ─────────────────────────────────────────────────────────────
 
   private async initFromDatabase(): Promise<void> {
-    this.activeProvider = LLMProvider.OLLAMA;
+    this.activeProvider = LLMProvider.OPENAI;
     try {
       const row = await this.database.db
         .selectFrom("LLMConfig")
         .selectAll()
-        .where("id", "=", LLMProvider.OLLAMA)
+        .where("id", "=", LLMProvider.OPENAI)
         .executeTakeFirst();
 
       if (!row) {
-        this.chat = this.defaultOllamaChat();
+        this.chat = this.defaultOpenAIChat();
         this.logger.warn(
-          "No LLMConfig in DB; using env-default Ollama. Set config via POST /llm/config",
+          "No LLMConfig in DB; using default OpenAI (gpt-4o-mini). Set config via POST /llm/config",
         );
         return;
       }
@@ -315,10 +294,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (err) {
       this.logger.error(
-        "Failed to init LLM from DB, falling back to Ollama",
+        "Failed to init LLM from DB, falling back to default OpenAI",
         err,
       );
-      this.chat = this.defaultOllamaChat();
+      this.chat = this.defaultOpenAIChat();
     }
   }
 
@@ -335,18 +314,11 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private defaultOllamaChat() {
-    // 同样使用 ThinkingChatOllama 子类，统一 reasoning_content 处理逻辑
-    // 根据 OLLAMA_MODEL 自动判断是否启用 thinking（qwen2.5 关闭 / qwen3 / deepseek-r1 开启）
-    const model = this.config.get<string>("OLLAMA_MODEL") ?? "qwen2.5:3b";
-    const thinking = shouldEnableThinking(model, undefined);
-    return new ThinkingChatOllama({
-      baseUrl:
-        this.config.get<string>("OLLAMA_BASE_URL") ?? "http://localhost:11434",
-      model,
+  private defaultOpenAIChat() {
+    return createChatModel({
+      provider: LLMProvider.OPENAI,
+      model: "gpt-4o-mini",
       temperature: 0,
-      numCtx: 4096,
-      thinking,
     });
   }
 

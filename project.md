@@ -8,7 +8,7 @@
 *   **前端：** `React 18` + `Vite` + `Zustand` (状态管理) + `TailwindCSS` + `Shadcn UI` (组件库) + `ECharts`
 *   **后端：** `NestJS` (强约束的 IOC 架构) + `Prisma ORM` (类型安全的数据库操作)
 *   **AI 编排：** `LangChain.js` (与 Node.js 生态完美融合)
-*   **大模型：** 本地 `Ollama` (跑 `qwen2.5:3b`) + 预留云端 API 接口
+*   **大模型：** 云端 API（`OpenAI` / `Anthropic`，默认 `gpt-4o-mini`）
 *   **校验库：** `Zod` (用于定义数据 Schema，前后端共享)
 
 ---

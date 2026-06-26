@@ -64,13 +64,13 @@ export class PlannerAgent {
 
   /**
    * Bind tools to the current chat model each call.
-   * In LangChain 0.3.x with @langchain/ollama, we pass the StructuredTool[] directly.
+   * LangChain 0.3.x bindTools() 接受 StructuredTool[] 数组，
+   * ChatOpenAI / ChatAnthropic 会自动处理 tool_calls 协议格式。
    */
   private getChat() {
     const baseChat = this.llm.getChatModel();
     const tools = [...this.toolMap.values()];
 
-    // 直接传递 StructuredTool 数组，@langchain/ollama 会自动处理 Ollama API 所需的格式
     return baseChat.bindTools(tools);
   }
 

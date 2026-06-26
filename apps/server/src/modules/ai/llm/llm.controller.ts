@@ -20,7 +20,7 @@ import {
  *
  * GET  /llm/config  — returns current config (apiKey masked)
  * POST /llm/config  — upserts config + hot-reloads LlmService
- * GET  /llm/health  — pings all 3 providers
+ * GET  /llm/health  — pings all providers
  * GET  /llm/models  — returns available models per provider
  */
 @Controller("llm")
@@ -85,19 +85,6 @@ export class LlmController {
       string,
       { ok: boolean; latencyMs?: number; error?: string }
     > = {};
-
-    // Ollama — use baseUrl from DB (or default), ping the /api/tags endpoint
-    try {
-      const t0 = Date.now();
-      const cfg = configByProvider[LLMProvider.OLLAMA];
-      const baseUrl = cfg?.baseUrl ?? "http://localhost:11434";
-      const res = await fetch(`${baseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      result["ollama"] = { ok: res.ok, latencyMs: Date.now() - t0 };
-    } catch (e: unknown) {
-      result["ollama"] = { ok: false, error: String(e) };
-    }
 
     // OpenAI — requires API key; if not configured, skip
     {
@@ -174,14 +161,6 @@ export class LlmController {
         "claude-3-5-sonnet-20240620",
         "claude-3-opus-20240229",
         "claude-3-haiku-20240307",
-      ],
-      ollama: [
-        "qwen2.5:3b",
-        "qwen3:4b",
-        "llama3.3",
-        "mistral",
-        "deepseek-r1:8b",
-        "codellama:13b",
       ],
     };
   }

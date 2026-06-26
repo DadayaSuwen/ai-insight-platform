@@ -71,10 +71,10 @@ model ChatMessage {
 // ─── LLM Configuration ─────────────────────────────────────────────────────────
 
 model LLMConfig {
-  id          String   @id // "openai" | "anthropic" | "ollama"
+  id          String   @id // "openai" | "anthropic"
   apiKey      String?
   baseUrl     String?
-  model       String   @default("qwen3:8b")
+  model       String   @default("gpt-4o-mini")
   temperature Float    @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
