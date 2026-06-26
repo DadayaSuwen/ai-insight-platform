@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Plus, ChevronRight, MessageCircle, Loader2 } from "lucide-react";
 import { useChatStore } from "../../store";
 import { useChatActions } from "../../hooks/useChatActions";
-import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { formatRelative } from "../../utils/formatRelative";
 
 /**
@@ -19,17 +18,16 @@ import { formatRelative } from "../../utils/formatRelative";
  *   │ ── │
  *   │ ▶  │  expand toggle
  *   └────┘
+ *
+ * 注意：折叠态没有列表行可放 inline 展开，所以右键菜单彻底移除。
+ * 要删除会话请先展开侧栏。
  */
 export function CollapsedSidebar() {
-  const { handleNewChat, selectSession, handleDelete } = useChatActions();
+  const { handleNewChat, selectSession } = useChatActions();
   const sessions = useChatStore((s) => s.sessions);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
   const [loading, setLoading] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
 
   return (
     <aside
@@ -100,12 +98,8 @@ export function CollapsedSidebar() {
             <button
               key={s.id}
               onClick={() => selectSession(s.id, {})}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setPendingDelete({ id: s.id, title: s.title });
-              }}
               aria-label={s.title || "新对话"}
-              title={`${s.title || "新对话"} · ${formatRelative(s.updatedAt)}\n（左键切换 / 右键删除）`}
+              title={`${s.title || "新对话"} · ${formatRelative(s.updatedAt)}\n（左键切换 · 展开侧栏后可删除/重命名）`}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-colors"
               style={{
                 background: active ? "var(--accent-light)" : "var(--bg-tertiary)",
@@ -152,17 +146,6 @@ export function CollapsedSidebar() {
           <ChevronRight size={16} />
         </button>
       </div>
-
-      <DeleteSessionDialog
-        open={pendingDelete !== null}
-        title={pendingDelete?.title ?? ""}
-        onOpenChange={(o) => {
-          if (!o) setPendingDelete(null);
-        }}
-        onConfirm={() => {
-          if (pendingDelete) handleDelete(pendingDelete.id);
-        }}
-      />
     </aside>
   );
 }

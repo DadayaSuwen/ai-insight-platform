@@ -28,6 +28,8 @@ import type {
   ToolResultData,
 } from "../types";
 
+import type { ChatSession } from "../../../types/chat";
+
 function newId(): string {
   return (
     globalThis.crypto?.randomUUID?.() ??
@@ -92,6 +94,7 @@ function StatusDot({ connected }: { connected: boolean }) {
 function ChatWindow() {
   const messages = useChatStore((s) => s.messages);
   const updateLastAssistant = useChatStore((s) => s.updateLastAssistant);
+  const upsertSession = useChatStore((s) => s.upsertSession);
   const theme = useChatStore((s) => s.theme);
   const toggleTheme = useChatStore((s) => s.toggleTheme);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
@@ -175,13 +178,21 @@ function ChatWindow() {
     [updateLastAssistant],
   );
 
-  const onDone = useCallback(() => {
-    updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
-    isNearBottomRef.current = true;
-    scrollToBottom();
-    // 流完成后刷新侧栏（同步自动重命名 + touch updatedAt）
-    void refreshSessions();
-  }, [updateLastAssistant, refreshSessions]);
+  const onDone = useCallback(
+    (data: { session?: ChatSession | null }) => {
+      updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
+      isNearBottomRef.current = true;
+      scrollToBottom();
+      // 优先用 done 事件携带的 session 局部更新（覆盖自动重命名 + touch updatedAt），
+      // 省一次 GET /chat/sessions。仅当后端没回 session 时（catch 路径）才走兜底刷新。
+      if (data.session) {
+        upsertSession(data.session);
+      } else {
+        void refreshSessions();
+      }
+    },
+    [updateLastAssistant, upsertSession, refreshSessions],
+  );
 
   const { sendMessage, isLoading, error, abort } = useSSEChat({
     onText,

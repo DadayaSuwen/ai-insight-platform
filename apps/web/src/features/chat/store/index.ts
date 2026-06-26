@@ -6,6 +6,8 @@ import {
   loadCurrentSessionId,
   loadSidebarOpen,
   loadSidebarCollapsed,
+  loadSearchQuery,
+  saveSearchQuery,
   pruneMissingSessionId,
 } from './persistence';
 
@@ -33,6 +35,8 @@ interface ChatState {
   sidebarOpen: boolean;
   /** Desktop only: whether the sidebar is in its narrow (icon-strip) form. */
   sidebarCollapsed: boolean;
+  /** 侧栏搜索框输入（按会话 title 模糊匹配，localStorage 持久化） */
+  searchQuery: string;
 
   setCurrentSessionId: (id: string | null) => void;
   setSessions: (s: ChatSession[]) => void;
@@ -44,6 +48,7 @@ interface ChatState {
   setHistoryLoading: (b: boolean) => void;
   setSidebarOpen: (b: boolean) => void;
   setSidebarCollapsed: (b: boolean) => void;
+  setSearchQuery: (q: string) => void;
 }
 
 const getInitialTheme = (): 'light' | 'dark' => {
@@ -62,6 +67,7 @@ const initialCurrent = pruneMissingSessionId(
 );
 const initialSidebar = loadSidebarOpen();
 const initialSidebarCollapsed = loadSidebarCollapsed();
+const initialSearchQuery = loadSearchQuery();
 
 export const useChatStore = create<ChatState>((set) => ({
   // ── messages / theme ──
@@ -103,6 +109,7 @@ export const useChatStore = create<ChatState>((set) => ({
   historyLoading: false,
   sidebarOpen: initialSidebar,
   sidebarCollapsed: initialSidebarCollapsed,
+  searchQuery: initialSearchQuery,
 
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
   setSessions: (s) => set({ sessions: s }),
@@ -125,4 +132,8 @@ export const useChatStore = create<ChatState>((set) => ({
   setHistoryLoading: (b) => set({ historyLoading: b }),
   setSidebarOpen: (b) => set({ sidebarOpen: b }),
   setSidebarCollapsed: (b) => set({ sidebarCollapsed: b }),
+  setSearchQuery: (q) => {
+    saveSearchQuery(q);
+    set({ searchQuery: q });
+  },
 }));

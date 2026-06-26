@@ -6,4 +6,3 @@ export { SessionList } from "./SessionList";
 export { SessionItem } from "./SessionItem";
 export { NewChatButton } from "./NewChatButton";
 export { SidebarHeader } from "./SidebarHeader";
-export { DeleteSessionDialog } from "./DeleteSessionDialog";
