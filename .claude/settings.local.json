@@ -8,7 +8,11 @@
       "Bash(echo \"exit: $?\")",
       "Bash(pnpm remove *)",
       "Bash(git add *)",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(pnpm --filter @ai-insight/server exec tsc --noEmit)",
+      "Bash(pnpm --filter @ai-insight/web exec tsc --noEmit)",
+      "Bash(git commit -m 'fix\\(planner\\): 恢复 SSE 流式打字机效果 *)",
+      "Bash(git push *)"
     ]
   }
 }

@@ -18,13 +18,14 @@ export class AiService {
   async *processStream(
     message: string,
     historyMessages: BaseMessage[] = [],
+    opts: { signal?: AbortSignal } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     this.logger.log(`[stream] Processing message: ${message}`);
 
     try {
       await this.plannerAgent.refreshSchema();
       // 将历史记录传给 PlannerAgent
-      yield* this.plannerAgent.invokeStream(message, historyMessages);
+      yield* this.plannerAgent.invokeStream(message, historyMessages, opts);
     } catch (error: unknown) {
       // 捕获未预期的同步/异步错误，防止 SSE 流静默中断
       const msg = error instanceof Error ? error.message : String(error);

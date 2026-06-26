@@ -13,6 +13,12 @@ export class DatabaseService implements OnModuleDestroy {
       dialect: new PostgresDialect({
         pool: new Pool({
           connectionString: process.env.DATABASE_URL,
+          // 默认 max=10 太小，多会话并发时会排队甚至超时
+          max: 20,
+          // 默认永不释放空闲连接，浪费 PG fd
+          idleTimeoutMillis: 30_000,
+          // 默认 0 = 永不超时，可能挂死；5s 是 node-postgres 文档推荐值
+          connectionTimeoutMillis: 5_000,
         }),
       }),
     });

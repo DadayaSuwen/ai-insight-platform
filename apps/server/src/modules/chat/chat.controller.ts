@@ -1,5 +1,6 @@
-import { Controller, Sse, Query, MessageEvent } from "@nestjs/common";
-import { Observable } from "rxjs";
+import { Controller, Sse, Query, MessageEvent, Req } from "@nestjs/common";
+import type { Request } from "express";
+import { Observable, defer, finalize } from "rxjs";
 import { ChatService } from "./chat.service";
 
 @Controller("chat")
@@ -8,13 +9,17 @@ export class ChatController {
 
   /**
    * SSE stream endpoint.
-   * GET /chat/stream?message=...
-   * 直接透传 PlannerAgent 产生的所有事件 (tool_call, tool_result, text, error, done)。
+   * GET /chat/stream?message=...&sessionId=...
+   *
+   * 用 RxJS defer 把 AbortController 创建延迟到订阅时；监听 req.on("close")
+   * （客户端断开 / Stop 按钮 / 浏览器关闭）→ abort → 透传到 planner/agent →
+   * LangChain ChatOllama 真正中断 HTTP 请求。
    */
   @Sse("stream")
   stream(
     @Query("message") message: string,
-    @Query("sessionId") sessionId: string, // ★ 新增
+    @Query("sessionId") sessionId: string,
+    @Req() req: Request,
   ): Observable<MessageEvent> {
     if (!message || !sessionId) {
       return new Observable<MessageEvent>((subscriber) => {
@@ -26,6 +31,17 @@ export class ChatController {
         subscriber.complete();
       });
     }
-    return this.chatService.processMessageStream(sessionId, message);
+
+    return defer(() => {
+      const controller = new AbortController();
+      // 客户端断开（Stop / 浏览器关闭 / 网络断）→ 立即 abort
+      req.on("close", () => controller.abort());
+      return this.chatService.processMessageStream(sessionId, message, {
+        signal: controller.signal,
+      });
+    }).pipe(
+      // 兜底：Observable 终止时确保不再持有 req 监听器，防止内存泄漏
+      finalize(() => req.removeAllListeners("close")),
+    );
   }
 }

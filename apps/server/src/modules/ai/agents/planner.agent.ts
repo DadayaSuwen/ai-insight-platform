@@ -8,6 +8,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { LlmService } from "../llm/llm.service";
 import { DatabaseService } from "../../database/database.service";
 import { ChartHelper } from "../tools/chart.helper";
@@ -15,11 +16,15 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createQuerySalesTool, createGenChartTool } from "../tools";
 
 export interface PlannerToolCallData {
+  /** 跨 turn 全局唯一的工具调用 id。Ollama 返回的是函数名，planner 层洗成 UUID。 */
+  id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface PlannerToolResultData {
+  /** 与对应 tool_call.id 配对，供前端 LangChain ToolMessage.tool_call_id 使用 */
+  id: string;
   name: string;
   result: Record<string, unknown>;
 }
@@ -69,21 +74,10 @@ export class PlannerAgent {
   }
 
   private buildDefaultSchema(): string {
-    // 兜底：refreshSchema 失败时，planner 仍然能工作。
-    // 通过 getSchema() 动态拿真实 4 张业务表；若 DB 查询也失败，降到空串。
-    return "";
+    return `Sales: id, productName, category, amount, quantity, region, saleDate, createdAt, updatedAt
+ChatSession: id, userId, title, createdAt, updatedAt
+ChatMessage: id, sessionId, role, content, metadata, createdAt`;
   }
-
-  /**
-   * 业务表白名单——LLM 只能看这 4 张表，ChatSession/ChatMessage/LLMConfig
-   * 是系统内部表，给 LLM 看会污染上下文并增加幻觉。
-   */
-  private static readonly BUSINESS_TABLES = new Set([
-    "Customer",
-    "Product",
-    "SalesOrder",
-    "SalesOrderItem",
-  ]);
 
   async refreshSchema(): Promise<void> {
     try {
@@ -91,51 +85,23 @@ export class PlannerAgent {
         table_name: string;
         column_name: string;
         data_type: string;
-        is_nullable: string;
-      }> | undefined;
-
-      const pkMap: Map<string, string[]> =
-        ((await (this.db as any).getPrimaryKeys?.()) as
-          | Map<string, string[]>
-          | undefined) ?? new Map();
+      }>;
 
       if (!rows) return;
 
-      // 按白名单过滤 + 按表名分组
-      const tables = new Map<string, Array<{ col: string; type: string; nullable: boolean; isPk: boolean }>>();
+      const tables = new Map<string, string[]>();
       for (const row of rows) {
-        if (!PlannerAgent.BUSINESS_TABLES.has(row.table_name)) continue;
-        const pkSet = new Set(pkMap.get(row.table_name) ?? []);
         const cols = tables.get(row.table_name) ?? [];
-        cols.push({
-          col: row.column_name,
-          type: row.data_type,
-          nullable: row.is_nullable === "YES",
-          isPk: pkSet.has(row.column_name),
-        });
+        cols.push(`${row.column_name} (${row.data_type})`);
         tables.set(row.table_name, cols);
       }
 
-      // 固定顺序输出，方便日志对比
       const lines: string[] = [];
-      for (const tableName of [...PlannerAgent.BUSINESS_TABLES]) {
-        const cols = tables.get(tableName);
-        if (!cols) continue;
-        const colDescs = cols
-          .map((c) => {
-            const tags: string[] = [];
-            if (c.isPk) tags.push("PK");
-            if (c.nullable) tags.push("NULL");
-            const tagStr = tags.length > 0 ? ` [${tags.join(",")}]` : "";
-            return `${c.col} (${c.type})${tagStr}`;
-          })
-          .join(", ");
-        lines.push(`${tableName}: ${colDescs}`);
+      for (const [table, cols] of tables) {
+        lines.push(`${table}: ${cols.join(", ")}`);
       }
       this.schema = lines.join("\n");
-      this.logger.log(
-        `Schema refreshed from database (${tables.size} business tables):\n${this.schema}`,
-      );
+      this.logger.log("Schema refreshed from database");
     } catch (err) {
       this.logger.warn(
         `Failed to refresh schema: ${err instanceof Error ? err.message : String(err)}`,
@@ -169,12 +135,6 @@ export class PlannerAgent {
 
 数据库表结构:
  ${this.schema}
-
-【绝对红线——工具调用规则，最高优先级，违反任一条即视为错误】:
-1. **绝对禁止**在文本中描述你将要调用的工具。禁止输出"我将使用XX工具"、"接下来我调用XX"、"让我查一下"、"我先获取一下"等任何前瞻性废话。
-2. 如果你需要使用工具，**直接输出工具调用**，不要附带任何解释性文字（content 字段必须为空字符串）。
-3. **只有在不使用任何工具、直接回答用户问题时，才输出文本**。一旦决定调工具，content 必须空。
-4. 严禁"只说不做"：不要在文本里叙述你会调用工具，但实际不调用。如果你描述了工具调用，那次调用必须真实发生。
 
 【重要规则】:
 1. 如果用户询问数据相关问题，必须优先调用 query_sales 工具获取真实数据，绝不允许编造数据。
@@ -212,131 +172,166 @@ export class PlannerAgent {
   async *invokeStream(
     message: string,
     history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
+    opts: { signal?: AbortSignal } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
-    const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
-    const systemPrompt = this.buildSystemPrompt();
+    // Planner 绕过 LlmService.invokeStream 直接调 chat.stream()，
+    // 所以它本身没有超时保护。这里补一个本地 timeout（默认 120s），
+    // 用 AbortSignal.any() 把外部 signal（客户端 Stop）和内部 timeout 合并。
+    const STREAM_TIMEOUT_MS = Number(process.env.STREAM_TIMEOUT_MS ?? 120_000);
+    const timeoutController = new AbortController();
+    const timeoutTimer = setTimeout(
+      () => timeoutController.abort(),
+      STREAM_TIMEOUT_MS,
+    );
+    const combinedSignal = opts.signal
+      ? AbortSignal.any([opts.signal, timeoutController.signal])
+      : timeoutController.signal;
 
-    // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
-    // 这里直接展开即可；末尾追加当前用户消息。
-    const messages: BaseMessage[] = [
-      new SystemMessage(systemPrompt),
-      ...history,
-      new HumanMessage(message),
-    ];
+    try {
+      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
+      const systemPrompt = this.buildSystemPrompt();
 
-    let iterations = 0;
+      // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
+      // 这里直接展开即可；末尾追加当前用户消息。
+      const messages: BaseMessage[] = [
+        new SystemMessage(systemPrompt),
+        ...history,
+        new HumanMessage(message),
+      ];
 
-    while (true) {
-      iterations++;
-      if (iterations > MAX_ITERATIONS) {
+      let iterations = 0;
+
+      while (true) {
+        iterations++;
+        if (iterations > MAX_ITERATIONS) {
+          this.logger.warn(
+            `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+          );
+          yield {
+            type: "error",
+            data: {
+              code: "MAX_ITERATIONS_REACHED",
+              message: `已尝试 ${MAX_ITERATIONS} 次，仍无法完成请求，请尝试换一种问法。`,
+            },
+          };
+          yield { type: "done", data: {} };
+          return;
+        }
+
+        const stream = await this.getChat().stream(messages, {
+          signal: combinedSignal,
+        });
+
+        // ★ 使用 AIMessageChunk 累积流式碎片
+        let finalMessage: AIMessageChunk | undefined;
+
+        for await (const chunk of stream) {
+          // 客户端断开 / 内部超时 → 立即退出，避免再 yield 一段或继续触发 tool
+          if (combinedSignal.aborted) {
+            const reason = timeoutController.signal.aborted
+              ? "timeout"
+              : "client_disconnect";
+            this.logger.log(`[PlannerAgent] Stream aborted (${reason})`);
+            return;
+          }
+          // 1. 实时输出文本片段（打字机效果）
+          const content = this.extractContent(chunk.content);
+          if (content) {
+            yield {
+              type: "text",
+              data: { content },
+            };
+          }
+
+          // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
+          finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
+        }
+
+        // 3. 流结束后，检查是否有完整的工具调用
+        if (
+          !finalMessage ||
+          !finalMessage.tool_calls ||
+          finalMessage.tool_calls.length === 0
+        ) {
+          // 没有工具调用，说明 LLM 已经说完了，退出循环
+          break;
+        }
+
+        // 4. 把拼接完整的 AIMessage 加入历史记录
+        messages.push(finalMessage as AIMessage);
+
+        // 5. 执行工具
+        for (const toolCall of finalMessage.tool_calls) {
+          const toolName = toolCall.name ?? "";
+          // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
+          const toolArgs = toolCall.args ?? {};
+          // Ollama 复用的 toolCall.id 就是函数名 → 洗成真 UUID，保证跨 turn 唯一。
+          // OpenAI/Anthropic 的 id 已经是真 UUID，跳过覆盖。
+          const toolCallId =
+            toolCall.id && toolCall.id !== toolName ? toolCall.id : randomUUID();
+
+          yield {
+            type: "tool_call",
+            data: { id: toolCallId, name: toolName, args: toolArgs },
+          };
+
+          const tool = this.toolMap.get(toolName);
+          let result: Record<string, unknown>;
+
+          try {
+            if (!tool) {
+              result = { error: `Unknown tool: ${toolName}` };
+            } else {
+              const raw = await tool.invoke(toolArgs);
+              result =
+                typeof raw === "string"
+                  ? JSON.parse(raw)
+                  : (raw as Record<string, unknown>);
+            }
+          } catch (err) {
+            result = {
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+
+          yield {
+            type: "tool_result",
+            data: { id: toolCallId, name: toolName, result },
+          };
+
+          messages.push(
+            new ToolMessage({
+              tool_call_id: toolCallId,
+              name: toolName,
+              content: JSON.stringify(result),
+            }),
+          );
+        }
+      }
+
+      yield { type: "done", data: {} };
+    } catch (err) {
+      // 捕获 AbortError：分清是 timeout 还是 client_disconnect，
+      // 用 error 事件告知前端，再让 ai.service.ts 走标准 error+done 收尾
+      if (err instanceof Error && err.name === "AbortError") {
+        const reason = timeoutController.signal.aborted
+          ? "timeout"
+          : "client_disconnect";
         this.logger.warn(
-          `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+          `[PlannerAgent] Stream aborted by ${reason} (${STREAM_TIMEOUT_MS}ms timeout)`,
         );
         yield {
           type: "error",
           data: {
-            code: "MAX_ITERATIONS_REACHED",
-            message: `已尝试 ${MAX_ITERATIONS} 次，仍无法完成请求，请尝试换一种问法。`,
+            code: "LLM_ABORTED",
+            message: `LLM stream aborted (${reason})`,
           },
         };
-        yield { type: "done", data: {} };
         return;
       }
-
-      const stream = await this.getChat().stream(messages);
-
-      // ★ 使用 AIMessageChunk 累积流式碎片
-      let finalMessage: AIMessageChunk | undefined;
-      // ★ 单轮 text 缓冲：等本轮流结束再决定是否 yield 给前端
-      // 中间轮（即将调工具）的 text 不暴露给用户，但保留在 messages 数组里
-      // 维持 LLM 上下文记忆。
-      let currentTurnTextBuffer = "";
-
-      for await (const chunk of stream) {
-        // 1. 累积本轮 text 到 buffer（不 yield；轮末再决定）
-        const content = this.extractContent(chunk.content);
-        if (content) {
-          currentTurnTextBuffer += content;
-        }
-
-        // 2. 累积合并 chunk，LangChain 底层会自动拼好 tool_calls 的 args
-        finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
-      }
-
-      // 3. 流结束后，检查是否有完整的工具调用
-      if (
-        !finalMessage ||
-        !finalMessage.tool_calls ||
-        finalMessage.tool_calls.length === 0
-      ) {
-        // 情况 A: 最终总结轮 → 把整轮 text yield 出去给前端
-        if (currentTurnTextBuffer.length > 0) {
-          yield {
-            type: "text",
-            data: { content: currentTurnTextBuffer },
-          };
-        }
-        // 仍要把 AIMessage 放进历史，保证多轮对话上下文一致
-        messages.push(new AIMessage(currentTurnTextBuffer));
-        // 没有工具调用，说明 LLM 已经说完了，退出循环
-        break;
-      }
-
-      // 情况 B: 中间工具调用轮 → 整轮 text 不 yield 给前端
-      // 但**必须**把它作为 AIMessage content 放进 messages 数组
-      // （保留 LLM 上下文记忆），并通过 'thinking' 事件传给 chat.service.ts
-      // 存到 metadata.thinking 供调试。
-      messages.push(new AIMessage(currentTurnTextBuffer));
-      if (currentTurnTextBuffer.length > 0) {
-        yield {
-          type: "thinking",
-          data: { content: currentTurnTextBuffer },
-        };
-      }
-
-      // 5. 执行工具
-      for (const toolCall of finalMessage.tool_calls) {
-        const toolName = toolCall.name ?? "";
-        // 此时 args 已经是被 LangChain 拼接并解析好的完整 JSON 对象
-        const toolArgs = toolCall.args ?? {};
-
-        yield {
-          type: "tool_call",
-          data: { name: toolName, args: toolArgs },
-        };
-
-        const tool = this.toolMap.get(toolName);
-        let result: Record<string, unknown>;
-
-        try {
-          if (!tool) {
-            result = { error: `Unknown tool: ${toolName}` };
-          } else {
-            const raw = await tool.invoke(toolArgs);
-            result =
-              typeof raw === "string"
-                ? JSON.parse(raw)
-                : (raw as Record<string, unknown>);
-          }
-        } catch (err) {
-          result = { error: err instanceof Error ? err.message : String(err) };
-        }
-
-        yield {
-          type: "tool_result",
-          data: { name: toolName, result },
-        };
-
-        messages.push(
-          new ToolMessage({
-            tool_call_id: toolCall.id ?? toolName,
-            name: toolName,
-            content: JSON.stringify(result),
-          }),
-        );
-      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutTimer);
     }
-
-    yield { type: "done", data: {} };
   }
 }

@@ -128,40 +128,42 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
         opts.temperature;
     }
 
-    // LangChain's stream() may return a Promise that resolves to AsyncIterable
-    // (e.g. ChatOpenAI returns Promise<IterableReadableStream>).
-    // Wrap sync iterables in an async generator for uniform handling.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = await (chat as any).stream(messages);
-    const stream: AsyncIterable<unknown> =
-      raw[Symbol.asyncIterator] != null
-        ? raw
-        : (async function* () {
-            yield* raw;
-          })();
-
-    let timedOut = false;
-    const timeoutTimer = setTimeout(() => {
-      timedOut = true;
-    }, timeoutMs);
+    // 用 AbortController 实现真 abort：超时真正掐断 HTTP socket，
+    // 而不是只翻 flag 让 for-await 自己发现
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      // Track accumulated content to detect new chunks
-      let accumulated = "";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = await (chat as any).stream(messages, {
+        signal: controller.signal,
+      });
+      // LangChain's stream() may return a Promise that resolves to AsyncIterable
+      // (e.g. ChatOpenAI returns Promise<IterableReadableStream>).
+      // Wrap sync iterables in an async generator for uniform handling.
+      const stream: AsyncIterable<unknown> =
+        raw[Symbol.asyncIterator] != null
+          ? raw
+          : (async function* () {
+              yield* raw;
+            })();
 
       for await (const chunk of stream) {
-        if (timedOut) {
-          throw new Error(`LLM stream timeout after ${timeoutMs}ms`);
-        }
         const content = this.normalizeContent(
           (chunk as { content: unknown }).content,
         );
         if (content) {
-          accumulated += content;
           yield content;
         }
       }
     } catch (err) {
+      // AbortError 是正常路径（超时或外部 abort），静默处理
+      if (err instanceof Error && err.name === "AbortError") {
+        this.logger.warn(
+          `[invokeStream] Aborted (timeout=${timeoutMs}ms or external abort)`,
+        );
+        return;
+      }
       this.logger.error(
         `[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`,
       );

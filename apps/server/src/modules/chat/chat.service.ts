@@ -1,7 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Observable } from "rxjs";
 import { MessageEvent } from "@nestjs/common";
-import { randomUUID } from "crypto";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AiService } from "../ai/ai.service";
 import { ChatSessionService } from "./chat-session.service";
@@ -18,11 +17,17 @@ export class ChatService {
   processMessageStream(
     sessionId: string,
     message: string,
+    opts: { signal?: AbortSignal } = {},
   ): Observable<MessageEvent> {
     this.logger.log(`SSE stream start for session ${sessionId}: ${message}`);
 
     return new Observable<MessageEvent>((subscriber) => {
       (async () => {
+        // 收集器声明在 try 之外，让 catch 块能访问 partial 文本
+        let assistantText = "";
+        const assistantToolCalls: any[] = [];
+        const assistantToolResults: any[] = [];
+
         try {
           // 1. 先拉历史（不含当前用户消息），保证 planner 看到的 history 是"过去"
           const history =
@@ -32,62 +37,40 @@ export class ChatService {
           // 2. 再保存当前用户消息
           await this.sessionService.saveMessage(sessionId, "user", message);
 
-          // 3. 定义收集器，用于保存最终的助手消息
-          let assistantText = "";
-          let assistantThinking = ""; // ★ 中间轮被丢弃的思考文字（不入 content）
-          const assistantToolCalls: any[] = [];
-          const assistantToolResults: any[] = [];
-          // 配对 token：planner 严格按序发射 tool_call → tool_result，
-          // 我们在 tool_call 时生成一个真 UUID 并暂存，tool_result 来时复用同一 id，
-          // 这样 metadata 里能保存稳定的 {id, name, args/result} 三元组，
-          // 重建时按 id 配对 AIMessage.tool_calls[].id 与 ToolMessage.tool_call_id，
-          // 既不依赖下标（容忍未来并发/部分失败），UUID 也跨 turn 全局唯一。
-          let pendingToolCallId: string | null = null;
-
-          // 4. 消费 AiService 的流
+          // 3. 消费 AiService 的流（收集器已在 try 外声明）
           for await (const event of this.aiService.processStream(
             message,
             historyMessages,
+            { signal: opts.signal },
           )) {
             subscriber.next({
               type: event.type,
               data: event.data,
             });
 
-            // 收集助手的数据用于落库
+            // 用 exhaustive switch 替 if/else if（TS 通过 PlannerStreamEvent
+            // union 自动 narrow 每个 case 的 event.data 类型）。
+            // planner.agent.ts 已经在 tool_call / tool_result data 里给好 id，
+            // chat 层直接 push 即可，不再需要 randomUUID 兜底。
             switch (event.type) {
               case "text":
                 assistantText += event.data.content;
                 break;
-              case "thinking":
-                // 中间轮被丢弃的文字（planner 已经决定调工具，所以这轮 text
-                // 不会展示给用户，但保存到 metadata.thinking 供调试 / 未来
-                // 加折叠面板用）。**不**写入 assistantText → 不污染多轮 LLM
-                // 上下文。
-                assistantThinking += event.data.content;
-                break;
               case "tool_call":
-                // Ollama 的 toolCall.id 就是函数名，跨 turn 会重复 → 洗成真 UUID
-                pendingToolCallId = randomUUID();
-                assistantToolCalls.push({
-                  id: pendingToolCallId,
-                  ...event.data,
-                });
+                assistantToolCalls.push(event.data);
                 break;
               case "tool_result":
-                // planner 的 try/catch 保证 tool_call 与 tool_result 严格配对，
-                // 所以这里 pendingToolCallId 一定非空；万一缺失，做兜底
-                assistantToolResults.push({
-                  id: pendingToolCallId ?? randomUUID(),
-                  ...event.data,
-                });
-                pendingToolCallId = null;
+                assistantToolResults.push(event.data);
                 break;
-              // error / done 不需要收集
+              case "error":
+              case "done":
+              case "thinking":
+                // 不需要收集的状态事件，nothing to do
+                break;
             }
           }
 
-          // 5. 流结束后，保存助手消息
+          // 4. 流结束后，保存助手消息
           await this.sessionService.saveMessage(
             sessionId,
             "assistant",
@@ -95,17 +78,13 @@ export class ChatService {
             {
               toolCalls: assistantToolCalls,
               toolResults: assistantToolResults,
-              // 仅当 thinking 非空时存，避免无意义字段
-              ...(assistantThinking.length > 0
-                ? { thinking: assistantThinking }
-                : {}),
             },
           );
 
-          // 5.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
+          // 4.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
           await this.sessionService.touchSession(sessionId);
 
-          // 6. 如果是第一句话，自动更新会话标题
+          // 5. 如果是第一句话，自动更新会话标题
           if (history.length <= 1 && message.length > 0) {
             const title =
               message.substring(0, 20) + (message.length > 20 ? "..." : "");
@@ -115,11 +94,32 @@ export class ChatService {
           subscriber.complete();
         } catch (err: unknown) {
           this.logger.error(`SSE stream error: ${err}`);
+          // 流意外中断时保存已生成的 partial 文本，让用户能看到 LLM 想了什么。
+          // 用独立 try/catch 包住 save，避免 save 失败时再次触发本 catch。
+          if (assistantText.trim().length > 0) {
+            try {
+              await this.sessionService.saveMessage(
+                sessionId,
+                "assistant",
+                assistantText + "\n\n[stream interrupted]",
+                {
+                  toolCalls: assistantToolCalls,
+                  toolResults: assistantToolResults,
+                },
+              );
+              await this.sessionService.touchSession(sessionId);
+            } catch (saveErr) {
+              this.logger.error(
+                `Failed to save partial assistant text: ${saveErr}`,
+              );
+            }
+          }
           subscriber.next({
             type: "error",
             data: { code: "STREAM_FAILED", message: String(err) },
           });
-          subscriber.next({ type: "done", data: {} });
+          // session: null 让前端 fallback 到 refreshSessions() 兜底刷新侧栏
+          subscriber.next({ type: "done", data: { session: null } });
           subscriber.complete();
         }
       })();
