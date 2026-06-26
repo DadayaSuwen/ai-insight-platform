@@ -179,13 +179,13 @@ function ChatWindow() {
   );
 
   const onDone = useCallback(
-    (data: { session?: ChatSession | null }) => {
+    (data?: { session?: ChatSession | null }) => {
       updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
       isNearBottomRef.current = true;
       scrollToBottom();
       // 优先用 done 事件携带的 session 局部更新（覆盖自动重命名 + touch updatedAt），
       // 省一次 GET /chat/sessions。仅当后端没回 session 时（catch 路径）才走兜底刷新。
-      if (data.session) {
+      if (data?.session) {
         upsertSession(data.session);
       } else {
         void refreshSessions();
