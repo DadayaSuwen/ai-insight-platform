@@ -4,6 +4,25 @@ import csv from "csv-parser";
 
 const prisma = new PrismaClient();
 
+// ============================================================
+// 中英映射表 (CSV 是英文, 工具 enum 是中文, DB 必须存中文才能匹配)
+// ============================================================
+const REGION_MAP: Record<string, string> = {
+  South: "华南",
+  West: "西北",
+  East: "华东",
+  Central: "华中",
+};
+
+const CATEGORY_MAP: Record<string, string> = {
+  Furniture: "家具",
+  "Office Supplies": "办公用品",
+  Technology: "电子产品",
+};
+
+const mapRegion = (raw: string): string => REGION_MAP[raw] ?? raw;
+const mapCategory = (raw: string): string => CATEGORY_MAP[raw] ?? raw;
+
 // 解析 CSV 中的 M/D/YYYY 日期格式
 function parseDate(dateStr: string): Date {
   if (!dateStr) return new Date();
@@ -43,7 +62,7 @@ async function main() {
             id: customerId,
             name: row["Customer Name"],
             segment: row["Segment"],
-            region: row["Region"],
+            region: mapRegion(row["Region"]),
             state: row["State"],
             city: row["City"],
           });
@@ -55,7 +74,7 @@ async function main() {
           products.set(productId, {
             id: productId,
             name: row["Product Name"].substring(0, 200), // 防止字符串过长
-            category: row["Category"],
+            category: mapCategory(row["Category"]),
             subCategory: row["Sub-Category"],
           });
         }

@@ -166,3 +166,17 @@ export type SSEMessage = z.infer<typeof SSEMessageSchema>;
 
 **写在最后：**
 准备好开始搭 Monorepo 骨架了吗？如果准备好了，我们可以从第一步的配置文件开始。
+
+
+
+❯ 1. [ ] 明细查询 + 洞察生成 (推荐核心)
+  DetailAgent (query_details: Top-N / 明细行 / 利润分析) + InsightAgent (generate_insight: 专精 LLM 抽 3-5 条商业洞察) +
+  修复种子数据中英不一致。直接拉高数据分析的'深度'与'质量',论文演示主推能力。
+  2. [ ] 报告导出 (可选增强)
+  ReportAgent (export_report: 一键生成 Markdown / PDF 报告,含数据表 + 图表 +
+  洞察,前端下载按钮)。面向'交付物'价值,论文很加分但需要额外后端依赖。
+  3. [ ] 重绑 ChartAgent (顺手优化)
+  把已存在但死代码的 chart.agent.ts 重新绑到 gen_chart,让图表标题/标注/配色/多系列随上下文自适应。零新增 agent,但效果立刻提升。
+↓ 4. [ ] RouterAgent 架构重设 (大改动)
+  在 PlannerAgent 之前加一个轻量 LLM 分类器,把问题分成 chat / data / chart / insight / export 五类,再路由到不同
+  agent。架构最清晰但改动最大,毕业前才考虑。

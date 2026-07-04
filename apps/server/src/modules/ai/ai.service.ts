@@ -18,7 +18,7 @@ export class AiService {
   async *processStream(
     message: string,
     historyMessages: BaseMessage[] = [],
-    opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal; sessionId?: string } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     this.logger.log(`[stream] Processing message: ${message}`);
 

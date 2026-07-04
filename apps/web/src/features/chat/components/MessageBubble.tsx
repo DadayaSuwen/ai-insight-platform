@@ -2,6 +2,7 @@ import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm"; // ★ 引入插件
 import DynamicChart from "./DynamicChart";
+import { InsightPanel, InsightSkeleton } from "./InsightPanel";
 import type { ChatMessage, AssistantMessage } from "../types";
 
 /**
@@ -125,7 +126,7 @@ function MessageBubble({
           </div>
         )}
 
-        {/* (B) 工具返回的结果 (图表 / 表格) */}
+        {/* (B) 工具返回的结果 (图表 / 表格 / 洞察) */}
         {(msg.toolResults?.length ?? 0) > 0 && (
           <div className="mb-3 space-y-4">
             {msg.toolResults!.map((res, idx) => {
@@ -150,10 +151,57 @@ function MessageBubble({
                   />
                 );
               }
+              // query_details: 返回 { groupByField, label, metrics, metricLabels, rows }
+              if (res.name === "query_details" && res.result.rows) {
+                const label = (res.result.label as string) ?? "维度";
+                const metricLabels = (res.result.metricLabels as Record<string, string>) ?? {};
+                const rows = res.result.rows as Record<string, any>[];
+                return (
+                  <div key={idx} className="space-y-1">
+                    <div
+                      className="text-xs flex items-center gap-2"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      <span>📋 按 {label}</span>
+                      {(res.result.metrics as string[])?.map((m) => (
+                        <span
+                          key={m}
+                          className="px-1.5 py-0.5 rounded text-[10px]"
+                          style={{
+                            background: "var(--bg-hover)",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {metricLabels[m] ?? m}
+                        </span>
+                      ))}
+                    </div>
+                    <CollapsibleTable rows={rows} />
+                  </div>
+                );
+              }
+              // generate_insight: 返回 { summary, insights[], recommendation }
+              if (res.name === "generate_insight" && res.result.insights) {
+                return (
+                  <InsightPanel
+                    key={idx}
+                    data={res.result as any}
+                  />
+                );
+              }
               return null;
             })}
           </div>
         )}
+
+        {/* (B-Skeleton) generate_insight tool_call 已发出但 tool_result 未到 */}
+        {!msg.isFinal &&
+          (msg.toolCalls?.some((c) => c.name === "generate_insight") ?? false) &&
+          !(msg.toolResults?.some((r) => r.name === "generate_insight") ?? false) && (
+            <div className="mb-3">
+              <InsightSkeleton />
+            </div>
+          )}
 
         {/* (C) 正在思考的动画 (有工具调用但还没开始吐文本时) */}
         {!msg.content && (msg.toolCalls?.length ?? 0) > 0 && !msg.isFinal && (
@@ -345,17 +393,33 @@ function DynamicSuggestions({
   let suggestions: { label: string; query: string }[] = [];
 
   const hasChart = message.toolResults?.some((r) => r.name === "gen_chart");
-  const hasTable = message.toolResults?.some((r) => r.name === "query_sales");
+  const hasTable =
+    message.toolResults?.some(
+      (r) => r.name === "query_sales" || r.name === "query_details",
+    );
+  const hasInsight = message.toolResults?.some(
+    (r) => r.name === "generate_insight",
+  );
 
   // 根据上一轮的结果，推荐不同的下一步动作
-  if (hasChart && !hasTable) {
+  if (hasInsight) {
+    // 已经有洞察,引导用户深入某个具体方向
+    suggestions.push({
+      label: "📊 画个图看看",
+      query: "把刚才分析的数据画成可视化图表",
+    });
+    suggestions.push({
+      label: "🔍 Top 10 明细",
+      query: "列出销售额最高的 10 个客户/产品,我要看具体数字",
+    });
+  } else if (hasChart && !hasTable) {
     suggestions.push({
       label: "📋 查看明细数据",
       query: "把刚才的数据用表格详细列出来",
     });
     suggestions.push({
-      label: "🔍 深挖最大值",
-      query: "找出刚才数据中销售额最高的那个，深入分析一下它的构成",
+      label: "🧠 提取商业洞察",
+      query: "基于刚才的数据,给我一些商业洞察和风险提示",
     });
   } else if (hasTable && !hasChart) {
     suggestions.push({
@@ -363,8 +427,8 @@ function DynamicSuggestions({
       query: "把刚才的数据画成图表展示",
     });
     suggestions.push({
-      label: "📉 查看时间趋势",
-      query: "看一下这些数据近期的变化趋势",
+      label: "🧠 提取商业洞察",
+      query: "基于刚才的数据,给我一些商业洞察和风险提示",
     });
   } else if (hasTable && hasChart) {
     suggestions.push({

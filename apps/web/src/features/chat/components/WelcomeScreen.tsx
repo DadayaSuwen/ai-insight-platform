@@ -159,21 +159,20 @@ function WelcomeScreen({ onSend, isLoading }: WelcomeScreenProps) {
 
 const SUGGESTIONS: Array<{ label: string; query: string }> = [
   {
-    label: "📊 本月销售总览",
-    query: "帮我统计本月的总销售额、订单量和销量，并给出一个概览。",
+    label: "📊 本月销售总结与洞察",
+    query: "帮我统计本月的总销售额、订单量和销量，并抽取几条商业洞察。",
   },
   {
-    label: "📈 各品类业绩对比",
-    query:
-      "对比各类别商品今年的销售额和利润，画出柱状图，并分析哪个品类表现最好。",
+    label: "🏆 Top 10 客户",
+    query: "列出销售额最高的 10 个客户，并告诉我他们的利润贡献。",
   },
   {
-    label: "👥 客户画像洞察",
-    query: "对比不同客户类型在购买品类上的偏好差异，并给出商业建议。",
+    label: "💸 哪些产品最亏",
+    query: "找出利润最低的 5 个产品子类，分析亏损原因。",
   },
   {
-    label: "🗺️ 地区利润分析",
-    query: "分析各个地区的利润表现，哪些地区亏损较多？",
+    label: "📈 月度销售趋势 + 可视化",
+    query: "按月统计 2017 年的销售额,画折线图,给我一些趋势洞察。",
   },
 ];
 
