@@ -41,7 +41,7 @@ export class ChatService {
           for await (const event of this.aiService.processStream(
             message,
             historyMessages,
-            { signal: opts.signal },
+            { signal: opts.signal, sessionId },
           )) {
             subscriber.next({
               type: event.type,

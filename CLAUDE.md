@@ -122,9 +122,17 @@ VITE_API_BASE_URL=http://localhost:3000
 
 ## Architecture
 
-**Planner + Function Calling**：LLM 通过 `bindTools` 调用工具（`query_sales` / `gen_chart`），执行结果回灌给 LLM 生成最终回答。多轮对话时，`PlannerAgent.invokeStream(message, history)` 会从 `ChatMessage` 表重建 `BaseMessage[]`（包括历史 tool_calls 和 ToolMessage），确保 LLM 看到完整上下文。
+**Planner + Function Calling (Agent-as-a-Tool)**：LLM 通过 `bindTools` 调用 4 个工具：
+- `query_sales` — 固定聚合（按月/类别/地区）
+- `query_details` — 明细/Top-N/利润分析（任意维度 + 任意指标）
+- `gen_chart` — ECharts 图表（ChartAgent LLM-driven，ChartHelper fallback）
+- `generate_insight` — 商业洞察（封装 InsightAgent 类，独立 LLM pass）
 
-详见 [架构设计](./docs/architecture/SYSTEM.md) 和 [多轮对话 UI 增强](./docs/development/MULTI_TURN_DIALOGUE.md)。
+执行结果回灌给 LLM 生成最终回答。多轮对话时，`PlannerAgent.invokeStream(message, history)` 会从 `ChatMessage` 表重建 `BaseMessage[]`（包括历史 tool_calls 和 ToolMessage），确保 LLM 看到完整上下文。
+
+`InsightAgent` 是独立 Agent 类，封装成 StructuredTool 后绑定到 Planner。`ToolResultContext` 服务在 LLM 没传 data 时自动从最近工具结果兜底。
+
+详见 [架构设计](./docs/architecture/SYSTEM.md)、[多轮对话 UI 增强](./docs/development/MULTI_TURN_DIALOGUE.md) 和 [Agent 增强记录 (2026-07-04)](./docs/development/2026-07-04_AGENT_ENHANCEMENTS.md)。
 
 ## Development Phases
 
@@ -138,6 +146,7 @@ VITE_API_BASE_URL=http://localhost:3000
 | Phase 11 | ✅ | 数据层重构：Kysely / Superstore CSV / Planner & Tools 完善 |
 | Refactor | ✅ | Planner + Function Calling 架构重构 |
 | **Multi-Turn** | ✅ | **多轮次对话持久化 + 侧栏 UI + Welcome + Toast + 停止按钮 + 折叠** |
+| **Agent 增强** | ✅ | **query_details (明细/Top-N/利润) + InsightAgent (商业洞察) + ChartAgent 重绑 + 数据中英修复** |
 
 详细记录见 [docs/development/REFACTOR.md](./docs/development/REFACTOR.md) 和 [docs/development/MULTI_TURN_DIALOGUE.md](./docs/development/MULTI_TURN_DIALOGUE.md)。
 

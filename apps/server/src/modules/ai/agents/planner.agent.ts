@@ -12,8 +12,13 @@ import { randomUUID } from "crypto";
 import { LlmService } from "../llm/llm.service";
 import { DatabaseService } from "../../database/database.service";
 import { ChartHelper } from "../tools/chart.helper";
+import { ChartAgent } from "./chart.agent";
 import type { StructuredTool } from "@langchain/core/tools";
 import { createQuerySalesTool, createGenChartTool } from "../tools";
+import { createQueryDetailsTool } from "../tools/query-details.tool";
+import { createGenerateInsightTool } from "../tools/generate-insight.tool";
+import { InsightAgent } from "./insight.agent";
+import { ToolResultContext } from "../tools/tool-result.context";
 
 export interface PlannerToolCallData {
   /** 跨 turn 全局唯一的工具调用 id。Ollama 返回的是函数名，planner 层洗成 UUID。 */
@@ -47,13 +52,27 @@ export class PlannerAgent {
   constructor(
     private readonly llm: LlmService,
     private readonly db: DatabaseService,
-    private readonly chartAgent: ChartHelper,
+    private readonly chartHelper: ChartHelper,
+    private readonly chartAgent: ChartAgent,
+    private readonly insightAgent: InsightAgent,
+    private readonly toolResultContext: ToolResultContext,
   ) {
     const querySalesTool = createQuerySalesTool(this.db);
-    const genChartTool = createGenChartTool(this.db, this.chartAgent);
+    const queryDetailsTool = createQueryDetailsTool(this.db);
+    const genChartTool = createGenChartTool(
+      this.db,
+      this.chartHelper,
+      this.chartAgent,
+    );
+    const generateInsightTool = createGenerateInsightTool(
+      this.insightAgent,
+      this.toolResultContext,
+    );
 
     this.toolMap.set("query_sales", querySalesTool);
+    this.toolMap.set("query_details", queryDetailsTool);
     this.toolMap.set("gen_chart", genChartTool);
+    this.toolMap.set("generate_insight", generateInsightTool);
 
     this.schema = this.buildDefaultSchema();
 
@@ -137,16 +156,23 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 数据库表结构:
  ${this.schema}
 
+【何时使用哪个工具】(关键 — 选错工具 = 答非所问):
+- 简单聚合 / 总览 (按月/类别/地区 总额销量) → query_sales
+- Top-N / 明细行 / 利润分析 / 任意维度聚合 (州/客户/子类别/客户类型/运输方式/按日按周按季) → query_details
+- 可视化图表 → gen_chart
+- **商业洞察 / 原因分析 / 风险机会 / "为什么" / "分析一下" / "总结一下"** → **必须先 query_sales 或 query_details 拿到数据,然后立即调用 generate_insight**。不要只在文本里总结 — 那叫"描述",不叫"洞察"。
+
 【重要规则】:
-1. 如果用户询问数据相关问题，必须优先调用 query_sales 工具获取真实数据，绝不允许编造数据。
-2. 如果用户要求画图，必须调用 gen_chart 工具。
-3. 如果工具返回的数据无法满足用户的细节要求，请基于工具返回的现有数据进行总结，严禁说"因工具限制无法获取"这种推卸责任的话。
-4. 你的回复必须使用格式良好的 Markdown 语法：
-   - 使用 \`##\` 或 \`###\` 作为标题。
-   - 使用 \`**加粗**\` 突出关键指标。
-   - 如果有多个要点，使用无序列表 \`-\`。
-5. 语言要精炼、专业，像麦肯锡的商业报告，不要有废话。
-6. 【格式红线】：前端已经自动将工具返回的 summary 数据渲染成了精美的数据表格。因此，**你在回复中绝对禁止使用 Markdown 表格语法 (|---|---) 重复展示相同的数据！** 你只需要用自然语言对数据进行深入分析、对比和总结即可。`;
+1. 询问数据 → 必须用 query_sales 或 query_details,**绝对禁止编造数据**。
+2. 画图 → 必须 gen_chart。
+3. 工具返回无法满足细节要求 → 基于现有数据总结,严禁说"因工具限制无法获取"。
+4. 回复用 Markdown (\`##\`/\`###\` 标题, \`**加粗**\` 关键数字, \`-\` 列表),像麦肯锡商业报告。
+5. 【格式红线】前端已自动把工具返回的 summary / rows 渲染成精美表格。**禁止用 Markdown 表格语法 (|---|---) 重复展示相同数据**。你只负责自然语言分析。
+6. generate_insight 是关键差异化能力。当用户问"为什么"、"分析一下"、"有什么风险"、"给我洞察"、"总结"时:**数据查询完后必须紧接着调用 generate_insight**,让专业的二次 LLM pass 抽取洞察卡片。不要自己敷衍总结。
+7. 多工具协同模式 (示例):
+   - "Top 10 客户按销售额,分析风险" → query_details(groupBy=customer, metrics=[sales,profit]) → generate_insight(question=..., data=上一步结果)
+   - "本月销售,画图,给洞察" → query_sales(month) → gen_chart(same) → generate_insight(question=..., data=query_sales 结果)
+8. generate_insight 的 data 参数如果留空,系统会自动从最近的 query_sales / query_details 结果补全。但**显式传 data 更稳**。`;
   }
 
   /**
@@ -183,7 +209,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
   async *invokeStream(
     message: string,
     history: BaseMessage[] = [], // ★ 接收 chat.service.ts 构造好的 LangChain 历史实例
-    opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal; sessionId?: string } = {},
   ): AsyncGenerator<PlannerStreamEvent, void, unknown> {
     // Planner 绕过 LlmService.invokeStream 直接调 chat.stream()，
     // 所以它本身没有超时保护。这里补一个本地 timeout（默认 120s），
@@ -293,7 +319,19 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
             if (!tool) {
               result = { error: `Unknown tool: ${toolName}` };
             } else {
-              const raw = await tool.invoke(toolArgs);
+              // ★ 运行时上下文注入 (不会回传给 LLM,工具内部识别并使用):
+              //   - generate_insight: sessionId 用于 ToolResultContext 兜底
+              //   - gen_chart: originalMessage 用于 ChartAgent 生成上下文相关标题
+              const argsWithContext = {
+                ...toolArgs,
+                ...(toolName === "generate_insight" && opts.sessionId
+                  ? { sessionId: opts.sessionId }
+                  : {}),
+                ...(toolName === "gen_chart" && message
+                  ? { originalMessage: message }
+                  : {}),
+              };
+              const raw = await tool.invoke(argsWithContext);
               result =
                 typeof raw === "string"
                   ? JSON.parse(raw)
@@ -303,6 +341,11 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
             result = {
               error: err instanceof Error ? err.message : String(err),
             };
+          }
+
+          // ★ 推入 ToolResultContext (给 generate_insight 兜底用)
+          if (opts.sessionId && toolName !== "generate_insight") {
+            this.toolResultContext.push(opts.sessionId, toolCallId, toolName, result);
           }
 
           yield {
