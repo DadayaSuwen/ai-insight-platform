@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "prebuild": "pnpm --filter @workspace/types build",
     "preview": "vite preview",
     "lint": "eslint ."
   },
