@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../core/store';
 import type { LLMConfig } from '@workspace/types';
 import { LLMProvider } from '@workspace/types';
+import { toast } from '../../store/toast';
 
 const PROVIDER_LABELS: Record<LLMProvider, string> = {
   [LLMProvider.OPENAI]: 'OpenAI',
@@ -21,10 +22,20 @@ const BASE_URLS: Record<LLMProvider, string> = {
 
 interface FormState {
   provider: LLMProvider;
-  apiKey: string;
+  /** Raw text in the input. Empty means "don't change the saved key on save". */
+  apiKeyInput: string;
   baseUrl: string;
   model: string;
   temperature: number;
+}
+
+/** Build a masked display string from a real key, e.g. "sk-ant-...mn07". */
+function maskApiKey(key: string | null | undefined): string | null {
+  if (!key) return null;
+  if (key.length <= 8) return '••••••••';
+  const head = key.slice(0, 6);
+  const tail = key.slice(-4);
+  return `${head}…${tail}`;
 }
 
 function HealthDot({ ok }: { ok: boolean | undefined }) {
@@ -43,7 +54,7 @@ export default function SettingsPage() {
 
   const [form, setForm] = useState<FormState>({
     provider: LLMProvider.OPENAI,
-    apiKey: '',
+    apiKeyInput: '',
     baseUrl: BASE_URLS[LLMProvider.OPENAI],
     model: DEFAULT_MODELS[LLMProvider.OPENAI],
     temperature: 0,
@@ -51,60 +62,90 @@ export default function SettingsPage() {
 
   const [saving, setSaving] = useState(false);
   const [testingHealth, setTestingHealth] = useState(false);
-  const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // Load config once on mount
   useEffect(() => {
     fetchLlmConfig();
-  }, []);
+  }, [fetchLlmConfig]);
 
-  // When configs finish loading, pre-fill the currently selected provider
+  // When configs finish loading, pre-fill the currently selected provider.
+  // We don't touch apiKeyInput here — that field is intentionally left empty
+  // so the form shows the "saved key" hint instead of overwriting it on re-save.
   useEffect(() => {
     const saved = llmConfigs[form.provider];
     if (saved) {
       setForm((f) => ({
         ...f,
-        apiKey: saved.apiKey ?? '',
         baseUrl: saved.baseUrl ?? BASE_URLS[saved.provider],
         model: saved.model,
         temperature: saved.temperature,
+        // apiKeyInput left empty — preserves existing key on next save.
       }));
     }
-  }, [llmConfigs]);
+  }, [llmConfigs, form.provider]);
 
   const handleProviderChange = (p: LLMProvider) => {
     const saved = llmConfigs[p];
     setForm({
       provider: p,
-      apiKey: saved?.apiKey ?? '',
+      apiKeyInput: '',
       baseUrl: saved?.baseUrl ?? BASE_URLS[p],
       model: saved?.model ?? DEFAULT_MODELS[p],
       temperature: saved?.temperature ?? 0,
     });
   };
 
-  const handleSave = async () => {
-    if (!form.model.trim()) {
-      setMessage({ type: 'err', text: '模型名称不能为空' });
-      return;
-    }
+  const handleClearApiKey = async () => {
+    setForm((f) => ({ ...f, apiKeyInput: '' }));
+    // Persist the explicit clear to the DB.
     setSaving(true);
-    setMessage(null);
     const config: LLMConfig = {
       provider: form.provider,
-      apiKey: form.apiKey || undefined,
+      apiKey: '', // empty string is the explicit-clear signal to the backend
       baseUrl: form.baseUrl || undefined,
       model: form.model,
       temperature: form.temperature,
     };
     const result = await saveLlmConfig(config);
-    setMessage({
-      type: result.ok ? 'ok' : 'err',
-      text: result.message,
-    });
     setSaving(false);
     if (result.ok) {
-      setTimeout(() => navigate('/'), 1200);
+      toast.success('API Key 已清除');
+    } else {
+      toast.error(`清除失败：${result.message}`);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!form.model.trim()) {
+      toast.error('模型名称不能为空');
+      return;
+    }
+    setSaving(true);
+    // Build the config — only attach apiKey when the user actually typed one.
+    // Empty apiKeyInput + saved key = leave the saved key untouched (no field).
+    // Empty apiKeyInput + no saved key = backend writes NULL (no-op for usage).
+    const trimmedKey = form.apiKeyInput.trim();
+    const hasSaved = Boolean(llmConfigs[form.provider]?.apiKey);
+    const config: LLMConfig = {
+      provider: form.provider,
+      ...(trimmedKey
+        ? { apiKey: trimmedKey }
+        : !hasSaved
+          ? { apiKey: '' } // first time saving this provider → explicit empty
+          : {}), // user didn't edit → omit entirely → backend preserves DB key
+      baseUrl: form.baseUrl || undefined,
+      model: form.model,
+      temperature: form.temperature,
+    };
+    const result = await saveLlmConfig(config);
+    setSaving(false);
+    if (result.ok) {
+      toast.success('配置已保存并应用');
+      // Reset the apiKey input so the next render shows the masked "saved" hint.
+      setForm((f) => ({ ...f, apiKeyInput: '' }));
+      setTimeout(() => navigate('/'), 800);
+    } else {
+      toast.error(`保存失败：${result.message}`);
     }
   };
 
@@ -120,6 +161,10 @@ export default function SettingsPage() {
     if (p === LLMProvider.ANTHROPIC) return llmHealth.anthropic;
     return undefined;
   };
+
+  const savedApiKey = llmConfigs[form.provider]?.apiKey;
+  const savedApiKeyMasked = maskApiKey(savedApiKey);
+  const apiKeyPlaceholder = form.provider === LLMProvider.OPENAI ? 'sk-...' : 'sk-ant-...';
 
   return (
     <div
@@ -221,19 +266,52 @@ export default function SettingsPage() {
         <section className="mb-4">
           <label className="mb-1 block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
             API Key
+            {savedApiKeyMasked && !form.apiKeyInput && (
+              <span
+                className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-normal"
+                style={{
+                  background: 'var(--accent-light)',
+                  color: 'var(--accent)',
+                }}
+                title="已保存到数据库。重新输入将覆盖；留空则保留旧值。"
+              >
+                已保存 · {savedApiKeyMasked}
+              </span>
+            )}
           </label>
-          <input
-            type="password"
-            value={form.apiKey}
-            onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-            placeholder={form.provider === LLMProvider.OPENAI ? 'sk-...' : 'sk-ant-...'}
-            className="w-full rounded-xl border px-3 py-2 text-sm"
-            style={{
-              background: 'var(--bg-secondary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
-          />
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={form.apiKeyInput}
+              onChange={(e) => setForm((f) => ({ ...f, apiKeyInput: e.target.value }))}
+              placeholder={apiKeyPlaceholder}
+              className="flex-1 rounded-xl border px-3 py-2 text-sm"
+              style={{
+                background: 'var(--bg-secondary)',
+                borderColor: 'var(--border)',
+                color: 'var(--text-primary)',
+              }}
+            />
+            {savedApiKey && (
+              <button
+                type="button"
+                onClick={handleClearApiKey}
+                disabled={saving}
+                className="rounded-xl border px-3 py-2 text-xs transition-colors disabled:opacity-50"
+                style={{
+                  borderColor: 'var(--border)',
+                  background: 'transparent',
+                  color: 'var(--text-muted)',
+                }}
+                title="从数据库清除保存的 API Key"
+              >
+                清除
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            留空保存 = 保留已保存的 key；输入新值 = 覆盖；点「清除」= 显式清空。
+          </p>
         </section>
 
         {/* Base URL */}
@@ -309,22 +387,6 @@ export default function SettingsPage() {
         >
           {saving ? '保存中...' : '保存并应用'}
         </button>
-
-        {message && (
-          <div
-            className="mt-3 rounded-xl border px-4 py-2 text-xs"
-            style={{
-              background:
-                message.type === 'ok' ? 'var(--success-light)' : 'var(--error-light)',
-              borderColor:
-                message.type === 'ok' ? 'var(--success)' : 'var(--error)',
-              color:
-                message.type === 'ok' ? 'var(--success)' : 'var(--error)',
-            }}
-          >
-            {message.text}
-          </div>
-        )}
       </div>
     </div>
   );
