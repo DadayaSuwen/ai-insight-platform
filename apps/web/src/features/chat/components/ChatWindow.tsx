@@ -392,7 +392,7 @@ function ChatWindow() {
         </header>
 
         {/* ── Quick Commands ──────────────────────── */}
-        {false && isEmpty && (
+        {isEmpty && (
           <div
             className="shrink-0 border-b px-6 py-3"
             style={{

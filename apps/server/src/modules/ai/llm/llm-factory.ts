@@ -27,6 +27,12 @@ export function createChatModel(config: LLMConfig) {
       const opts: Record<string, unknown> = {
         modelName: config.model,
         temperature: config.temperature ?? 0,
+        // ChatAnthropic v0.3.11 defaults `topP` to -1 on the instance, and
+        // the SDK always emits `top_p: this.topP` in every request. Anthropic
+        // proxies / the official API require `top_p ∈ (0, 1]`, so -1 always
+        // gets rejected with HTTP 400 "top_p should be in (0,1]". Force a
+        // valid default that matches Anthropic's recommended sampling.
+        topP: 1,
       };
       if (config.apiKey) opts.apiKey = config.apiKey;
       if (config.baseUrl) {

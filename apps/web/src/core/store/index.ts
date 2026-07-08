@@ -60,19 +60,54 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   saveLlmConfig: async (config: LLMConfig) => {
-    const res = await fetch(`${API_BASE}/llm/config`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-    });
-    const data = await res.json();
+    // Build payload — omit `apiKey` if empty so we don't silently overwrite
+    // a previously-saved key with `null`. Empty string means "explicit clear".
+    const payload: Record<string, unknown> = {
+      provider: config.provider,
+      model: config.model,
+      temperature: config.temperature,
+    };
+    if (config.baseUrl) payload.baseUrl = config.baseUrl;
+    if (config.apiKey !== undefined) {
+      // Empty string → clear; non-empty → update; undefined → omit entirely.
+      payload.apiKey = config.apiKey;
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/llm/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      return {
+        ok: false,
+        message: `网络错误：${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+
+    let data: { ok?: boolean; message?: string };
+    try {
+      data = await res.json();
+    } catch {
+      return { ok: false, message: `服务器返回了非 JSON (HTTP ${res.status})` };
+    }
+
+    if (!res.ok && !data?.ok) {
+      return {
+        ok: false,
+        message: data?.message ?? `HTTP ${res.status} ${res.statusText}`,
+      };
+    }
+
     if (data.ok) {
       set((state) => ({
         llmConfigs: { ...state.llmConfigs, [config.provider]: config },
         activeProvider: config.provider,
       }));
     }
-    return data;
+    return { ok: !!data.ok, message: data.message ?? "" };
   },
 
   fetchLlmHealth: async () => {

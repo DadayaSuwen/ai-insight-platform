@@ -196,17 +196,48 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
    * Hot-reload the chat model.
    * Called by LlmController after a config update.
    * @param config  Optional new config to use instead of reading from DB.
+   * @param options.preserveApiKey     When true, leave the apiKey column untouched in the UPDATE.
+   * @param options.explicitClearApiKey When true, force the apiKey column to NULL (clear).
    */
-  async reload(config?: LLMConfig): Promise<void> {
+  async reload(
+    config?: LLMConfig,
+    options?: { preserveApiKey?: boolean; explicitClearApiKey?: boolean },
+  ): Promise<void> {
     // Persist to DB if provided (called from POST /llm/config)
     if (config) {
       const db = this.database.db;
       const now = new Date();
+
+      // Initial INSERT branch — only used when no row exists for this provider.
+      //   preserveApiKey / explicitClearApiKey: write NULL so DB has a placeholder
+      //   otherwise: write the user's value
+      const insertApiKey =
+        options?.preserveApiKey || options?.explicitClearApiKey
+          ? null
+          : (config.apiKey ?? null);
+
+      // UPDATE branch — Kysely's doUpdateSet only touches listed columns.
+      //   preserveApiKey:      omit apiKey entirely from UPDATE (keep existing)
+      //   explicitClearApiKey: force apiKey = NULL
+      //   otherwise:           write config.apiKey (or NULL if empty)
+      const baseUpdate = {
+        baseUrl: config.baseUrl ?? null,
+        model: config.model,
+        temperature: config.temperature,
+        updatedAt: now,
+      } as const;
+      const apiKeyUpdate: Record<string, string | null> =
+        options?.preserveApiKey
+          ? {}
+          : options?.explicitClearApiKey
+            ? { apiKey: null }
+            : { apiKey: config.apiKey ?? null };
+
       await db
         .insertInto("LLMConfig")
         .values({
           id: config.provider,
-          apiKey: config.apiKey ?? null,
+          apiKey: insertApiKey,
           baseUrl: config.baseUrl ?? null,
           model: config.model,
           temperature: config.temperature,
@@ -214,15 +245,27 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
           updatedAt: now,
         })
         .onConflict((oc) =>
-          oc.column("id").doUpdateSet({
-            apiKey: config.apiKey ?? null,
-            baseUrl: config.baseUrl ?? null,
-            model: config.model,
-            temperature: config.temperature,
-            updatedAt: now,
-          }),
+          oc
+            .column("id")
+            .doUpdateSet({ ...baseUpdate, ...apiKeyUpdate }),
         )
         .execute();
+
+      // CRITICAL: ChatAnthropic's constructor validates apiKey at *construction*
+      // time and throws `Anthropic API key not found` when it's undefined. So if
+      // the user is preserving the existing apiKey (didn't include it in the
+      // POST body), we must hydrate config.apiKey from the DB before passing
+      // it to initWithConfig().
+      if (options?.preserveApiKey && config.apiKey === undefined) {
+        const row = await db
+          .selectFrom("LLMConfig")
+          .select("apiKey")
+          .where("id", "=", config.provider)
+          .executeTakeFirst();
+        if (row?.apiKey) {
+          config = { ...config, apiKey: row.apiKey };
+        }
+      }
     }
     this.chatReady = config
       ? this.initWithConfig(config)
@@ -264,21 +307,27 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   // ─── Internals ─────────────────────────────────────────────────────────────
 
   private async initFromDatabase(): Promise<void> {
-    this.activeProvider = LLMProvider.OPENAI;
     try {
+      // Pick the most recently updated row as the active provider.
+      // Previously we hardcoded `id = OPENAI`, which meant a server restart
+      // always fell back to OpenAI even when the user had only configured
+      // Anthropic — silently dropping custom baseUrl / apiKey.
       const row = await this.database.db
         .selectFrom("LLMConfig")
         .selectAll()
-        .where("id", "=", LLMProvider.OPENAI)
+        .orderBy("updatedAt", "desc")
         .executeTakeFirst();
 
       if (!row) {
+        this.activeProvider = LLMProvider.OPENAI;
         this.chat = this.defaultOpenAIChat();
         this.logger.warn(
           "No LLMConfig in DB; using default OpenAI (gpt-4o-mini). Set config via POST /llm/config",
         );
         return;
       }
+
+      this.activeProvider = row.id as LLMProvider;
 
       const config: LLMConfig = {
         provider: row.id as LLMProvider, // id IS the provider
@@ -290,9 +339,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
 
       this.chat = createChatModel(config);
       this.logger.log(
-        `LlmService loaded config: provider=${config.provider}, model=${config.model}`,
+        `LlmService loaded config: provider=${config.provider}, model=${config.model}, baseUrl=${config.baseUrl ?? "<default>"}`,
       );
     } catch (err) {
+      this.activeProvider = LLMProvider.OPENAI;
       this.logger.error(
         "Failed to init LLM from DB, falling back to default OpenAI",
         err,
@@ -306,7 +356,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     try {
       this.chat = createChatModel(config);
       this.logger.log(
-        `LlmService reloaded: provider=${config.provider}, model=${config.model}`,
+        `LlmService reloaded: provider=${config.provider}, model=${config.model}, baseUrl=${config.baseUrl ?? "<default>"}`,
       );
     } catch (err) {
       this.logger.error("Failed to apply new LLM config", err);
