@@ -123,6 +123,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
         break;
       case "error": {
         const e = data as ErrorEventData;
+        // [M7] 把 SSE 错误 + traceId 打到 console,便于前端调试 + 客服查服务端日志
+        console.error("[SSE error]", e);
         opts.onError?.(e);
         setError(e.message);
         // error 后不立即复位 isLoading —— ChatInput 仍能 abort；

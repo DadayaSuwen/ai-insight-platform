@@ -8,9 +8,11 @@ import { ConfigService } from "@nestjs/config";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
+import { jsonrepair } from "jsonrepair";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
 import { DatabaseService } from "../../database/database.service";
 import { createChatModel } from "./llm-factory";
+import { traceLogger } from "../debug-log";
 
 /**
  * Options for {@link LlmService.invoke}.
@@ -478,14 +480,45 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     try {
       parsed = JSON.parse(json);
     } catch (err) {
-      const coerced = this.coercePlainWord(raw, schema);
-      if (coerced !== undefined) return coerced;
-      throw new Error(
-        `LLM returned non-JSON: ${(err as Error).message}; raw=${raw.slice(0, 200)}`,
-      );
+      // [M6-L1] 第一层修复: 用 jsonrepair 救回损坏的 JSON
+      // 常见可修复场景: Markdown fence 残留、尾随逗号、单引号、缺引号属性、JS 注释
+      try {
+        const repaired = jsonrepair(json);
+        parsed = JSON.parse(repaired);
+        this.logger.warn(
+          `[M6-L1] jsonrepair recovered malformed JSON (origErr=${(err as Error).message})`,
+        );
+      } catch (repairErr) {
+        // [M7] JSON unrecoverable → trace 完整 raw (前 4000 字符, 替代原 raw.slice(0, 200))
+        traceLogger.trace({
+          phase: "parse-and-validate",
+          ctx: { schemaName: schema.constructor.name, repaired: false },
+          payload: raw,
+          err: repairErr,
+          level: "error",
+          dumpPayload: true,
+        });
+        const coerced = this.coercePlainWord(raw, schema);
+        if (coerced !== undefined) return coerced;
+        throw new Error(
+          `[M6-L1] LLM JSON unrecoverable: ${(repairErr as Error).message}; raw=${raw.slice(0, 200)}`,
+        );
+      }
     }
     const result = schema.safeParse(parsed);
     if (!result.success) {
+      // [M7] schema mismatch → trace 完整 raw (前 4000 字符)
+      traceLogger.trace({
+        phase: "parse-and-validate",
+        ctx: {
+          schemaName: schema.constructor.name,
+          zodIssues: result.error.issues.length,
+        },
+        payload: raw,
+        err: new Error(result.error.message),
+        level: "error",
+        dumpPayload: true,
+      });
       const coerced = this.coercePlainWord(raw, schema);
       if (coerced !== undefined) return coerced;
       throw new Error(

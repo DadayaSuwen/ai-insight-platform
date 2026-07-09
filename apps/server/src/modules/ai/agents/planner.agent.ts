@@ -19,6 +19,19 @@ import { createQueryDetailsTool } from "../tools/query-details.tool";
 import { createGenerateInsightTool } from "../tools/generate-insight.tool";
 import { InsightAgent } from "./insight.agent";
 import { ToolResultContext } from "../tools/tool-result.context";
+import { traceLogger } from "../debug-log";
+
+/**
+ * [M9-Bug B Step 2+3] 图表关键词正则 + session 维度重试标记
+ *
+ * 当 Planner 输出纯文本(0 tool_call)但用户消息含图表关键词时,
+ * 注入 System 提示强制要求调用 gen_chart。同一 session 只重试 1 次,避免死循环。
+ */
+const CHART_KEYWORD_REGEX =
+  /(图|占比|分布|趋势|地图|可视化|画|chart|pie|bar|line|柱状|折线|饼|热力|桑基|漏斗|雷达|3D|水球|词云)/i;
+
+/** sessionId → 是否已重试过 (避免死循环) */
+const retriedChartForSession = new Set<string>();
 
 export interface PlannerToolCallData {
   /** 跨 turn 全局唯一的工具调用 id。Ollama 返回的是函数名，planner 层洗成 UUID。 */
@@ -54,6 +67,7 @@ export class PlannerAgent {
     private readonly db: DatabaseService,
     private readonly chartHelper: ChartHelper,
     private readonly chartAgent: ChartAgent,
+    // [M13-V2] ChartValidator 删除 — V2 装配确定性,无需校验器
     private readonly insightAgent: InsightAgent,
     private readonly toolResultContext: ToolResultContext,
   ) {
@@ -162,9 +176,15 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 - 可视化图表 → gen_chart
 - **商业洞察 / 原因分析 / 风险机会 / "为什么" / "分析一下" / "总结一下"** → **必须先 query_sales 或 query_details 拿到数据,然后立即调用 generate_insight**。不要只在文本里总结 — 那叫"描述",不叫"洞察"。
 
+【样式/地图/布局意图】(M5-Patch — 严禁 ASCII 画图):
+- 用户提到颜色 ("紫色" / "蓝色系" / "用红色" / "#ff0000") → 调 gen_chart 时**必须传 colorPalette** (中文色名后端自动转 hex)
+- 用户提到地图类型 ("中国地图" / "世界地图" / "广东省") → 调 gen_chart 时**必须传 mapType**
+- 用户说 "全屏展示" / "大屏" / "铺满" → 调 gen_chart 时**必须传 layout: "fullscreen"**
+- **严禁用 ASCII 字符、Unicode 方块、Markdown 表格模拟图表**;图表生成是 gen_chart 工具的职责,后端会自动注入用户指定的样式。
+
 【重要规则】:
 1. 询问数据 → 必须用 query_sales 或 query_details,**绝对禁止编造数据**。
-2. 画图 → 必须 gen_chart。
+2. 画图 → 必须 gen_chart,**绝对禁止 ASCII 手绘**。
 3. 工具返回无法满足细节要求 → 基于现有数据总结,严禁说"因工具限制无法获取"。
 4. 回复用 Markdown (\`##\`/\`###\` 标题, \`**加粗**\` 关键数字, \`-\` 列表),像麦肯锡商业报告。
 5. 【格式红线】前端已自动把工具返回的 summary / rows 渲染成精美表格。**禁止用 Markdown 表格语法 (|---|---) 重复展示相同数据**。你只负责自然语言分析。
@@ -225,7 +245,7 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
       : timeoutController.signal;
 
     try {
-      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 10);
+      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 30);
       const systemPrompt = this.buildSystemPrompt();
 
       // chat.service.ts 的 buildHistoryMessages 已经把 DB 记录转成 BaseMessage[]，
@@ -290,7 +310,33 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
           !finalMessage.tool_calls ||
           finalMessage.tool_calls.length === 0
         ) {
-          // 没有工具调用，说明 LLM 已经说完了，退出循环
+          // [M9-Bug B Step 2+3] 0 tool_call 后置防御: 用户消息含图表关键词但 planner 没调工具 → 注入 System 提示 + 重试 1 次
+          const sessionKey = opts.sessionId ?? "default";
+          if (
+            CHART_KEYWORD_REGEX.test(message) &&
+            !retriedChartForSession.has(sessionKey)
+          ) {
+            retriedChartForSession.add(sessionKey);
+            this.logger.warn(
+              `[M9-Bug B] session ${sessionKey} planner returned 0 tool_call but user message contains chart keyword; injecting hint and retrying once`,
+            );
+            // 把当前 finalMessage (纯 text) 也保留进 messages,让 LLM 看到自己刚才的回答
+            if (finalMessage) messages.push(finalMessage as AIMessage);
+            // [M10-Bug E 修复] LangChain 协议硬性要求 SystemMessage 必须是 messages[0],
+            //   中间插入会抛 "System messages are only permitted as the first passed message"。
+            //   改用 HumanMessage 模拟"用户追问"语气,LLM 视为强诉求。
+            messages.push(
+              new HumanMessage(
+                // [M5-Patch-Fix] 收紧:用户消息含图表/样式关键词时,严禁 ASCII 兜底
+                "[系统提示] 你刚才没有调用任何工具,但用户消息包含图表/可视化/颜色/地图/布局关键词。" +
+                  "**你必须调用 gen_chart 工具**;用户指定的颜色、地图类型、布局意图会自动由后端 ChartAgent 识别。" +
+                  "**严禁用 ASCII 字符手绘图表** — 那会被前端视为渲染失败并降级为表格。",
+              ),
+            );
+            continue; // 回到 while(true) 顶部重试
+          }
+          // 没有工具调用 / 已重试过 → 退出循环
+          retriedChartForSession.delete(sessionKey); // 清理本次 session 的标记
           break;
         }
 
@@ -305,7 +351,9 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
           // Ollama 复用的 toolCall.id 就是函数名 → 洗成真 UUID，保证跨 turn 唯一。
           // OpenAI/Anthropic 的 id 已经是真 UUID，跳过覆盖。
           const toolCallId =
-            toolCall.id && toolCall.id !== toolName ? toolCall.id : randomUUID();
+            toolCall.id && toolCall.id !== toolName
+              ? toolCall.id
+              : randomUUID();
 
           yield {
             type: "tool_call",
@@ -322,13 +370,18 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
               // ★ 运行时上下文注入 (不会回传给 LLM,工具内部识别并使用):
               //   - generate_insight: sessionId 用于 ToolResultContext 兜底
               //   - gen_chart: originalMessage 用于 ChartAgent 生成上下文相关标题
+              //   - [M6-L3] gen_chart: sessionId 用于 ChartAgent 失败计数隔离 (意图直出降级)
               const argsWithContext = {
                 ...toolArgs,
                 ...(toolName === "generate_insight" && opts.sessionId
                   ? { sessionId: opts.sessionId }
                   : {}),
                 ...(toolName === "gen_chart" && message
-                  ? { originalMessage: message }
+                  ? {
+                      originalMessage: message,
+                      // [M6-L3] sessionId 注入到 gen_chart args (供 ChartAgent 失败计数)
+                      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+                    }
                   : {}),
               };
               const raw = await tool.invoke(argsWithContext);
@@ -338,6 +391,17 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
                   : (raw as Record<string, unknown>);
             }
           } catch (err) {
+            // [M7] 工具 invoke 失败 → traceLogger.trace (之前完全无日志)
+            traceLogger.trace({
+              phase: "tool-call",
+              ctx: {
+                toolName,
+                toolCallId,
+                args: toolArgs,
+              },
+              err,
+              level: "error",
+            });
             result = {
               error: err instanceof Error ? err.message : String(err),
             };
@@ -345,7 +409,12 @@ ChatMessage: id, sessionId, role, content, metadata, createdAt`;
 
           // ★ 推入 ToolResultContext (给 generate_insight 兜底用)
           if (opts.sessionId && toolName !== "generate_insight") {
-            this.toolResultContext.push(opts.sessionId, toolCallId, toolName, result);
+            this.toolResultContext.push(
+              opts.sessionId,
+              toolCallId,
+              toolName,
+              result,
+            );
           }
 
           yield {

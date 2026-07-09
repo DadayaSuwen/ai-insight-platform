@@ -1,0 +1,5 @@
+{
+  "type": "FeatureCollection",
+  "features": [],
+  "_comment": "M5-Patch placeholder: 美国各州 GeoJSON 待后续追加 (推荐 Natural Earth ne_10m_admin_1_states_provinces,Public Domain)。当前为空 FeatureCollection,ECharts map series 注册成功但无州多边形,渲染为空白地图。"
+}

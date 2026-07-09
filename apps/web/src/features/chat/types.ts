@@ -1,4 +1,7 @@
 import type { Message } from "@workspace/types";
+// SSEChartData / SSESQLData 自 ChartAgent 升级 (M1) 起已标记 @deprecated。
+// 前端不再读 AssistantMessage.{sql,chart,analysis},所有图表数据走 toolResults[i].result.chart。
+// 保留 import 是为了 AssistantMessage 的兼容字段类型 (M5 彻底删除)。
 import type { SSEChartData, SSESQLData } from "@workspace/types";
 
 /**
@@ -16,6 +19,11 @@ export interface ToolCallData {
 export interface ToolResultData {
   id: string;
   name: string;
+  /**
+   * 与 `@workspace/types` 的 `SSEToolResultData.result` 兼容:
+   * - `chart` 字段已升级为 `EChartsOption` (M1 引入)
+   * - `chartType` / `chartSource` / `metrics` / `metricLabels` / `groupBy` 是 M1 新增
+   */
   result: Record<string, unknown>;
 }
 
@@ -27,6 +35,8 @@ export interface TextEventData {
 export interface ErrorEventData {
   code: string;
   message: string;
+  /** [M7] 后端 traceId (chat.service.ts SSE error event 注入),客服可凭此查服务端日志 */
+  traceId?: string;
 }
 
 /** done 事件可携带 session 字段，用于前端刷新侧栏 */
@@ -60,9 +70,15 @@ export interface AssistantMessage extends Message {
   error?: { code?: string; message: string };
   /** LLM thinking content (from SSE thinking event) — reserved, planner 暂未用 */
   thinking?: string;
-  /** 兼容旧版 SSE 事件的字段（已废弃，保留以防组件仍有引用） */
+  /**
+   * 兼容旧版 SSE 事件的字段（已废弃，保留以防组件仍有引用）
+   * @deprecated 自 ChartAgent 升级 (M1) 起,所有图表/SQL/分析数据应通过 toolResults 读取。
+   *             M5 阶段 grep 确认无消费后将彻底删除。
+   */
   sql?: SSESQLData;
+  /** @deprecated 同 AssistantMessage.sql */
   chart?: SSEChartData;
+  /** @deprecated 同 AssistantMessage.sql */
   analysis?: string;
 }
 

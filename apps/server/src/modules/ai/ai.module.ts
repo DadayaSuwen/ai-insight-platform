@@ -16,6 +16,8 @@ import { LlmController } from "./llm/llm.controller";
     AiService,
     ChartHelper,
     ChartAgent,
+    // [M13-V2] ChartValidator 删除 — V2 不再让 LLM 输出 EChartsOption,
+    //          装配由 ChartHelper.assemble() 100% 确定,无需校验器
     PlannerAgent,
     InsightAgent,
     ToolResultContext,

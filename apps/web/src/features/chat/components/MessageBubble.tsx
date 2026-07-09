@@ -1,9 +1,71 @@
-import React from "react";
+import React, { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm"; // ★ 引入插件
-import DynamicChart from "./DynamicChart";
+import DynamicChart, { type DynamicChartHandle } from "./DynamicChart";
+import { ChartErrorBoundary } from "./ChartErrorBoundary";
+import { CollapsibleTable } from "./CollapsibleTable"; // [M13-V2] 抽出独立组件
 import { InsightPanel, InsightSkeleton } from "./InsightPanel";
 import type { ChatMessage, AssistantMessage } from "../types";
+import { Button } from "../../../components/ui/button";
+
+/**
+ * [M6-L4 / M13-V2] ChartWithFallback — 单个图表 + 表格降级子组件
+ *
+ * [M6-L4] 抽出这个组件是为了使用 useState 控制"切表格"toggle;
+ *        直接在 MessageBubble 的 .map 内联渲染会破坏 hooks 规则。
+ * [M13-V2] GUARD-V2-3: V2 移除 showTable toggle,fallbackRows 直接透传到 ChartErrorBoundary
+ *        Canvas 像素探针触发 onError 时,Boundary 自动渲染表格(无需用户点击)
+ */
+function ChartWithFallback({
+  chartKey,
+  chartOption,
+  fallbackRows,
+  chartRefs,
+  onExportPng,
+  mapType,
+}: {
+  chartKey: string;
+  chartOption: Record<string, unknown>;
+  fallbackRows?: Array<Record<string, any>>;
+  chartRefs: React.MutableRefObject<Map<string, DynamicChartHandle>>;
+  onExportPng: (key: string) => void;
+  /** [M5-Patch] 地图类型,来自后端 intent.mapType */
+  mapType?: string;
+}) {
+  // [M13-V2] GUARD-V2-3: V2 移除 showTable state, fallbackRows 直接透传到 Boundary
+  // Canvas 像素探针触发 onError 时, Boundary 自动渲染 CollapsibleTable (无需用户点击)
+  return (
+    <>
+      <ChartErrorBoundary
+        onError={(err) => {
+          console.error("[GUARD-2a / GUARD-V2-3] chart render failed:", err);
+        }}
+        fallbackRows={fallbackRows}  // [M13-V2] 直接传 rows
+      >
+        <DynamicChart
+          ref={(handle) => {
+            if (handle) chartRefs.current.set(chartKey, handle);
+            else chartRefs.current.delete(chartKey);
+          }}
+          option={chartOption}
+          mapType={mapType}  // [M5-Patch] 透传到 ensureMap
+          enableResize={true}
+        />
+      </ChartErrorBoundary>
+      <div className="mt-2 flex justify-end">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-[10px]"
+          onClick={() => onExportPng(chartKey)}
+          title="导出 PNG"
+        >
+          📥 导出 PNG
+        </Button>
+      </div>
+    </>
+  );
+}
 
 /**
  * MessageBubble — 渲染单条消息
@@ -21,6 +83,26 @@ function MessageBubble({
   onSuggestionClick: (text: string) => void;
 }) {
   const isUser = message.role === "user";
+
+  // M5 (GUARD-5b): 每个 gen_chart 渲染需要一个 ref 调 exportPng()
+  const chartRefs = useRef<Map<string, DynamicChartHandle>>(new Map());
+
+  const handleExportPng = (toolResultId: string) => {
+    const handle = chartRefs.current.get(toolResultId);
+    if (!handle) return;
+    const dataUrl = handle.exportPng();
+    if (!dataUrl) {
+      console.warn("[GUARD-5b] exportPng returned null (instance not ready)");
+      return;
+    }
+    // 触发下载
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `chart-${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   // ─── 用户消息 ───────────────────────────────────────────
   if (isUser) {
@@ -131,14 +213,46 @@ function MessageBubble({
           <div className="mb-3 space-y-4">
             {msg.toolResults!.map((res, idx) => {
               if (res.name === "gen_chart" && res.result.chart) {
+                // M3 chartSource 标签: 🤖 LLM 生成 / 📊 模板兜底
+                const chartSource = res.result.chartSource as string | undefined;
+                // M5: ref 用来调 exportPng (GUARD-5b)
+                const chartKey = res.id ?? `chart-${idx}`;
+                // [M6-L4] 提取 fallbackRows 供表格降级用
+                const fallbackRows = res.result.rows as
+                  | Array<Record<string, any>>
+                  | undefined;
+                // [M5-Patch] 读取 intent (后端 chartAgent 返回) → 透传到 DynamicChart
+                const intent = (res.result.intent ?? {}) as {
+                  mapType?: string;
+                  layout?: "inline" | "fullscreen";
+                };
+                const isFullscreen = intent.layout === "fullscreen";
                 return (
                   <div
                     key={idx}
-                    className="rounded-lg p-2"
+                    className={`rounded-lg p-2 ${isFullscreen ? "w-full" : ""}`}
                     style={{ background: "var(--bg-secondary)" }}
                   >
-                    <DynamicChart
-                      option={res.result.chart as Record<string, unknown>}
+                    <div className="mb-2 flex items-center justify-between gap-1 text-[10px]">
+                      {chartSource && (
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {chartSource === "fallback" ? "📊 模板生成" : "🤖 LLM 生成"}
+                        </span>
+                      )}
+                      {/* [M5-Patch] 全屏标识提示 */}
+                      {isFullscreen && (
+                        <span style={{ color: "var(--text-muted)" }}>
+                          ⛶ 全屏展示
+                        </span>
+                      )}
+                    </div>
+                    <ChartWithFallback
+                      chartKey={chartKey}
+                      chartOption={res.result.chart as Record<string, unknown>}
+                      fallbackRows={fallbackRows}
+                      chartRefs={chartRefs}
+                      onExportPng={handleExportPng}
+                      mapType={intent.mapType}
                     />
                   </div>
                 );
@@ -279,108 +393,11 @@ function MessageBubble({
     </div>
   );
 }
-import { useState } from "react";
 
 // 通用的可折叠数据表格组件 (完全动态)
-function CollapsibleTable({ rows }: { rows: Record<string, any>[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!rows || rows.length === 0) return null;
-
-  // 1. 动态提取表头 (取第一行数据的所有 key)
-  const headers = Object.keys(rows[0]);
-
-  // 2. 表头友好映射 (把英文 key 转成中文展示)
-  const headerMap: Record<string, string> = {
-    key: "分组/时间",
-    name: "名称",
-    totalAmount: "销售额 (¥)",
-    totalQuantity: "销量",
-    orderCount: "订单数",
-    value: "数值",
-    // 未来如果有新字段，只需在这里加映射即可，或者直接显示英文
-  };
-
-  return (
-    <div className="relative mt-2">
-      <div
-        className="overflow-auto rounded-lg border transition-all"
-        style={{
-          borderColor: "var(--border)",
-          maxHeight: expanded ? "none" : "200px",
-        }}
-      >
-        <table className="w-full text-xs">
-          <thead
-            style={{ background: "var(--bg-hover)" }}
-            className="sticky top-0"
-          >
-            <tr>
-              {headers.map((h) => (
-                <th
-                  key={h}
-                  className="px-3 py-2 text-left font-medium whitespace-nowrap"
-                >
-                  {headerMap[h] || h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, ridx) => (
-              <tr
-                key={ridx}
-                className="border-t"
-                style={{ borderColor: "var(--border)" }}
-              >
-                {headers.map((h) => {
-                  const val = row[h];
-
-                  // ★ 健壮的数字判断：支持原生 number 和纯数字字符串
-                  const isNum =
-                    (typeof val === "number" && !isNaN(val)) ||
-                    (typeof val === "string" &&
-                      val.trim() !== "" &&
-                      !isNaN(Number(val)));
-
-                  return (
-                    <td
-                      key={h}
-                      className={`px-3 py-2 whitespace-nowrap tabular-nums text-left`}
-                    >
-                      {/* 如果是数字，格式化为千分位；否则直接显示字符串 */}
-                      {isNum
-                        ? Number(val).toLocaleString()
-                        : String(val ?? "-")}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {rows.length > 8 && (
-        <div
-          className="flex justify-center py-1.5 border-t"
-          style={{
-            borderColor: "var(--border)",
-            background: "var(--bg-primary)",
-          }}
-        >
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs font-medium hover:underline"
-            style={{ color: "var(--accent)" }}
-          >
-            {expanded ? "⬆ 收起表格" : `⬇ 展开全部 (${rows.length} 行)`}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+// [M13-V2] GUARD-V2-3: CollapsibleTable 已抽出到独立文件 ./CollapsibleTable.tsx
+// 旧的本地定义已删除, 顶部 import 指向 ./CollapsibleTable.tsx
+// CollapsibleTable_DELETED_PLACEHOLDER 已被替换
 
 // 智能追问组件
 function DynamicSuggestions({

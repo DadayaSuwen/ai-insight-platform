@@ -4,6 +4,7 @@ import { MessageEvent } from "@nestjs/common";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AiService } from "../ai/ai.service";
 import { ChatSessionService } from "./chat-session.service";
+import { currentTrace } from "../ai/debug-log";
 
 @Injectable()
 export class ChatService {
@@ -127,7 +128,12 @@ export class ChatService {
           }
           subscriber.next({
             type: "error",
-            data: { code: "STREAM_FAILED", message: String(err) },
+            data: {
+              code: "STREAM_FAILED",
+              message: String(err),
+              // [M7] 把 traceId 透传给前端,客服可凭此 grep 服务端日志定位
+              traceId: currentTrace()?.traceId,
+            },
           });
           // session: null 让前端 fallback 到 refreshSessions() 兜底刷新侧栏
           subscriber.next({ type: "done", data: { session: null } });

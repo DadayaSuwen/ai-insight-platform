@@ -1,111 +1,105 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 import { LlmService } from "../llm/llm.service";
+import { METRIC_LABELS, type MetricKey } from "../tools/dimensions";
+import type { EChartSeriesType } from "@workspace/types";
+import { traceLogger } from "../debug-log";
+import { type ChartIntent } from "../tools/schemas";
 
 /**
- * System prompt for LLM-driven chart configuration generation.
- * Inlined here (was previously ../prompts/chart.prompt.ts) because it's
- * only used by this single agent and the prompts/ directory has been
- * dismantled as part of the planner-architecture cleanup.
+ * ChartAgent (V2 重构 — IntentExtractor)
+ *
+ * [GUARD-V2-1] **LLM 输出隔离**: 本类绝不返回 EChartsOption 结构。
+ * LLM 仅输出最小意图 JSON {chartType, xField, yField, groupBy, metrics},
+ * 由 ChartAssembler (chart.helper.ts) 100% 装配 EChartsOption。
+ *
+ * 链路:
+ *   gen-chart.tool.ts
+ *     → SQL 聚合得到 rows
+ *     → chartAgent.extractIntent(rows, message, ctx)
+ *     → chartHelper.assemble(intent, rows, ctx)
+ *     → SSE tool_result { chart, intent, chartSource: "agent", ... }
  */
-const CHART_SYSTEM_PROMPT = `你是一个图表配置生成助手。根据数据和用户意图，生成 ECharts 图表配置。
 
-可选图表类型:
-- line: 折线图 (适合显示趋势)
-- bar: 柱状图 (适合比较)
-- pie: 饼图 (适合显示占比)
-- scatter: 散点图 (适合显示分布)
-- area: 面积图 (适合显示累积趋势)
+const DATA_TRUNCATE_THRESHOLD = 100;
 
-规则:
-1. 根据数据特点和用户问题选择合适的图表类型
-2. 返回完整的 ECharts 配置 JSON 对象
-3. 必须包含: type, title, xAxis, yAxis, series
-4. series 的 data 需要是符合图表类型的数组
-5. 只返回 JSON，不要解释`;
+/**
+ * 上下文 — Planner/工具层注入的运行时信息
+ */
+export interface ChartAgentContext {
+  /** Planner 推断的 chartType 提示 (允许 null,因 GenChartArgsSchema.chartType 是 nullish) */
+  chartTypeHint?: string | null;
+  /** SQL 阶段确定的 groupBy 维度 */
+  groupBy?: string;
+  /** groupBy 中文标签 (用于 title) */
+  groupLabel?: string;
+  /** SQL 已计算的指标列表 */
+  metrics?: MetricKey[];
+  metricLabels?: Record<string, string>;
+  /** [GUARD-1a] 数据是否被截断 (rows > 100 时) */
+  dataTruncated?: boolean;
+  /** [GUARD-1a] 截断前的原始行数 */
+  originalRowCount?: number;
+  /** 用户原始问句 (供 intentFallback 关键词推断) */
+  originalMessage?: string;
 
-function buildChartUserMessage(
-  userMessage: string,
-  data: unknown[],
-): string {
-  const dataPreview = JSON.stringify(data.slice(0, 5), null, 2);
-  return `用户问题: ${userMessage}
-
-数据样本 (前5条):
-${dataPreview}
-
-请选择合适的图表类型并生成 ECharts 配置。`;
+  // ─────────────────────────────────────────────────────────────
+  // [M5-Patch-Fix] Planner 显式传入的样式/地图/布局意图
+  // 优先级: explicit > inner LLM 提取 > undefined
+  // 注入方式: gen-chart.tool.ts 154 行 ctx 拼装时填入
+  // ─────────────────────────────────────────────────────────────
+  /** Planner 显式指定的用户颜色 (如 ['#800080']) */
+  explicitColorPalette?: string[] | null;
+  /** Planner 显式指定的地图类型 (如 'world' / 'prov-guangdong') */
+  explicitMapType?: string | null;
+  /** Planner 显式指定的布局 ('inline' | 'fullscreen') */
+  explicitLayout?: "inline" | "fullscreen" | null;
 }
 
-/**
- * Chart types supported.
- */
-export type ChartType = "line" | "bar" | "pie" | "scatter" | "area";
+const CHART_INTENT_PROMPT = `你是图表选型助手。根据用户问题 + 已聚合数据 + Planner 上下文,选择最合适的 ECharts 系列类型并指定字段映射。
 
-/**
- * ECharts option interface.
- *
- * Kept intentionally loose — LangChain's structured output sometimes
- * drops optional fields, and the validator below only requires the
- * shape we actually render (xAxis / yAxis / series[].type).
- */
-export interface EChartsOption {
-  title?: { text: string };
-  tooltip?: { trigger: string };
-  legend?: { data?: string[] };
-  xAxis?: { type: string; data?: unknown[] };
-  yAxis?: { type: string };
-  series?: unknown[];
-}
+【硬规则】
+1. 仅返回 JSON 对象,无 markdown fence、无 prose、无解释
+2. chartType 必须是 30 个 ECharts series 枚举值之一 (line / bar / pie / scatter / area / map / heatmap / treemap / sankey / funnel / gauge / radar / parallel / sunburst / boxplot / candlestick / graph / tree / themeRiver / pictorialBar / bar3D / scatter3D / surface3D / map3D / line3D / points3D / lines3D / liquidFill / wordCloud / custom)
+3. xField: x 轴字段名 (默认 "name")
+4. yField: y 轴字段名,必填,数值字段 (sales / quantity / profit / discount / orderCount)
+5. groupBy: 用户语义上的分组维度,可省略
+6. metrics: 多指标时填入,可省略
+7. **严禁** 输出 series / xAxis / yAxis / tooltip / legend / 任何 ECharts 配置字段 — 装配由代码完成
 
-/**
- * Loose Zod schema for the LLM output. Anything stricter (e.g.
- * `legend.data: string[]`) tends to cause Qwen to apologize and
- * truncate the JSON. We hand-coerce after parsing.
- */
-const ChartOptionSchema = z
-  .object({
-    type: z.enum(["line", "bar", "pie", "scatter", "area"]).optional(),
-    title: z
-      .object({ text: z.string().optional() })
-      .passthrough()
-      .optional(),
-    tooltip: z
-      .object({ trigger: z.string().optional() })
-      .passthrough()
-      .optional(),
-    legend: z
-      .object({ data: z.array(z.string()).optional() })
-      .passthrough()
-      .optional(),
-    xAxis: z
-      .object({
-        type: z.string().optional(),
-        data: z.array(z.unknown()).optional(),
-      })
-      .passthrough()
-      .optional(),
-    yAxis: z
-      .object({ type: z.string().optional() })
-      .passthrough()
-      .optional(),
-    series: z.array(z.unknown()).optional(),
-  })
-  .passthrough();
+【选型指引】
+- 占比 / 构成 / 比例 (≤7 类) → pie
+- 占比 (>7 类) → treemap / sunburst
+- 趋势 / 月度变化 → line (groupBy 含 month/day/week/quarter 优先)
+- 类别对比 → bar
+- 范围 / 极值 / 中位数 → boxplot
+- K 线 / OHLC → candlestick
+- 多维评分 → radar
+- 流向 / 来源去向 → sankey
+- 单调下降 → funnel
+- 仪表 / 完成率 → gauge
+- 地理分布 → map (中国省份,groupBy=state)
+- 词频 → wordCloud
+- 完成率 KPI → liquidFill / gauge
+- 累积趋势 → area
 
-type LlmChartOutput = z.infer<typeof ChartOptionSchema>;
+【样式与布局】(M5-Patch)
+- 用户指定颜色 ("红色" / "蓝色系" / "用蓝绿色" / "#ff0000") → colorPalette: ["#ff0000" 或对应 hex]
+  - 中文颜色名 → 转 hex ("红"→"#ff0000","蓝绿"→"#00ffff","金黄"→"#ffd700")
+  - 颜色系 ("红色系" / "暖色调") → 3-5 个同色系 hex 数组
+- 用户说 "全屏展示" / "大屏" / "铺满" → layout: "fullscreen"
+- 未指定则不填,前端自动处理
 
-/**
- * ChartAgent — Chart Configuration
- *
- * Layered strategy:
- *   1. Try LLM via LlmService.invokeStructured with a permissive Zod
- *      schema that tolerates Qwen's occasional field drops.
- *   2. Coerce the result into a renderable EChartsOption (fill in
- *      missing xAxis.data from input rows, etc.).
- *   3. Fall back to keyword/template logic on any failure so that
- *      existing tests and offline runs keep working.
- */
+【地图系列】(M5-Patch)
+- 用户说 "中国地图" / 未指定地理范围 → mapType: "china"
+- 用户说 "世界地图" / "全球" → mapType: "world"
+- 用户说 "美国地图" → mapType: "usa"
+- 用户说某省 (如 "广东省" / "江苏省") → mapType: "prov-<拼音>" (例 "prov-guangdong")
+
+【数据上下文】
+- 数据样本 (前 8 条) 会在 human message 中给出,你只需从中识别字段名
+- ctx.metrics 是 Planner 已确定的指标列表,yField 优先从 metrics 选`;
+
 @Injectable()
 export class ChartAgent {
   private readonly logger = new Logger(ChartAgent.name);
@@ -113,248 +107,212 @@ export class ChartAgent {
   constructor(private readonly llm: LlmService) {}
 
   /**
-   * Generate chart config from data and message.
+   * [GUARD-V2-1] 主入口: LLM 提取最小意图。
+   * 不抛错 — 失败时降级 intentFallback()。
    */
-  async generate(data: unknown[], message: string): Promise<EChartsOption> {
-    this.logger.log(`Generating chart for ${data?.length ?? 0} records`);
-
-    if (!data || data.length === 0) {
-      return this.getDefaultChart();
+  async extractIntent(
+    rows: Array<Record<string, number | string>>,
+    message: string,
+    ctx?: ChartAgentContext,
+  ): Promise<ChartIntent> {
+    // [GUARD-1a] 数据截断
+    let workingData = rows ?? [];
+    let dataTruncated = false;
+    let originalRowCount = workingData.length;
+    if (workingData.length > DATA_TRUNCATE_THRESHOLD) {
+      this.logger.warn(
+        `[GUARD-1a] data rows ${workingData.length} > ${DATA_TRUNCATE_THRESHOLD}, truncating`,
+      );
+      workingData = workingData.slice(0, DATA_TRUNCATE_THRESHOLD);
+      dataTruncated = true;
     }
+
+    const enrichedCtx: ChartAgentContext = {
+      ...(ctx ?? {}),
+      dataTruncated,
+      originalRowCount,
+    };
 
     try {
-      const llmResult = await this.llm.invokeStructured<typeof ChartOptionSchema>({
-        system: CHART_SYSTEM_PROMPT,
-        human: buildChartUserMessage(message, data),
-        schema: ChartOptionSchema,
-        timeoutMs: 30_000,
+      const human = buildIntentUserMessage(message, workingData, enrichedCtx);
+      const intent = await this.llm.invokeStructured<typeof ChartIntentSchemaType>({
+        system: CHART_INTENT_PROMPT,
+        human,
+        schema: ChartIntentSchemaType,
+        timeoutMs: 15_000,
         temperature: 0,
       });
-      const chart = this.coerceOption(llmResult, data);
-      this.logger.log(`LLM generated chart config (type=${chart.series?.[0] && (chart.series[0] as { type?: string }).type})`);
-      return chart;
+      // 缺失字段从 ctx 兜底
+      return this.fillIntentFields(intent as ChartIntent, enrichedCtx, workingData);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`LLM chart gen failed (${msg}); falling back`);
-      return this.generateFromData(data, message);
-    }
-  }
-
-  /**
-   * Shape the LLM output into something the frontend can render.
-   * If the model didn't pick a chart type, fall back to bar.
-   */
-  private coerceOption(parsed: LlmChartOutput, data: unknown[]): EChartsOption {
-    const firstRow = (data.find((d) => d != null) ?? {}) as Record<string, unknown>;
-    const keys = Object.keys(firstRow);
-    const categoryCol = this.findColumn(keys, [
-      "category",
-      "region",
-      "productname",
-      "name",
-      "date",
-      "time",
-    ]) ?? keys[0];
-    const valueCol = this.findColumn(keys, [
-      "amount",
-      "quantity",
-      "total",
-      "count",
-      "sales",
-    ]) ?? keys[1] ?? keys[0];
-
-    const chartType: ChartType =
-      (parsed.type && (["line", "bar", "pie", "scatter", "area"] as ChartType[]).includes(parsed.type as ChartType))
-        ? (parsed.type as ChartType)
-        : this.detectChartTypeFromKeys(keys);
-
-    const series = ((): unknown[] => {
-      const fallbackData = data.map((row) => {
-        const r = row as Record<string, unknown>;
-        return Number(r[valueCol]) || 0;
-      });
-      if (!Array.isArray(parsed.series) || parsed.series.length === 0) {
-        return [{ type: chartType, data: fallbackData }];
-      }
-      // If the first series entry is missing its `data` field, fill it
-      // in — Qwen sometimes returns `[{ type: 'bar' }]` without values.
-      const first = parsed.series[0] as Record<string, unknown> | undefined;
-      if (first && (first.data === undefined || first.data === null)) {
-        return [{ ...first, data: fallbackData }, ...parsed.series.slice(1)];
-      }
-      return parsed.series;
-    })();
-
-    const xData =
-      parsed.xAxis?.data && parsed.xAxis.data.length > 0
-        ? parsed.xAxis.data
-        : data.map((row) => {
-            const r = row as Record<string, unknown>;
-            return categoryCol ? String(r[categoryCol]) : "";
-          });
-
-    return {
-      title: parsed.title?.text ? { text: parsed.title.text } : undefined,
-      tooltip: parsed.tooltip ?? { trigger: chartType === "pie" ? "item" : "axis" },
-      legend: parsed.legend,
-      xAxis: parsed.xAxis?.type
-        ? { type: parsed.xAxis.type, data: parsed.xAxis.type === "category" ? xData : undefined }
-        : { type: "category", data: xData },
-      yAxis: parsed.yAxis?.type ? { type: parsed.yAxis.type } : { type: "value" },
-      series,
-    } as EChartsOption;
-  }
-
-  /**
-   * Template-based fallback (frozen behavior — tests assert against it).
-   */
-  private generateFromData(data: unknown[], message: string): EChartsOption {
-    const validData = data.filter((item) => item != null);
-    if (validData.length === 0) {
-      return this.getDefaultChart();
-    }
-
-    const firstRow = validData[0] as Record<string, unknown>;
-    const keys = Object.keys(firstRow);
-
-    const chartType = this.detectChartType(message);
-
-    const categoryCol = this.findColumn(keys, [
-      "category",
-      "region",
-      "productname",
-      "name",
-      "date",
-      "time",
-    ]);
-    const valueCol = this.findColumn(keys, [
-      "amount",
-      "quantity",
-      "total",
-      "count",
-      "sales",
-    ]);
-
-    if (chartType === "pie") {
-      return this.generatePieChart(data, categoryCol, valueCol);
-    }
-
-    return this.generateXYChart(data, categoryCol, valueCol, chartType);
-  }
-
-  /**
-   * Detect chart type from message (fallback path).
-   */
-  private detectChartType(message: string): ChartType {
-    const lowerMessage = message.toLowerCase();
-    if (
-      lowerMessage.includes("饼") ||
-      lowerMessage.includes("pie") ||
-      lowerMessage.includes("占比")
-    ) {
-      return "pie";
-    }
-    if (
-      lowerMessage.includes("折线") ||
-      lowerMessage.includes("line") ||
-      lowerMessage.includes("趋势")
-    ) {
-      return "line";
-    }
-    if (lowerMessage.includes("散点") || lowerMessage.includes("scatter")) {
-      return "scatter";
-    }
-    if (lowerMessage.includes("面积") || lowerMessage.includes("area")) {
-      return "area";
-    }
-    return "bar";
-  }
-
-  /**
-   * Heuristic for when LLM failed to pick a type — infer pie vs bar from
-   * column names. Used only inside coerceOption.
-   */
-  private detectChartTypeFromKeys(keys: string[]): ChartType {
-    const lower = keys.map((k) => k.toLowerCase());
-    if (lower.some((k) => k.includes("category") || k.includes("region"))) {
-      return "bar";
-    }
-    return "bar";
-  }
-
-  private findColumn(keys: string[], patterns: string[]): string | null {
-    for (const pattern of patterns) {
-      const found = keys.find((k) =>
-        k.toLowerCase().includes(pattern.toLowerCase()),
-      );
-      if (found) return found;
-    }
-    return null;
-  }
-
-  private generatePieChart(
-    data: unknown[],
-    categoryCol: string | null,
-    valueCol: string | null,
-  ): EChartsOption {
-    const chartData = data.map((row) => {
-      const r = row as Record<string, unknown>;
-      return {
-        name: categoryCol ? String(r[categoryCol]) : "Unknown",
-        value: valueCol ? Number(r[valueCol]) || 0 : 0,
-      };
-    });
-
-    return {
-      tooltip: { trigger: "item" },
-      legend: { data: chartData.map((d) => d.name) },
-      series: [
-        {
-          type: "pie",
-          radius: "50%",
-          data: chartData,
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: "rgba(0, 0, 0, 0.5)",
-            },
-          },
+      this.logger.warn(`[M13-V2] extractIntent LLM 失败 → intentFallback: ${msg}`);
+      traceLogger.trace({
+        phase: "intent-mode",
+        ctx: {
+          chartTypeHint: enrichedCtx.chartTypeHint,
+          groupBy: enrichedCtx.groupBy,
+          metrics: enrichedCtx.metrics,
+          rowCount: workingData.length,
         },
-      ],
-    };
+        err: error,
+        level: "warn",
+      });
+      return this.intentFallback(workingData, enrichedCtx);
+    }
   }
 
-  private generateXYChart(
-    data: unknown[],
-    categoryCol: string | null,
-    valueCol: string | null,
-    chartType: ChartType,
-  ): EChartsOption {
-    const xData = data.map((row) => {
-      const r = row as Record<string, unknown>;
-      return categoryCol ? String(r[categoryCol]) : `Item ${data.indexOf(row)}`;
-    });
-    const yData = data.map((row) => {
-      const r = row as Record<string, unknown>;
-      return valueCol ? Number(r[valueCol]) || 0 : 0;
-    });
-
+  /**
+   * 缺失字段兜底 — 让 ChartIntent 总是完整
+   * [M5-Patch-Fix] Planner 显式 ctx 字段优先级 > inner LLM 提取
+   */
+  private fillIntentFields(
+    intent: ChartIntent,
+    ctx: ChartAgentContext,
+    rows: Array<Record<string, number | string>>,
+  ): ChartIntent {
+    const fields = rows[0] ? Object.keys(rows[0]) : ["name"];
+    const xField = intent.xField ?? (fields.includes("name") ? "name" : fields[0]);
+    const yField = intent.yField ?? ctx.metrics?.[0] ?? fields.find((f) => f !== xField) ?? "value";
+    const explicitColor = ctx.explicitColorPalette;
+    const explicitMap = ctx.explicitMapType;
+    const explicitLayout = ctx.explicitLayout;
     return {
-      tooltip: { trigger: "axis" },
-      xAxis: { type: "category", data: xData },
-      yAxis: { type: "value" },
-      series: [{ type: chartType, data: yData, smooth: true }],
+      chartType: intent.chartType,
+      xField,
+      yField,
+      groupBy: intent.groupBy ?? (ctx.groupBy as ChartIntent["groupBy"]),
+      metrics: intent.metrics ?? ctx.metrics,
+      // [M5-Patch-Fix] explicit 优先级最高,inner LLM 提取值只在 explicit 为空时使用
+      colorPalette: explicitColor && explicitColor.length > 0 ? explicitColor : intent.colorPalette,
+      mapType: explicitMap ?? intent.mapType,
+      layout: explicitLayout ?? intent.layout,
     };
   }
 
-  private getDefaultChart(): EChartsOption {
+  /**
+   * [GUARD-V2-1] 关键词兜底(无 LLM 调用)
+   * Planner 已传 chartTypeHint → 直接用,否则 detectChartType 关键词推断
+   * [M5-Patch-Fix] explicit 字段透传(LLM 失败时仍保留 Planner 显式意图)
+   */
+  private intentFallback(
+    rows: Array<Record<string, number | string>>,
+    ctx: ChartAgentContext,
+  ): ChartIntent {
+    let chartType: EChartSeriesType = (ctx.chartTypeHint as EChartSeriesType) ?? "bar";
+    if (!ctx.chartTypeHint && ctx.originalMessage) {
+      chartType = this.detectChartType(ctx.originalMessage) as EChartSeriesType;
+    }
+    const fields = rows[0] ? Object.keys(rows[0]) : ["name"];
+    const xField = fields.includes("name") ? "name" : fields[0];
+    const yMetric =
+      ctx.metrics?.[0] ?? fields.find((f) => f !== xField) ?? "value";
+    const explicitColor = ctx.explicitColorPalette;
+    const explicitMap = ctx.explicitMapType;
+    const explicitLayout = ctx.explicitLayout;
     return {
-      title: { text: "数据图表" },
-      tooltip: { trigger: "axis" },
-      xAxis: { type: "category", data: [] },
-      yAxis: { type: "value" },
-      series: [{ type: "bar", data: [] }],
+      chartType,
+      xField,
+      yField: yMetric,
+      groupBy: ctx.groupBy as ChartIntent["groupBy"],
+      metrics: ctx.metrics,
+      // [M5-Patch-Fix] 即使 LLM 失败,Planner 显式字段仍生效
+      colorPalette: explicitColor && explicitColor.length > 0 ? explicitColor : undefined,
+      mapType: explicitMap ?? undefined,
+      layout: explicitLayout ?? undefined,
     };
   }
+
+  /**
+   * 关键词推断 chartType (仅作为 LLM 失败的兜底)
+   */
+  private detectChartType(message: string): string {
+    const m = message.toLowerCase();
+    if (m.includes("饼") || m.includes("占比") || m.includes("pie")) return "pie";
+    if (m.includes("热力") || m.includes("heatmap")) return "heatmap";
+    if (m.includes("漏斗") || m.includes("funnel")) return "funnel";
+    if (m.includes("雷达") || m.includes("radar")) return "radar";
+    if (m.includes("桑基") || m.includes("sankey")) return "sankey";
+    if (m.includes("矩形树") || m.includes("treemap")) return "treemap";
+    if (m.includes("地图") || m.includes("省份")) return "map";
+    if (m.includes("折线") || m.includes("趋势")) return "line";
+    if (m.includes("散点") || m.includes("scatter")) return "scatter";
+    if (m.includes("面积") || m.includes("area")) return "area";
+    if (m.includes("3d") || m.includes("三维")) return "bar3D";
+    if (m.includes("词云") || m.includes("wordcloud")) return "wordCloud";
+    if (m.includes("水球") || m.includes("liquidfill")) return "liquidFill";
+    if (m.includes("仪表") || m.includes("gauge")) return "gauge";
+    if (m.includes("柱") || m.includes("bar")) return "bar";
+    return "bar";
+  }
+}
+
+// ============================================================
+// helpers
+// ============================================================
+
+/** LLM 输入 schema 引用 (运行时 zod instance)
+ *  与 schemas.ts 的 ChartIntentSchema 字段对齐,运行时放宽 (chartType 接受任意字符串供 fallback)
+ *  [M5-Patch] 新增 colorPalette/mapType/layout 字段
+ */
+const ChartIntentSchemaType = z.object({
+  chartType: z.string(),
+  xField: z.string().optional(),
+  yField: z.string(),
+  groupBy: z.string().optional(),
+  metrics: z.array(z.string()).optional(),
+  colorPalette: z.array(z.string()).optional(),
+  mapType: z.string().optional(),
+  layout: z.enum(["inline", "fullscreen"]).optional(),
+});
+
+function buildIntentUserMessage(
+  userMessage: string,
+  data: Array<Record<string, number | string>>,
+  ctx: ChartAgentContext,
+): string {
+  const dataPreview = JSON.stringify(data.slice(0, 8), null, 2);
+  const ctxLines: string[] = [];
+
+  // [M5-Patch-Fix] Planner 显式传 → 优先级最高,在 ctxLines 最前面显眼位置注入,
+  //   提示 inner LLM 不要覆盖。fillIntentFields 也会二次校验 explicit 优先级。
+  if (ctx.explicitColorPalette && ctx.explicitColorPalette.length > 0) {
+    ctxLines.push(
+      `- ⚠️ Planner 已显式指定 colorPalette: ${JSON.stringify(ctx.explicitColorPalette)} (请勿覆盖)`,
+    );
+  }
+  if (ctx.explicitMapType) {
+    ctxLines.push(
+      `- ⚠️ Planner 已显式指定 mapType: "${ctx.explicitMapType}" (请勿覆盖)`,
+    );
+  }
+  if (ctx.explicitLayout) {
+    ctxLines.push(
+      `- ⚠️ Planner 已显式指定 layout: "${ctx.explicitLayout}" (请勿覆盖)`,
+    );
+  }
+
+  if (ctx.chartTypeHint) ctxLines.push(`- chartType 提示: ${ctx.chartTypeHint}`);
+  if (ctx.groupBy) ctxLines.push(`- 分组维度: ${ctx.groupBy} (${ctx.groupLabel ?? ""})`);
+  if (ctx.metrics?.length) {
+    const labels = ctx.metricLabels ?? {};
+    ctxLines.push(
+      `- 指标 (metrics): ${ctx.metrics.map((m) => `${m}=${labels[m] ?? m}`).join(", ")}`,
+    );
+  }
+  if (ctx.dataTruncated) {
+    ctxLines.push(
+      `- ⚠️ 数据已截断至 Top ${data.length} (原 ${ctx.originalRowCount ?? "?"} 条)`,
+    );
+  }
+
+  return `用户问题: ${userMessage}
+
+数据样本 (前 8 条):
+${dataPreview}
+
+数据上下文:
+${ctxLines.join("\n") || "(无)"}
+
+请直接输出 ChartIntent JSON,严格遵守硬规则。如果 Planner 已显式指定 colorPalette/mapType/layout,务必原样透传,不要修改。`;
 }
