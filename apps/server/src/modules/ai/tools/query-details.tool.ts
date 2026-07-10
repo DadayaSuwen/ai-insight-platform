@@ -1,83 +1,85 @@
 import { tool } from "@langchain/core/tools";
-import { QueryDetailsArgsSchema } from "./schemas";
-import { DatabaseService } from "../../database/database.service";
-import {
-  DIMENSION_BUILDERS,
-  METRIC_SELECTORS,
-  METRIC_LABELS,
-  applyFilters,
-  type QB,
-  type MetricKey,
-  type DimensionKey,
-} from "./dimensions";
+import { QueryDetailsArgsSchema, type QueryDetailsArgs } from "./schemas";
+import { DatasourceService } from "../../datasource/datasource.service";
+import { MetadataService } from "../../datasource/metadata/metadata.service";
+import { QueryGatewayService } from "../../datasource/query-gateway/query-gateway.service";
+import type { QueryIntent } from "@workspace/types";
+import { buildFieldMapping } from "./field-mapping";
 
-// ============================================================
-// 工具工厂
-// ============================================================
-export function createQueryDetailsTool(db: DatabaseService) {
+/**
+ * [Sprint 2] V3 query_details — 跨数据源通用聚合工具
+ *
+ * 接收 dataSourceId + 任意 table / column 名 (string),完全元数据驱动。
+ *
+ * 链路:
+ *   LLM args → buildIntent(args) → QueryGateway.executeIntent()
+ *     → validateIntent → translate → sql-guard → executor.executeRaw
+ *     → rows
+ */
+export function createQueryDetailsTool(
+  ds: DatasourceService,
+  metadata: MetadataService,
+  gateway: QueryGatewayService,
+  currentUserId: string, // [Sprint 5]
+) {
   return tool(
-    async (input: import("zod").infer<typeof QueryDetailsArgsSchema>) => {
+    async (input: QueryDetailsArgs) => {
       try {
-        const groupBy = ((input.groupBy ?? "product") as DimensionKey);
-        const metrics = (input.metrics ?? ["sales", "quantity", "profit"]) as MetricKey[];
-        const topN = Math.min(Math.max(input.topN ?? 10, 1), 100);
-        const sortBy = (input.sortBy ?? metrics[0]) as MetricKey;
-        const order = input.order ?? "desc";
-
-        // ★ groupBy='none' 强制 topN ≤ 50, 防止 SSE / 前端渲染撑爆
-        const safeTopN = groupBy === "none" ? Math.min(topN, 50) : topN;
-
-        const builder = DIMENSION_BUILDERS[groupBy];
-        if (!builder) {
-          return { error: `Unsupported groupBy: ${groupBy}` };
+        const record = await ds.getByIdForUser(input.dataSourceId, currentUserId);
+        if (!record) {
+          return {
+            error: `DataSource "${input.dataSourceId}" not found`,
+          };
         }
+        const snapshot = await metadata.get(input.dataSourceId);
 
-        // 1. 基础查询
-        let qb: QB = db.db.selectFrom("SalesOrderItem as s");
+        const intent: QueryIntent = {
+          dataSourceId: input.dataSourceId,
+          intentType: "aggregate",
+          table: input.table,
+          joins: [],
+          groupBy: input.groupBy,
+          metrics: input.metrics.map(m => ({
+            column: m.column,
+            agg: m.agg,
+            alias: m.alias,
+            label: m.label,
+          })),
+          filters: input.filters,
+          orderBy: input.orderBy,
+          limit:
+            input.groupBy.length === 0
+              ? Math.min(input.topN, 50)
+              : input.topN,
+        };
 
-        // 2. 维度 join
-        qb = builder.joins(qb);
+        // [Sprint 5] 传入 currentUserId
+        const result = await gateway.executeIntent(
+          input.dataSourceId,
+          currentUserId,
+          intent,
+          snapshot,
+        );
 
-        // 3. 过滤器(可能再追加 join)
-        qb = applyFilters(qb, input.filters ?? null);
-
-        // 4. SELECT key + 指标
-        qb = qb.select([
-          builder.key.as("key"),
-          ...metrics.map((m) => METRIC_SELECTORS[m].as(m)),
-        ]);
-
-        // 5. GROUP BY(明细模式无)
-        if (groupBy !== "none") {
-          qb = qb.groupBy(builder.key);
-        }
-
-        // 6. 排序 + 限行 (limit 强制)
-        qb = qb.orderBy(METRIC_SELECTORS[sortBy] as any, order).limit(safeTopN);
-
-        const result = await qb.execute();
-
-        const rows = result.map((r: any) => {
-          const row: Record<string, number | string> = { key: String(r.key) };
-          for (const m of metrics) {
-            row[m] =
-              m === "discount"
-                ? Number(Number(r[m] ?? 0).toFixed(4))
-                : Number(r[m] ?? 0);
-          }
-          return row;
-        });
-
+        const metricLabels = intent.metrics.reduce(
+          (acc, m) => ({ ...acc, [m.alias]: m.label }),
+          {} as Record<string, string>,
+        );
+        // [Sprint 5.7] 构建 fieldMapping: 物理名 → 中文名
+        const fieldMapping = buildFieldMapping(
+          snapshot,
+          intent.table,
+          intent.metrics.map(m => m.alias),
+        );
         return {
-          groupByField: groupBy,
-          label: builder.label,
-          metrics,
-          metricLabels: metrics.reduce(
-            (acc, m) => ({ ...acc, [m]: METRIC_LABELS[m] }),
-            {} as Record<string, string>,
-          ),
-          rows,
-          totalRows: rows.length,
+          dataSourceId: input.dataSourceId,
+          table: intent.table,
+          groupByField: intent.groupBy.join(","),
+          metrics: intent.metrics.map(m => m.alias),
+          metricLabels,
+          rows: result.rows,
+          totalRows: result.rowCount,
+          fieldMapping,
         };
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) };
@@ -86,7 +88,9 @@ export function createQueryDetailsTool(db: DatabaseService) {
     {
       name: "query_details",
       description:
-        "查询销售明细数据。**与 query_sales 互补**:query_sales 只做 month/category/region 三种聚合;query_details 支持任意维度(product/customer/state/city/subCategory/segment/shipMode/day/week/quarter)、Top-N、可计算利润/折扣/订单数,适合 'Top 10 客户' '最亏的产品' '各客户类型利润率' 这类问题。需要时**必须**用我而不是 query_sales。",
+        "**V3 通用查询工具**:对当前会话绑定的数据源执行任意维度的 SQL 聚合/明细查询。" +
+        "传入 table 名 + groupBy 列 + metrics (聚合表达式) + filters (WHERE 条件) + topN。" +
+        "**必须**先确认 system prompt 中的 MetadataSnapshot 列出该 table 与 column;若看不到全量字段,先调 get_table_schema。",
       schema: QueryDetailsArgsSchema,
     },
   );

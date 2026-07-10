@@ -36,8 +36,16 @@ services:
       DB_NAME: ai_insight
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
       SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+      # [Sprint 4] 必须注入 32 字节 base64 加密密钥,缺则后端启动失败
+      # 生成: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+      DB_CONFIG_ENCRYPTION_KEY: ${DB_CONFIG_ENCRYPTION_KEY:?DB_CONFIG_ENCRYPTION_KEY must be set (32-byte base64)}
+      # [Sprint 5] JWT 签名密钥 (≥32 字符),缺则后端启动失败
+      # 生成: openssl rand -base64 32
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (at least 32 chars)}
     ports:
       - "3000:3000"
+    # [Sprint 5.6] CSV 文件不再持久化 — 数据已灌入 PG 主库
+    # volumes 保留仅用于 multer 临时上传 (用完即删)
     restart: unless-stopped
 
   web:
@@ -56,3 +64,4 @@ services:
 
 volumes:
   postgres_data:
+  # [Sprint 5.6] uploads_data 卷已移除 — CSV 数据存入 PG 主库, 不再依赖文件持久化

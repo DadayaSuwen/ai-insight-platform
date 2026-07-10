@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { METRIC_LABELS, type MetricKey } from "./dimensions";
+import { METRIC_LABELS, type MetricKey } from "./metric-labels";
 import { type ChartIntent } from "./schemas";
 
 export interface EChartsOption {
@@ -52,17 +52,29 @@ export class ChartHelper {
    * [GUARD-V2-2] 主入口 — 26 类硬编码装配
    * [M5-Patch] 装配完成后顶层注入 color (来自 intent.colorPalette)
    */
+  /**
+   * [Sprint 5.7] 解析指标/列的中文显示名。
+   * 优先级: fieldMapping > METRIC_LABELS > 原始物理名
+   */
+  private resolveLabel(
+    key: string,
+    fieldMapping?: Record<string, string>,
+  ): string {
+    return fieldMapping?.[key] ?? METRIC_LABELS[key as MetricKey] ?? key;
+  }
+
   assemble(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
     ctx: AssembleCtx = {},
+    fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     if (!rows || rows.length === 0) {
       return this.getDefaultChart();
     }
 
     // [M5-Patch] 委托 dispatch(),装配完成后再注入 color (顶层覆盖 ECharts 主题色)
-    const baseOption = this.dispatch(intent, rows, ctx);
+    const baseOption = this.dispatch(intent, rows, ctx, fieldMapping);
     if (intent.colorPalette && intent.colorPalette.length > 0) {
       baseOption.color = [...intent.colorPalette];
     }
@@ -77,6 +89,7 @@ export class ChartHelper {
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
     ctx: AssembleCtx,
+    fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     switch (intent.chartType) {
       // 基础 5 类
@@ -88,72 +101,73 @@ export class ChartHelper {
           ctx,
           "line",
           intent.chartType === "area" ? { areaStyle: {} } : {},
+          fieldMapping,
         );
       case "bar":
-        return this.assembleXY(intent, rows, ctx, "bar");
+        return this.assembleXY(intent, rows, ctx, "bar", {}, fieldMapping);
       case "scatter":
-        return this.assembleScatter(intent, rows, ctx);
+        return this.assembleScatter(intent, rows, ctx, fieldMapping);
       case "pie":
-        return this.assemblePie(intent, rows, ctx);
+        return this.assemblePie(intent, rows, ctx, fieldMapping);
 
       // 复杂图
       case "heatmap":
-        return this.assembleHeatmap(intent, rows, ctx);
+        return this.assembleHeatmap(intent, rows, ctx, fieldMapping);
       case "treemap":
-        return this.assembleTreemap(intent, rows, ctx);
+        return this.assembleTreemap(intent, rows, ctx, fieldMapping);
       case "sankey":
-        return this.assembleSankey(intent, rows, ctx);
+        return this.assembleSankey(intent, rows, ctx, fieldMapping);
       case "funnel":
-        return this.assembleFunnel(intent, rows, ctx);
+        return this.assembleFunnel(intent, rows, ctx, fieldMapping);
       case "gauge":
-        return this.assembleGauge(intent, rows, ctx);
+        return this.assembleGauge(intent, rows, ctx, fieldMapping);
       case "radar":
-        return this.assembleRadar(intent, rows, ctx);
+        return this.assembleRadar(intent, rows, ctx, fieldMapping);
       case "parallel":
-        return this.assembleParallel(intent, rows, ctx);
+        return this.assembleParallel(intent, rows, ctx, fieldMapping);
       case "sunburst":
-        return this.assembleSunburst(intent, rows, ctx);
+        return this.assembleSunburst(intent, rows, ctx, fieldMapping);
       case "boxplot":
-        return this.assembleBoxplot(intent, rows, ctx);
+        return this.assembleBoxplot(intent, rows, ctx, fieldMapping);
       case "candlestick":
-        return this.assembleCandlestick(intent, rows, ctx);
+        return this.assembleCandlestick(intent, rows, ctx, fieldMapping);
       case "graph":
-        return this.assembleGraph(intent, rows, ctx);
+        return this.assembleGraph(intent, rows, ctx, fieldMapping);
       case "tree":
-        return this.assembleTree(intent, rows, ctx);
+        return this.assembleTree(intent, rows, ctx, fieldMapping);
       case "themeRiver":
-        return this.assembleThemeRiver(intent, rows, ctx);
+        return this.assembleThemeRiver(intent, rows, ctx, fieldMapping);
       case "pictorialBar":
-        return this.assemblePictorialBar(intent, rows, ctx);
+        return this.assemblePictorialBar(intent, rows, ctx, fieldMapping);
 
       // 3D 系列
       case "bar3D":
-        return this.assembleBar3D(intent, rows, ctx);
+        return this.assembleBar3D(intent, rows, ctx, fieldMapping);
       case "scatter3D":
-        return this.assembleScatter3D(intent, rows, ctx);
+        return this.assembleScatter3D(intent, rows, ctx, fieldMapping);
       case "surface3D":
-        return this.assembleSurface3D(intent, rows, ctx);
+        return this.assembleSurface3D(intent, rows, ctx, fieldMapping);
       case "line3D":
-        return this.assembleLine3D(intent, rows, ctx);
+        return this.assembleLine3D(intent, rows, ctx, fieldMapping);
       case "points3D":
-        return this.assemblePoints3D(intent, rows, ctx);
+        return this.assemblePoints3D(intent, rows, ctx, fieldMapping);
       case "lines3D":
-        return this.assembleLines3D(intent, rows, ctx);
+        return this.assembleLines3D(intent, rows, ctx, fieldMapping);
 
       // 地理 (map3D 降级 bar)
       case "map3D":
         this.logger.warn(
           "[M13-V2] map3D 暂不支持 GeoJSON,降级为 bar (rewriteMap3DToBar 也兜底)",
         );
-        return this.assembleXY(intent, rows, ctx, "bar");
+        return this.assembleXY(intent, rows, ctx, "bar", {}, fieldMapping);
       case "map":
-        return this.assembleMap(intent, rows, ctx);
+        return this.assembleMap(intent, rows, ctx, fieldMapping);
 
       // 扩展插件
       case "liquidFill":
-        return this.assembleLiquidFill(intent, rows, ctx);
+        return this.assembleLiquidFill(intent, rows, ctx, fieldMapping);
       case "wordCloud":
-        return this.assembleWordCloud(intent, rows, ctx);
+        return this.assembleWordCloud(intent, rows, ctx, fieldMapping);
 
       // custom 不支持代码装配
       case "custom":
@@ -183,6 +197,7 @@ export class ChartHelper {
     ctx: AssembleCtx,
     type: "line" | "bar",
     extraSeriesOpts: Record<string, unknown> = {},
+    fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const metrics = (intent.metrics && intent.metrics.length > 0
       ? intent.metrics
@@ -190,7 +205,7 @@ export class ChartHelper {
     const needMultiY = this.needsMultipleYAxis(metrics);
     const xData = rows.map((r) => String(r[intent.xField] ?? ""));
     const series = metrics.map((m, i) => ({
-      name: METRIC_LABELS[m as MetricKey] ?? m,
+      name: this.resolveLabel(m, fieldMapping),
       type,
       data: rows.map((r) => Number(r[m] ?? 0)),
       yAxisIndex: needMultiY ? i : 0,
@@ -200,15 +215,15 @@ export class ChartHelper {
     const yAxis = needMultiY
       ? metrics.map((m, i) => ({
           type: "value",
-          name: METRIC_LABELS[m as MetricKey] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           position: i === 0 ? "left" : "right",
         }))
-      : { type: "value", name: METRIC_LABELS[metrics[0] as MetricKey] ?? metrics[0] };
+      : { type: "value", name: this.resolveLabel(metrics[0], fieldMapping) };
     return {
       tooltip: { trigger: "axis" },
       ...(metrics.length > 1
         ? {
-            legend: { data: metrics.map((m) => METRIC_LABELS[m as MetricKey] ?? m) },
+            legend: { data: metrics.map((m) => this.resolveLabel(m, fieldMapping)) },
           }
         : {}),
       xAxis: { type: "category", data: xData },
@@ -220,7 +235,7 @@ export class ChartHelper {
   private assembleScatter(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const xField = intent.xField;
     const yField = intent.yField;
@@ -241,7 +256,7 @@ export class ChartHelper {
   private assemblePie(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -253,7 +268,7 @@ export class ChartHelper {
       },
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           type: "pie",
           radius: "50%",
           data: rows.map((r) => ({
@@ -279,7 +294,7 @@ export class ChartHelper {
   private assembleHeatmap(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const xData = Array.from(
@@ -323,7 +338,7 @@ export class ChartHelper {
   private assembleTreemap(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -344,7 +359,7 @@ export class ChartHelper {
   private assembleSankey(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const names = rows.map((r) => String(r[intent.xField] ?? ""));
@@ -364,7 +379,7 @@ export class ChartHelper {
   private assembleFunnel(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const sorted = [...rows].sort(
@@ -375,7 +390,7 @@ export class ChartHelper {
       legend: { data: sorted.map((r) => String(r[intent.xField] ?? "")) },
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           type: "funnel",
           left: "10%",
           width: "80%",
@@ -392,7 +407,7 @@ export class ChartHelper {
   private assembleGauge(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const values = rows.map((r) => Number(r[m] ?? 0));
@@ -402,7 +417,7 @@ export class ChartHelper {
       tooltip: {},
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           type: "gauge",
           min: 0,
           max,
@@ -416,7 +431,7 @@ export class ChartHelper {
   private assembleRadar(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const max = Math.max(...rows.map((r) => Number(r[m] ?? 0)), 1) * 1.1;
@@ -430,12 +445,12 @@ export class ChartHelper {
       },
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           type: "radar",
           data: [
             {
               value: rows.map((r) => Number(r[m] ?? 0)),
-              name: METRIC_LABELS[m] ?? m,
+              name: this.resolveLabel(m, fieldMapping),
             },
           ],
         },
@@ -446,7 +461,7 @@ export class ChartHelper {
   private assembleParallel(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const metrics = (intent.metrics && intent.metrics.length > 0
       ? intent.metrics
@@ -455,7 +470,7 @@ export class ChartHelper {
       tooltip: {},
       parallelAxis: metrics.map((m) => ({
         dim: metrics.indexOf(m),
-        name: METRIC_LABELS[m] ?? m,
+        name: this.resolveLabel(m, fieldMapping),
       })),
       parallel: { left: 50, right: 50, bottom: 50, top: 50 },
       series: [
@@ -471,7 +486,7 @@ export class ChartHelper {
   private assembleSunburst(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -496,7 +511,7 @@ export class ChartHelper {
   private assembleBoxplot(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const data = rows.map((r) => {
@@ -510,7 +525,7 @@ export class ChartHelper {
       tooltip: {},
       xAxis: { type: "category", data: rows.map((r) => String(r[intent.xField] ?? "")) },
       yAxis: { type: "value" },
-      series: [{ name: METRIC_LABELS[m] ?? m, type: "boxplot", data }],
+      series: [{ name: this.resolveLabel(m, fieldMapping), type: "boxplot", data }],
     };
   }
 
@@ -520,7 +535,7 @@ export class ChartHelper {
   private assembleCandlestick(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const data = rows.map((r) => {
@@ -533,14 +548,14 @@ export class ChartHelper {
       tooltip: {},
       xAxis: { type: "category", data: rows.map((r) => String(r[intent.xField] ?? "")) },
       yAxis: { type: "value" },
-      series: [{ name: METRIC_LABELS[m] ?? m, type: "candlestick", data }],
+      series: [{ name: this.resolveLabel(m, fieldMapping), type: "candlestick", data }],
     };
   }
 
   private assembleGraph(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const names = rows.map((r) => String(r[intent.xField] ?? ""));
@@ -569,7 +584,7 @@ export class ChartHelper {
   private assembleTree(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -600,7 +615,7 @@ export class ChartHelper {
   private assembleThemeRiver(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -622,7 +637,7 @@ export class ChartHelper {
   private assemblePictorialBar(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {
@@ -631,7 +646,7 @@ export class ChartHelper {
       yAxis: { type: "value" },
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: this.resolveLabel(m, fieldMapping),
           type: "pictorialBar",
           symbol: "roundRect",
           data: rows.map((r) => Number(r[m] ?? 0)),
@@ -666,7 +681,7 @@ export class ChartHelper {
   private assembleBar3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     this.require3DCoordinates(rows, "bar3D");
     return {
@@ -693,7 +708,7 @@ export class ChartHelper {
   private assembleScatter3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     this.require3DCoordinates(rows, "scatter3D");
     return {
@@ -715,7 +730,7 @@ export class ChartHelper {
   private assembleSurface3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     this.require3DCoordinates(rows, "surface3D");
     return {
@@ -736,7 +751,7 @@ export class ChartHelper {
   private assembleLine3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     this.require3DCoordinates(rows, "line3D");
     return {
@@ -757,7 +772,7 @@ export class ChartHelper {
   private assemblePoints3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     this.require3DCoordinates(rows, "points3D");
     return {
@@ -779,7 +794,7 @@ export class ChartHelper {
   private assembleLines3D(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     if (rows.length === 0) return this.getDefaultChart();
     const data = rows.map((r) => [
@@ -803,28 +818,61 @@ export class ChartHelper {
   private assembleMap(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
-    // [M5-Patch] 透传 intent.mapType,默认 china。前端 ensureMap 负责加载对应 GeoJSON,
-    //   若资源不存在 → ensureMap 抛错 → ChartErrorBoundary 兜底表格。
     const mapType = intent.mapType ?? "china";
+    const data = rows.map((r) => ({
+      name: String(r[intent.xField] ?? ""),
+      value: Number(r[m] ?? 0),
+    }));
+    const values = data.map((d) => d.value).filter((v) => v > 0);
+    const min = values.length > 0 ? Math.min(...values) : 0;
+    const max = values.length > 0 ? Math.max(...values) : 1;
+    const label = this.resolveLabel(m, fieldMapping);
+
     return {
-      tooltip: { trigger: "item", formatter: "{b}: {c}" },
+      tooltip: {
+        trigger: "item",
+        formatter: (params: unknown) => {
+          const p = params as { name: string; value?: number };
+          if (p.value != null) {
+            return `${p.name}<br/>${label}: ${p.value.toLocaleString()}`;
+          }
+          return `${p.name}<br/>无数据`;
+        },
+      },
+      visualMap: {
+        min,
+        max,
+        left: "left",
+        bottom: 10,
+        calculable: true,
+        orient: "horizontal",
+        inRange: {
+          color: ["#e0f3f8", "#abd9e9", "#74add1", "#4575b4", "#313695"],
+        },
+        text: ["高", "低"],
+        textStyle: { fontSize: 10 },
+      },
       geo: {
         map: mapType,
         roam: true,
-        label: { show: true },
+        label: { show: false },
+        emphasis: {
+          label: { show: true, fontSize: 10 },
+          itemStyle: { areaColor: "#ffd700" },
+        },
       },
       series: [
         {
-          name: METRIC_LABELS[m] ?? m,
+          name: label,
           type: "map",
           geoIndex: 0,
-          data: rows.map((r) => ({
-            name: String(r[intent.xField] ?? ""),
-            value: Number(r[m] ?? 0),
-          })),
+          data,
+          emphasis: {
+            label: { show: true, fontSize: 12, fontWeight: "bold" },
+          },
         },
       ],
     };
@@ -837,7 +885,7 @@ export class ChartHelper {
   private assembleLiquidFill(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     const values = rows.map((r) => Number(r[m] ?? 0));
@@ -857,7 +905,7 @@ export class ChartHelper {
   private assembleWordCloud(
     intent: ChartIntent,
     rows: Array<Record<string, number | string>>,
-    _ctx: AssembleCtx,
+    _ctx: AssembleCtx, fieldMapping?: Record<string, string>,  // [Sprint 5.7]
   ): EChartsOption {
     const m = (intent.metrics?.[0] ?? intent.yField) as MetricKey;
     return {

@@ -52,11 +52,11 @@ export class ToolResultContext {
   }
 
   /**
-   * 拿当前 session 最近一条 "数据类" 工具的结果 (query_sales / query_details)。
+   * 拿当前 session 最近一条 "数据类" 工具的结果 (query_details / gen_chart)。
    * generate_insight 应该分析数据,不是分析图表或上一次的洞察。
    */
   getLatestData(sessionId: string): { name: string; result: unknown } | null {
-    const dataNames = new Set(["query_sales", "query_details", "gen_chart"]);
+    const dataNames = new Set(["query_details", "gen_chart"]);
     for (let i = this.store.length - 1; i >= 0; i--) {
       if (this.store[i].sessionId === sessionId && dataNames.has(this.store[i].name)) {
         return { name: this.store[i].name, result: this.store[i].result };

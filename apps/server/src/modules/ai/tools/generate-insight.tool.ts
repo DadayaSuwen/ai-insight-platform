@@ -39,14 +39,17 @@ export function createGenerateInsightTool(
         if (needsFallback && input.sessionId) {
           const latest = context.getLatestData(input.sessionId);
           if (latest) {
+            // [Sprint 5.7+] 提取实际数据: gen_chart 有 rows + metrics, query_details 有 rows
+            const payload = latest.result as Record<string, unknown>;
             data = {
               source: latest.name,
-              payload: latest.result,
+              rows: payload.rows ?? payload,
+              metrics: payload.metrics ?? [],
+              metricLabels: payload.metricLabels ?? {},
             };
-            // 不静默 fallback,标记来源让前端能看到
           } else {
             return {
-              error: "没有可分析的数据。请先调用 query_sales 或 query_details 拿到数据,再让我分析。",
+              error: "没有可分析的数据。请先调用 query_details 或 gen_chart 拿到数据,再让我分析。",
             };
           }
         }
@@ -64,7 +67,7 @@ export function createGenerateInsightTool(
     {
       name: "generate_insight",
       description:
-        "从一组数据(通常是 query_sales 或 query_details 的返回)中抽取商业洞察(trend/anomaly/opportunity/risk)。**当用户问'为什么'、'原因'、'有什么问题'、'机会'、'分析一下'、'总结一下'、'给我洞察'、'风险'、'增长点'时,在拿到数据后必须紧接着调用我**。如果调用时没传 data 参数,系统会自动从最近的 query_sales / query_details 结果补全。",
+        "从一组数据(通常是 query_details 或 gen_chart 的返回)中抽取商业洞察(trend/anomaly/opportunity/risk)。**当用户问'为什么'、'原因'、'有什么问题'、'机会'、'分析一下'、'总结一下'、'给我洞察'、'风险'、'增长点'时,在拿到数据后必须紧接着调用我**。如果调用时没传 data 参数,系统会自动从最近的 query_details / gen_chart 结果补全。",
       schema: GenerateInsightArgsSchema,
     },
   );

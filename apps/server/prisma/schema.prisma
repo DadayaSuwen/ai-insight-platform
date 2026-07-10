@@ -7,55 +7,73 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Business data tables
-model Customer {
-  id      String       @id
-  name    String
-  segment String
-  region  String
-  state   String
-  city    String
-  orders  SalesOrder[]
+// ─── Multi-Datasource V3 (Sprint 1) ───────────────────────────────
+// [Sprint 5.5] 业务表(Customer/Product/SalesOrder/SalesOrderItem)已删除。
+// 主数据库只存平台元数据。业务数据全部通过外部 DataSource 接入。
+// [架构 V3] DataSource 是外部数据源的注册表。一行 DataSource =
+// 一份外部 PG/MySQL 库 + 它的 schemaCache(Sprint 1)或一份上传的
+// CSV (Sprint 3)。聊天 session 绑定一个 dataSourceId,PlannerAgent
+// 从 MetadataService 读对应 snapshot 注入 system prompt。
+//
+// Sprint 1: 仅 Postgres 类型入库;Mysql/DuckDB 通过 connectionConfig
+// JSON 字段传递,Sprint 2/3 由 gateway 解析。
+//
+// [Sprint 5] Multi-Tenant:DataSource / ChatSession / ChatMessage 全部
+// 强关联 userId。QueryGateway 在执行前校验 ownership,不匹配 → 403。
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  dataSources  DataSource[]
+  sessions     ChatSession[]
 }
 
-model Product {
-  id          String           @id
-  name        String
-  category    String
-  subCategory String
-  orderItems  SalesOrderItem[]
+model DataSource {
+  id              String                 @id
+  userId          String                 // [Sprint 5] 强制关联,删除时级联
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  type            String                 // 'postgres' | 'mysql' | 'duckdb-csv'
+  connectionConfig Json                  // ConnectionConfig (Zod 验证,见 packages/types/src/datasource.ts)
+  status          String                 @default("active")  // 'active' | 'paused' | 'error'
+  lastError       String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  snapshots       DataSourceSnapshot[]
+
+  @@index([userId])
 }
 
-model SalesOrder {
-  id         String           @id
-  orderDate  DateTime
-  shipDate   DateTime?
-  shipMode   String
-  customerId String
-  customer   Customer         @relation(fields: [customerId], references: [id])
-  orderItems SalesOrderItem[]
-}
+model DataSourceSnapshot {
+  id            String      @id @default(uuid())
+  dataSourceId  String
+  dataSource    DataSource  @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  payload       Json        // MetadataSnapshot 序列化
+  fetchedAt     DateTime    @default(now())
+  tokenEstimate Int         @default(0)
+  truncated     Boolean     @default(false)
 
-model SalesOrderItem {
-  id        String     @id @default(cuid())
-  orderId   String
-  order     SalesOrder @relation(fields: [orderId], references: [id])
-  productId String
-  product   Product    @relation(fields: [productId], references: [id])
-  sales     Float
-  quantity  Int
-  discount  Float
-  profit    Float
+  @@index([dataSourceId, fetchedAt])
 }
 
 // Chat history tables
 model ChatSession {
-  id        String        @id @default(uuid())
-  userId    String?
-  title     String?
-  messages  ChatMessage[]
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id           String        @id @default(uuid())
+  userId       String        // [Sprint 5] 必填,删除时级联
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String?
+  // [Sprint 2] V3: 每个 session 绑定一个 DataSource(可选);null 表示用 superstore-demo 兜底
+  dataSourceId String?
+  messages     ChatMessage[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([dataSourceId])
 }
 
 model ChatMessage {

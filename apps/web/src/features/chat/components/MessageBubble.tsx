@@ -23,6 +23,7 @@ function ChartWithFallback({
   chartRefs,
   onExportPng,
   mapType,
+  fieldMapping,
 }: {
   chartKey: string;
   chartOption: Record<string, unknown>;
@@ -31,6 +32,8 @@ function ChartWithFallback({
   onExportPng: (key: string) => void;
   /** [M5-Patch] 地图类型,来自后端 intent.mapType */
   mapType?: string;
+  /** [Sprint 5.7] 物理名 → 中文名映射表 */
+  fieldMapping?: Record<string, string>;
 }) {
   // [M13-V2] GUARD-V2-3: V2 移除 showTable state, fallbackRows 直接透传到 Boundary
   // Canvas 像素探针触发 onError 时, Boundary 自动渲染 CollapsibleTable (无需用户点击)
@@ -40,7 +43,8 @@ function ChartWithFallback({
         onError={(err) => {
           console.error("[GUARD-2a / GUARD-V2-3] chart render failed:", err);
         }}
-        fallbackRows={fallbackRows}  // [M13-V2] 直接传 rows
+        fallbackRows={fallbackRows} // [M13-V2] 直接传 rows
+        fieldMapping={fieldMapping} // [Sprint 5.7]
       >
         <DynamicChart
           ref={(handle) => {
@@ -48,7 +52,7 @@ function ChartWithFallback({
             else chartRefs.current.delete(chartKey);
           }}
           option={chartOption}
-          mapType={mapType}  // [M5-Patch] 透传到 ensureMap
+          mapType={mapType} // [M5-Patch] 透传到 ensureMap
           enableResize={true}
         />
       </ChartErrorBoundary>
@@ -78,9 +82,15 @@ function ChartWithFallback({
 function MessageBubble({
   message,
   onSuggestionClick,
+  onRetry,
+  onEdit,
 }: {
   message: ChatMessage;
   onSuggestionClick: (text: string) => void;
+  /** [Sprint 5.7+] 重新生成: 重新发送上一条用户消息 */
+  onRetry?: () => void;
+  /** [Sprint 5.7+] 编辑: 将用户消息文本填入输入框 */
+  onEdit?: (text: string) => void;
 }) {
   const isUser = message.role === "user";
 
@@ -108,11 +118,58 @@ function MessageBubble({
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div
-          className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm text-white shadow-sm"
-          style={{ background: "var(--accent)" }}
-        >
-          {message.content}
+        <div className="max-w-[80%]">
+          <div
+            className="rounded-2xl rounded-br-sm px-4 py-2.5 text-sm text-white shadow-sm"
+            style={{ background: "var(--accent)" }}
+          >
+            {message.content}
+          </div>
+          <div className="mt-1 flex justify-end gap-1">
+            {/* 编辑 */}
+            {onEdit && (
+              <button
+                onClick={() => onEdit(message.content)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-70"
+                style={{ color: "var(--text-muted)" }}
+                title="编辑"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                编辑
+              </button>
+            )}
+            {/* 复制 */}
+            <button
+              onClick={() => navigator.clipboard.writeText(message.content).catch(() => {})}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-70"
+              style={{ color: "var(--text-muted)" }}
+              title="复制"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              复制
+            </button>
+            {/* 重新生成 */}
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-70"
+                style={{ color: "var(--text-muted)" }}
+                title="重新生成"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+                重试
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -125,20 +182,24 @@ function MessageBubble({
   const isEmptyThinking =
     !msg.isFinal && !msg.content && (msg.toolCalls?.length ?? 0) === 0;
 
-  // 1. 如果是空白思考状态，渲染一个极简的打字机气泡，防止出现丑陋的空气泡
+  // 1. 如果是空白思考状态，渲染思考中占位
   if (isEmptyThinking) {
     return (
       <div className="flex justify-start">
         <div
-          className="flex items-center gap-1 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm"
+          className="flex items-center gap-2 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm"
           style={{
             background: "var(--bg-primary)",
             border: "1px solid var(--border)",
           }}
         >
-          <span className="thinking-dot"></span>
-          <span className="thinking-dot"></span>
-          <span className="thinking-dot"></span>
+          <svg className="animate-spin-slow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
+            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+          </svg>
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            思考中...
+          </span>
         </div>
       </div>
     );
@@ -154,58 +215,9 @@ function MessageBubble({
           border: "1px solid var(--border)",
         }}
       >
-        {/* (A) 工具调用状态时间线 (合并连续相同工具) */}
+        {/* (A) 深度思考过程 — 可折叠步骤时间线 */}
         {(msg.toolCalls?.length ?? 0) > 0 && (
-          <div
-            className="mb-3 space-y-2 border-b pb-3"
-            style={{ borderColor: "var(--border)" }}
-          >
-            {msg
-              .toolCalls!.reduce(
-                (
-                  acc: { name: string; count: number; hasResult: boolean }[],
-                  call,
-                  idx,
-                ) => {
-                  // 如果和上一个工具同名，累加次数
-                  if (
-                    acc.length > 0 &&
-                    acc[acc.length - 1].name === call.name
-                  ) {
-                    acc[acc.length - 1].count++;
-                    // 只要当前有结果，就把这组标记为有结果
-                    if ((msg.toolResults?.length ?? 0) > idx) {
-                      acc[acc.length - 1].hasResult = true;
-                    }
-                  } else {
-                    acc.push({
-                      name: call.name,
-                      count: 1,
-                      hasResult: (msg.toolResults?.length ?? 0) > idx,
-                    });
-                  }
-                  return acc;
-                },
-                [],
-              )
-              .map((item, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 text-xs"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {item.hasResult ? (
-                    <span style={{ color: "var(--success)" }}>✓</span>
-                  ) : (
-                    <span className="animate-pulse">⏳</span>
-                  )}
-                  <span>
-                    {item.hasResult ? "已完成" : "正在执行"}：{item.name}
-                    {item.count > 1 && ` (共 ${item.count} 次)`}
-                  </span>
-                </div>
-              ))}
-          </div>
+          <ThinkProcess msg={msg} />
         )}
 
         {/* (B) 工具返回的结果 (图表 / 表格 / 洞察) */}
@@ -214,7 +226,9 @@ function MessageBubble({
             {msg.toolResults!.map((res, idx) => {
               if (res.name === "gen_chart" && res.result.chart) {
                 // M3 chartSource 标签: 🤖 LLM 生成 / 📊 模板兜底
-                const chartSource = res.result.chartSource as string | undefined;
+                const chartSource = res.result.chartSource as
+                  | string
+                  | undefined;
                 // M5: ref 用来调 exportPng (GUARD-5b)
                 const chartKey = res.id ?? `chart-${idx}`;
                 // [M6-L4] 提取 fallbackRows 供表格降级用
@@ -236,7 +250,9 @@ function MessageBubble({
                     <div className="mb-2 flex items-center justify-between gap-1 text-[10px]">
                       {chartSource && (
                         <span style={{ color: "var(--text-muted)" }}>
-                          {chartSource === "fallback" ? "📊 模板生成" : "🤖 LLM 生成"}
+                          {chartSource === "fallback"
+                            ? "📊 模板生成"
+                            : "🤖 LLM 生成"}
                         </span>
                       )}
                       {/* [M5-Patch] 全屏标识提示 */}
@@ -253,22 +269,20 @@ function MessageBubble({
                       chartRefs={chartRefs}
                       onExportPng={handleExportPng}
                       mapType={intent.mapType}
+                      fieldMapping={
+                        res.result.fieldMapping as
+                          | Record<string, string>
+                          | undefined
+                      }
                     />
                   </div>
-                );
-              }
-              if (res.name === "query_sales" && res.result.summary) {
-                return (
-                  <CollapsibleTable
-                    key={idx}
-                    rows={res.result.summary as any[]}
-                  />
                 );
               }
               // query_details: 返回 { groupByField, label, metrics, metricLabels, rows }
               if (res.name === "query_details" && res.result.rows) {
                 const label = (res.result.label as string) ?? "维度";
-                const metricLabels = (res.result.metricLabels as Record<string, string>) ?? {};
+                const metricLabels =
+                  (res.result.metricLabels as Record<string, string>) ?? {};
                 const rows = res.result.rows as Record<string, any>[];
                 return (
                   <div key={idx} className="space-y-1">
@@ -290,18 +304,20 @@ function MessageBubble({
                         </span>
                       ))}
                     </div>
-                    <CollapsibleTable rows={rows} />
+                    <CollapsibleTable
+                      rows={rows}
+                      fieldMapping={
+                        res.result.fieldMapping as
+                          | Record<string, string>
+                          | undefined
+                      }
+                    />
                   </div>
                 );
               }
               // generate_insight: 返回 { summary, insights[], recommendation }
               if (res.name === "generate_insight" && res.result.insights) {
-                return (
-                  <InsightPanel
-                    key={idx}
-                    data={res.result as any}
-                  />
-                );
+                return <InsightPanel key={idx} data={res.result as any} />;
               }
               return null;
             })}
@@ -310,8 +326,11 @@ function MessageBubble({
 
         {/* (B-Skeleton) generate_insight tool_call 已发出但 tool_result 未到 */}
         {!msg.isFinal &&
-          (msg.toolCalls?.some((c) => c.name === "generate_insight") ?? false) &&
-          !(msg.toolResults?.some((r) => r.name === "generate_insight") ?? false) && (
+          (msg.toolCalls?.some((c) => c.name === "generate_insight") ??
+            false) &&
+          !(
+            msg.toolResults?.some((r) => r.name === "generate_insight") ?? false
+          ) && (
             <div className="mb-3">
               <InsightSkeleton />
             </div>
@@ -371,7 +390,38 @@ function MessageBubble({
           </div>
         )}
 
-        {/* (E) 错误信息 */}
+        {/* (E) AI 回复操作: 复制 */}
+        {msg.isFinal && msg.content && (
+          <div className="mt-2 flex items-center gap-1 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+            <button
+              onClick={() => {
+                navigator.clipboard
+                  .writeText(msg.content)
+                  .then(() => {
+                    // 短暂视觉反馈
+                  })
+                  .catch(() => {});
+              }}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors hover:opacity-80"
+              style={{ color: "var(--text-muted)" }}
+              title="复制回复"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              复制
+            </button>
+          </div>
+        )}
+        {/* (F) 错误信息 */}
         {msg.error && (
           <div
             className="mt-2 rounded-lg p-2 text-xs"
@@ -380,7 +430,7 @@ function MessageBubble({
             {msg.error.message}
           </div>
         )}
-        {/* (F) 动态追问按钮 */}
+        {/* (G) 动态追问按钮 */}
         {msg.isFinal && (
           <DynamicSuggestions
             message={msg}
@@ -394,10 +444,67 @@ function MessageBubble({
   );
 }
 
-// 通用的可折叠数据表格组件 (完全动态)
-// [M13-V2] GUARD-V2-3: CollapsibleTable 已抽出到独立文件 ./CollapsibleTable.tsx
-// 旧的本地定义已删除, 顶部 import 指向 ./CollapsibleTable.tsx
-// CollapsibleTable_DELETED_PLACEHOLDER 已被替换
+// [Sprint 5.7+] 思考过程 — 可折叠步骤
+const TOOL_META: Record<string, { label: string; color: string }> = {
+  query_details: { label: "查询数据", color: "#3b82f6" },
+  gen_chart: { label: "生成图表", color: "#8b5cf6" },
+  generate_insight: { label: "分析洞察", color: "#f59e0b" },
+  get_table_schema: { label: "探索结构", color: "#6b7280" },
+};
+
+function ThinkProcess({ msg }: { msg: AssistantMessage }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const allDone = msg.toolCalls!.length === (msg.toolResults?.length ?? 0);
+  const steps = msg.toolCalls!.reduce(
+    (acc: { name: string; count: number; done: boolean }[], call, idx) => {
+      const done = (msg.toolResults?.length ?? 0) > idx;
+      const last = acc[acc.length - 1];
+      if (last && last.name === call.name && last.done === done) { last.count++; return acc; }
+      acc.push({ name: call.name, count: 1, done });
+      return acc;
+    }, [],
+  );
+
+  return (
+    <div className="mb-3 border-b pb-2" style={{ borderColor: "var(--border)" }}>
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex w-full items-center gap-1.5 text-xs"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+        </svg>
+        <span>{allDone ? "思考完成" : "思考中"}</span>
+        <span className="tabular-nums">· {steps.length} 步</span>
+        <span className="ml-auto">{collapsed ? "▶" : "▼"}</span>
+      </button>
+      {!collapsed && (
+        <div className="ml-5 mt-1.5 space-y-1">
+          {steps.map((step, i) => {
+            const meta = TOOL_META[step.name] ?? { label: step.name, color: "#6b7280" };
+            return (
+              <div key={i} className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                <span className="flex h-2 w-2 rounded-full" style={{ background: step.done ? "var(--success)" : meta.color }}>
+                  {step.done && (
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{margin:"auto"}}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </span>
+                <span style={{ color: step.done ? "var(--text-secondary)" : "var(--text-primary)" }}>
+                  {meta.label}
+                </span>
+                {step.count > 1 && <span>×{step.count}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // 智能追问组件
 function DynamicSuggestions({
@@ -410,10 +517,9 @@ function DynamicSuggestions({
   let suggestions: { label: string; query: string }[] = [];
 
   const hasChart = message.toolResults?.some((r) => r.name === "gen_chart");
-  const hasTable =
-    message.toolResults?.some(
-      (r) => r.name === "query_sales" || r.name === "query_details",
-    );
+  const hasTable = message.toolResults?.some(
+    (r) => r.name === "query_details" || r.name === "gen_chart",
+  );
   const hasInsight = message.toolResults?.some(
     (r) => r.name === "generate_insight",
   );

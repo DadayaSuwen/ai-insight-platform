@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
@@ -366,12 +367,20 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private defaultOpenAIChat() {
+  /**
+   * [Sprint 5 修复] 默认 OpenAI 占位 — 没有 apiKey 时不实际构造 ChatOpenAI
+   * (其构造器 v0.3.11 缺 key 必 throw),而是返回一个延迟构造的 stub。
+   * 用户调 Settings → POST /llm/config 后,reload() 会覆盖 this.chat。
+   */
+  private defaultOpenAIChat(): ChatOpenAI {
+    // 构造一个空 stub,apiKey 是 'unconfigured' 占位 — ChatOpenAI 不在构造时
+    // 校验,只有第一次 invoke 才报 401。我们希望启动不崩,所以接受这个延迟错误。
     return createChatModel({
       provider: LLMProvider.OPENAI,
       model: "gpt-4o-mini",
       temperature: 0,
-    });
+      apiKey: "unconfigured-set-via-llm-config",
+    }) as ChatOpenAI;
   }
 
   private getRequiredChat(): ReturnType<typeof createChatModel> {

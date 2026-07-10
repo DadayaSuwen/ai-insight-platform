@@ -168,7 +168,13 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
       });
 
       try {
-        const res = await fetch(url, { signal: controller.signal });
+        const token = localStorage.getItem("aiip.auth.token.v1");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers,
+        });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }

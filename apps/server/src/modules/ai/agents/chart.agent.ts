@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 import { LlmService } from "../llm/llm.service";
-import { METRIC_LABELS, type MetricKey } from "../tools/dimensions";
+import { METRIC_LABELS, type MetricKey } from "../tools/metric-labels";
 import type { EChartSeriesType } from "@workspace/types";
 import { traceLogger } from "../debug-log";
 import { type ChartIntent } from "../tools/schemas";
@@ -33,8 +33,8 @@ export interface ChartAgentContext {
   groupBy?: string;
   /** groupBy 中文标签 (用于 title) */
   groupLabel?: string;
-  /** SQL 已计算的指标列表 */
-  metrics?: MetricKey[];
+  /** SQL 已计算的指标列表 — [Sprint 2] 改为 string[],不再限 MetricKey enum */
+  metrics?: string[];
   metricLabels?: Record<string, string>;
   /** [GUARD-1a] 数据是否被截断 (rows > 100 时) */
   dataTruncated?: boolean;

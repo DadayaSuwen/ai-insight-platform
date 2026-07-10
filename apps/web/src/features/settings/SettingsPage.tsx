@@ -4,6 +4,9 @@ import { useAppStore } from '../../core/store';
 import type { LLMConfig } from '@workspace/types';
 import { LLMProvider } from '@workspace/types';
 import { toast } from '../../store/toast';
+import DataSourcesTab from '../datasources/DataSourcesTab';
+
+type SettingsTab = 'llm' | 'datasources';
 
 const PROVIDER_LABELS: Record<LLMProvider, string> = {
   [LLMProvider.OPENAI]: 'OpenAI',
@@ -49,6 +52,7 @@ function HealthDot({ ok }: { ok: boolean | undefined }) {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<SettingsTab>('llm');
   const { llmConfigs, activeProvider, llmHealth, isLoadingConfig, fetchLlmConfig, saveLlmConfig, fetchLlmHealth } =
     useAppStore();
 
@@ -188,12 +192,36 @@ export default function SettingsPage() {
           </svg>
         </button>
         <h1 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          LLM 设置
+          设置
         </h1>
       </header>
 
+      {/* Top tabs (Sprint 3 — LLM / 数据源) */}
+      <div
+        className="flex border-b px-4"
+        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+      >
+        {(['llm', 'datasources'] as SettingsTab[]).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="-mb-px border-b-2 px-3 py-2 text-xs transition-colors"
+            style={{
+              borderColor: tab === t ? 'var(--accent)' : 'transparent',
+              color: tab === t ? 'var(--text-primary)' : 'var(--text-muted)',
+            }}
+          >
+            {t === 'llm' ? 'LLM' : '数据源'}
+          </button>
+        ))}
+      </div>
+
       {/* Body */}
       <div className="mx-auto w-full max-w-xl flex-1 overflow-y-auto p-6">
+        {tab === 'datasources' ? (
+          <DataSourcesTab />
+        ) : (
+        <>
         {/* Provider selector */}
         <section className="mb-6">
           <p className="mb-2 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
@@ -387,6 +415,8 @@ export default function SettingsPage() {
         >
           {saving ? '保存中...' : '保存并应用'}
         </button>
+        </>
+        )}
       </div>
     </div>
   );

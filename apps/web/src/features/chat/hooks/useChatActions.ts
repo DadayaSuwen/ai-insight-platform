@@ -69,7 +69,7 @@ export function useChatActions() {
 
   const handleNewChat = useCallback(async () => {
     try {
-      const created = await chatSessionApi.create("新对话");
+      const created = await chatSessionApi.create("新对话", useChatStore.getState().selectedDataSourceId ?? undefined);
       upsertSession(created);
       setCurrentSessionId(created.id);
       setMessages([]);
@@ -135,7 +135,9 @@ export function useChatActions() {
       let sessionId = useChatStore.getState().currentSessionId;
       if (!sessionId) {
         try {
-          const created = await chatSessionApi.create("新对话");
+          // [Sprint 3] 绑定当前选中的数据源
+          const dsId = useChatStore.getState().selectedDataSourceId ?? undefined;
+          const created = await chatSessionApi.create("新对话", dsId);
           upsertSession(created);
           setCurrentSessionId(created.id);
           sessionId = created.id;

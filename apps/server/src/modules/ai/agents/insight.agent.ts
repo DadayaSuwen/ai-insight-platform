@@ -21,9 +21,9 @@ export const InsightResultSchema = z.object({
     .describe("一句话总结 (20-50 字),像电梯演讲开头:整体表现一句话定性"),
   insights: z
     .array(InsightItemSchema)
-    .min(2)
+    .min(1)
     .max(5)
-    .describe("3-5 条结构化洞察,聚焦商业价值,不简单复述数字"),
+    .describe("1-5 条结构化洞察,聚焦商业价值,不简单复述数字"),
   recommendation: z
     .string()
     .optional()
@@ -138,22 +138,28 @@ ${dataPreview}${focusHint}
   }
 
   /**
-   * 把对象/数组拍平成 JSON 字符串,行数过多时截断
+   * 把数据转为 LLM 可读的紧凑格式，优先提取 rows 数组
    */
   private previewData(data: unknown): string {
     try {
-      let json = JSON.stringify(data, null, 2);
-      // 简单启发式: 找每行 "{" 或 "[" 算行数
-      const rowMatches = json.match(/^\s*[\{\[]/gm);
-      const rowCount = rowMatches?.length ?? 0;
-      if (rowCount > 30) {
-        // 截断到前 30 行,留个尾巴
-        const lines = json.split("\n");
-        json =
-          lines.slice(0, 30).join("\n") +
-          `\n... (已截断,共 ${rowCount} 行)`;
+      const obj = data as Record<string, unknown>;
+
+      // [Sprint 5.7+] 如果数据含 rows 数组，直接格式化为紧凑表格
+      if (Array.isArray(obj.rows) && obj.rows.length > 0) {
+        const rows = obj.rows as Array<Record<string, unknown>>;
+        const cols = Object.keys(rows[0]);
+        const header = cols.join(" | ");
+        const body = rows.slice(0, 30).map((r) =>
+          cols.map((c) => String(r[c] ?? "")).join(" | "),
+        );
+        let text = `数据行数: ${rows.length}\n列: ${cols.join(", ")}\n${header}\n${"-".repeat(header.length)}\n${body.join("\n")}`;
+        if (rows.length > 30) text += `\n... (共 ${rows.length} 行, 已截断)`;
+        if (text.length > 6000) text = text.slice(0, 6000) + "\n... (已截断)";
+        return text;
       }
-      // 总长度再卡一道
+
+      // 回退: JSON 序列化
+      let json = JSON.stringify(data, null, 2);
       if (json.length > 6000) {
         json = json.slice(0, 6000) + "\n... (已截断)";
       }

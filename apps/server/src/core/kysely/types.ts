@@ -1,8 +1,22 @@
 // apps/server/src/core/kysely/types.ts
 import { Generated } from "kysely";
+
+// [Sprint 5] User 表 — Multi-Tenant
+export interface UserTable {
+  id: Generated<string>;
+  email: string;
+  passwordHash: string;
+  createdAt: Generated<Date>;
+  updatedAt: Date;
+}
+
 export interface ChatSessionTable {
   id: Generated<string>;
+  // [Sprint 5] userId 必填,FK 到 User
+  userId: string;
   title: string;
+  // [Sprint 2/V3] 多数据源绑定;null = 未绑定数据源
+  dataSourceId: string | null;
   createdAt: Generated<Date>;
   updatedAt: Generated<Date>;
 }
@@ -19,48 +33,17 @@ export interface ChatMessageTable {
   createdAt: Generated<Date>;
 }
 
+// [Sprint 5.5] 业务表接口(CustomerTable/ProductTable/SalesOrderTable/
+// SalesOrderItemTable)已删除。主数据库只存平台元数据。
+
 // 更新 Database 接口
 export interface Database {
-  Customer: CustomerTable;
-  Product: ProductTable;
-  SalesOrder: SalesOrderTable;
-  SalesOrderItem: SalesOrderItemTable;
+  User: UserTable;
   ChatSession: ChatSessionTable;
   ChatMessage: ChatMessageTable;
   LLMConfig: LLMConfigTable;
-}
-export interface CustomerTable {
-  id: string;
-  name: string;
-  segment: string;
-  region: string;
-  state: string;
-  city: string;
-}
-
-export interface ProductTable {
-  id: string;
-  name: string;
-  category: string;
-  subCategory: string;
-}
-
-export interface SalesOrderTable {
-  id: string;
-  orderDate: Date;
-  shipDate: Date | null;
-  shipMode: string;
-  customerId: string;
-}
-
-export interface SalesOrderItemTable {
-  id: Generated<string>;
-  orderId: string;
-  productId: string;
-  sales: number;
-  quantity: number;
-  discount: number;
-  profit: number;
+  DataSource: DataSourceTable;
+  DataSourceSnapshot: DataSourceSnapshotTable;
 }
 
 export interface LLMConfigTable {
@@ -74,5 +57,30 @@ export interface LLMConfigTable {
   // 没有列默认值。所以必须由应用层写入，Kysely 的 `Generated<T>` 不适用。
   createdAt: Date;
   updatedAt: Date;
+}
+
+// ─── [Sprint 1] Multi-Datasource V3 ───────────────────────────
+export interface DataSourceTable {
+  id: string;
+  // [Sprint 5] userId 必填,FK 到 User,delete user → cascade delete
+  userId: string;
+  name: string;
+  description: string | null;
+  type: string; // 'postgres' | 'mysql' | 'duckdb-csv'
+  // JSONB 列:connectionConfig 是 discriminated union (ConnectionConfigSchema)
+  connectionConfig: Record<string, unknown>;
+  status: string; // 'active' | 'paused' | 'error'
+  lastError: string | null;
+  createdAt: Generated<Date>;
+  updatedAt: Date;
+}
+
+export interface DataSourceSnapshotTable {
+  id: Generated<string>;
+  dataSourceId: string;
+  payload: Record<string, unknown>;
+  fetchedAt: Generated<Date>;
+  tokenEstimate: number;
+  truncated: boolean;
 }
 

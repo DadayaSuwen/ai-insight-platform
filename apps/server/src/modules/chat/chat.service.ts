@@ -17,6 +17,7 @@ export class ChatService {
 
   processMessageStream(
     sessionId: string,
+    userId: string, // [Sprint 5]
     message: string,
     opts: { signal?: AbortSignal } = {},
   ): Observable<MessageEvent> {
@@ -30,29 +31,49 @@ export class ChatService {
         const assistantToolResults: any[] = [];
 
         try {
-          // 1. 先拉历史（不含当前用户消息），保证 planner 看到的 history 是"过去"
-          const history =
-            await this.sessionService.getMessagesBySessionId(sessionId);
+          // 1. 先拉历史(隐式 ownership 校验) — 若 session 不归属 currentUser → NotFound
+          const history = await this.sessionService.getMessagesBySessionId(
+            sessionId,
+            userId,
+          );
           const historyMessages = this.buildHistoryMessages(history);
 
           // 2. 再保存当前用户消息
-          await this.sessionService.saveMessage(sessionId, "user", message);
+          await this.sessionService.saveMessage(
+            sessionId,
+            userId,
+            "user",
+            message,
+          );
 
-          // 3. 消费 AiService 的流（收集器已在 try 外声明）
+          // [Sprint 2/V3] 读 session → 解析 dataSourceId
+          // 透传给 PlannerAgent,后者用此 id 拉 MetadataSnapshot 注入 system prompt
+          const session = await this.sessionService.getSessionById(
+            sessionId,
+            userId,
+          );
+          // [Sprint 5] 强制使用当前 session 的 dataSourceId,不接受 LLM 从历史提取的其他 id
+          // (架构师避坑 #3:GraphQL/REST 隐性越权)
+          const dataSourceId = ChatSessionService.resolveDataSourceId(session);
+          this.logger.log(
+            `[Sprint 5] session ${sessionId} (user=${userId}) → dataSourceId=${dataSourceId}`,
+          );
+
+          // 3. 消费 AiService 的流(收集器已在 try 外声明)
           for await (const event of this.aiService.processStream(
             message,
             historyMessages,
-            { signal: opts.signal, sessionId },
+            { signal: opts.signal, sessionId, dataSourceId, currentUserId: userId },
           )) {
             subscriber.next({
               type: event.type,
               data: event.data,
             });
 
-            // 用 exhaustive switch 替 if/else if（TS 通过 PlannerStreamEvent
-            // union 自动 narrow 每个 case 的 event.data 类型）。
-            // planner.agent.ts 已经在 tool_call / tool_result data 里给好 id，
-            // chat 层直接 push 即可，不再需要 randomUUID 兜底。
+            // 用 exhaustive switch 替 if/else if(TS 通过 PlannerStreamEvent
+            // union 自动 narrow 每个 case 的 event.data 类型)。
+            // planner.agent.ts 已经在 tool_call / tool_result data 里给好 id,
+            // chat 层直接 push 即可,不再需要 randomUUID 兜底。
             switch (event.type) {
               case "text":
                 assistantText += event.data.content;
@@ -66,14 +87,15 @@ export class ChatService {
               case "error":
               case "done":
               case "thinking":
-                // 不需要收集的状态事件，nothing to do
+                // 不需要收集的状态事件,nothing to do
                 break;
             }
           }
 
-          // 4. 流结束后，保存助手消息
+          // 4. 流结束后,保存助手消息
           await this.sessionService.saveMessage(
             sessionId,
+            userId,
             "assistant",
             assistantText,
             {
@@ -82,23 +104,27 @@ export class ChatService {
             },
           );
 
-          // 5.5 touch 会话时间戳（让 sidebar 按 updatedAt 排序反映最新活动）
-          // returningAll() 直接拿到更新后的整行，避免再 SELECT 一次
-          let finalSession = await this.sessionService.touchSession(sessionId);
+          // 5.5 touch 会话时间戳(让 sidebar 按 updatedAt 排序反映最新活动)
+          // returningAll() 直接拿到更新后的整行,避免再 SELECT 一次
+          let finalSession = await this.sessionService.touchSession(
+            sessionId,
+            userId,
+          );
 
-          // 6. 如果是第一句话，自动更新会话标题（如果重命名了，finalSession 用新行）
+          // 6. 如果是第一句话,自动更新会话标题(如果重命名了,finalSession 用新行)
           if (history.length <= 1 && message.length > 0) {
             const title =
               message.substring(0, 20) + (message.length > 20 ? "..." : "");
             const renamed = await this.sessionService.updateSessionTitle(
               sessionId,
+              userId,
               title,
             );
             if (renamed) finalSession = renamed;
           }
 
-          // 7. 成功路径显式发 done 事件，把最新 session 一起回给前端，
-          //    前端用 upsertSession 局部更新侧栏，省一次 GET /chat/sessions
+          // 7. 成功路径显式发 done 事件,把最新 session 一起回给前端,
+          //    前端用 upsertSession 局部更新侧栏,省一次 GET /chat/sessions
           subscriber.next({
             type: "done",
             data: { session: finalSession ?? null },
@@ -106,12 +132,13 @@ export class ChatService {
           subscriber.complete();
         } catch (err: unknown) {
           this.logger.error(`SSE stream error: ${err}`);
-          // 流意外中断时保存已生成的 partial 文本，让用户能看到 LLM 想了什么。
-          // 用独立 try/catch 包住 save，避免 save 失败时再次触发本 catch。
+          // 流意外中断时保存已生成的 partial 文本,让用户能看到 LLM 想了什么。
+          // 用独立 try/catch 包住 save,避免 save 失败时再次触发本 catch。
           if (assistantText.trim().length > 0) {
             try {
               await this.sessionService.saveMessage(
                 sessionId,
+                userId,
                 "assistant",
                 assistantText + "\n\n[stream interrupted]",
                 {
@@ -119,7 +146,7 @@ export class ChatService {
                   toolResults: assistantToolResults,
                 },
               );
-              await this.sessionService.touchSession(sessionId);
+              await this.sessionService.touchSession(sessionId, userId);
             } catch (saveErr) {
               this.logger.error(
                 `Failed to save partial assistant text: ${saveErr}`,

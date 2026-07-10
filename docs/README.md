@@ -47,6 +47,10 @@ docs/
 | `development/PHASE_11_DATA_REFACTOR.md` | Phase 11：Kysely / Superstore CSV / Planner & Tools 完善 |
 | `development/MULTI_TURN_DIALOGUE.md` | **新增** 多轮次对话 & 聊天 UI 增强（侧栏 / Welcome / Toast / 停止按钮 / 折叠） |
 | `development/2026-06-25_LLM_AND_CHAT_PERSISTENCE_FIX.md` | **新增** LLMConfig 持久化 + 多轮上下文 + tool_call_id 修复（Prisma→Kysely 收尾、UUID tool_call id、迁移 SQL） |
+| `development/2026-07-10_SPRINT_3_DUCKDB_CSV.md` | **Sprint 3** DuckDB-CSV + 上传 UI + slug 化 + inferSemantics 维度推断 + Docker 卷持久化 |
+| `development/2026-07-10_SPRINT_4_MYSQL_CACHE_CSV_FIX.md` | **Sprint 4** MySQL 真实 executor + AES-256-GCM 密码加密 + CSV 列覆写纠错 + QueryGateway LRU/TTL 缓存 |
+| `development/2026-07-10_SPRINT_5_MULTI_TENANT_POOL.md` | **Sprint 5** 多租户鉴权 (User/JWT) + DataSource/ChatSession.userId 强隔离 + ExecutorFactory 长连接池复用 + 前端登录/注册/路由守卫 |
+| `development/2026-07-11_SPRINT_5_5_CLEANUP.md` | **Sprint 5.5** 清理 Superstore 业务表 + 删除废弃工具(query_sales/dimensions) + 主数据库纯净 |
 
 ## 过时文档（仅供参考）
 
@@ -66,19 +70,31 @@ docs/
 
 ## 当前架构
 
-本项目采用 **Planner + Function Calling** 架构：
+本项目采用 **Planner + Function Calling + 元数据驱动的多数据源 V3** 架构：
 
 ```
 用户输入
     ↓
-PlannerAgent.invokeStream(message, history)  ← LLM + bindTools([2个工具])
+PlannerAgent.invokeStream(message, history, { dataSourceId })  ← LLM + bindTools([5个工具])
+    ↓
+MetadataCache.get(dataSourceId)  → 动态生成 schema 注入 system prompt
     ↓
 LLM 决定调用工具 → 执行 → 结果回灌 → 再次调用 LLM
     ↓
 最终文本流式输出 (SSE text events)
 ```
 
-**工具**：`query_sales`（SQL 聚合查询）、`gen_chart`（SQL + ECharts 配置）
+**工具**：`query_details` / `gen_chart` / `generate_insight` / `get_table_schema`
+
+**数据源**:
+- `postgres` — 外部 PG 数据库
+- `mysql` — 外部 MySQL 数据库
+- `duckdb-csv` — 用户上传的 CSV,DuckDB 内存引擎查询
+
+> [Sprint 5.5] Superstore 4 张业务表已从主数据库删除。Superstore 演示数据
+> 已导出为 CSV,可通过 Settings → 数据源 → 上传 CSV 重新接入。
+
+**前端特性**:
 
 **前端特性**：
 

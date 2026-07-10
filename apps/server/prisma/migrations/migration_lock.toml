@@ -1,0 +1,11 @@
+# Prisma migration metadata generated for [Sprint 1] add_data_source
+#
+# 20260710000000_add_data_source — add DataSource + DataSourceSnapshot tables,
+#                                   seed superstore-demo row.
+#
+# Generated when the original schema.sql was bootstrapped before this folder
+# existed. Marking the migration as already applied so subsequent `prisma migrate
+# dev` does not re-execute it. DDL is idempotent (CREATE TABLE/INDEX +
+# ON CONFLICT seed), but Prisma migrate dev will warn "drift" unless this row
+# is present.
+provider = "postgresql"

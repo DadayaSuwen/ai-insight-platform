@@ -62,10 +62,15 @@ export type ChatMessageRequest = z.infer<typeof ChatMessageRequestSchema>;
 
 /**
  * Create new chat session request
+ *
+ * [Sprint 2] 新增 dataSourceId: 绑定的数据源 id。
+ *   - 不传: 由用户在下拉中选择或在 session 中绑定
+ *   - 传已注册的 dataSource id: 显式绑定
  */
 export const CreateSessionRequestSchema = z.object({
   title: z.string().optional(),
   userId: z.string().optional(),
+  dataSourceId: z.string().min(1).max(64).optional(),
 });
 
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
@@ -86,11 +91,14 @@ export type ChatMessageResponse = z.infer<typeof ChatMessageResponseSchema>;
 
 /**
  * Chat session schema
+ *
+ * [Sprint 2] 新增 dataSourceId (nullable)。
  */
 export const ChatSessionSchema = z.object({
   id: z.string().uuid(),
   title: z.string().nullable(),
   userId: z.string().nullable(),
+  dataSourceId: z.string().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -354,6 +362,8 @@ export const SSEToolResultDataSchema = z.object({
     error: z.string().optional(),
     // [M5-Patch] 透传 ChartIntent (LLM 提取的样式/地图/布局意图)
     intent: ChartIntentPayloadSchema.optional(),
+    // [Sprint 5.7] 物理名 → 中文名映射表 (供前端渲染中文表头和图例)
+    fieldMapping: z.record(z.string(), z.string()).optional(),
   }),
 });
 

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { formatCellValue } from "../../../lib/format-value";
 
 /**
  * [M13-V2] GUARD-V2-3: CollapsibleTable
@@ -11,8 +12,11 @@ import { useState } from "react";
  */
 export function CollapsibleTable({
   rows,
+  fieldMapping,
 }: {
   rows: Array<Record<string, unknown>>;
+  /** [Sprint 5.7] 物理名 → 中文名映射表,优先级高于 headerMap */
+  fieldMapping?: Record<string, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -31,11 +35,66 @@ export function CollapsibleTable({
     quantity: "销量",
     profit: "利润",
     discount: "平均折扣率",
-    // 未来如果有新字段，只需在这里加映射即可
   };
+
+  const cnLabel = (key: string) =>
+    fieldMapping?.[key] ?? headerMap[key] ?? key;
+
+  // 表头显示: "物理名 (中文名)"
+  const displayHeader = (key: string) => {
+    const cn = fieldMapping?.[key] ?? headerMap[key];
+    return cn && cn !== key ? `${key} (${cn})` : key;
+  };
+
+  // [Sprint 5.7+] 导出 CSV
+  const exportCSV = useCallback(() => {
+    const headerRow = headers.map(cnLabel).join(",");
+    const dataRows = rows.map((row) =>
+      headers
+        .map((h) => {
+          const val = row[h];
+          if (val == null) return "";
+          const str = String(val);
+          // 含逗号/换行/引号时用双引号包裹
+          if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        })
+        .join(","),
+    );
+    const csv = "﻿" + [headerRow, ...dataRows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [rows, headers, fieldMapping]);
 
   return (
     <div className="relative mt-2">
+      {/* 导出按钮 */}
+      <div className="mb-1 flex justify-end">
+        <button
+          onClick={exportCSV}
+          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] transition-colors hover:opacity-80"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--bg-secondary)",
+            color: "var(--text-secondary)",
+          }}
+          title="导出 CSV (中文表头)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          导出 CSV
+        </button>
+      </div>
       <div
         className="overflow-auto rounded-lg border transition-all"
         style={{
@@ -54,7 +113,7 @@ export function CollapsibleTable({
                   key={h}
                   className="px-3 py-2 text-left font-medium whitespace-nowrap"
                 >
-                  {headerMap[h] || h}
+                  {displayHeader(h)}
                 </th>
               ))}
             </tr>
@@ -68,22 +127,12 @@ export function CollapsibleTable({
               >
                 {headers.map((h) => {
                   const val = row[h];
-
-                  // 健壮的数字判断:支持原生 number 和纯数字字符串
-                  const isNum =
-                    (typeof val === "number" && !isNaN(val)) ||
-                    (typeof val === "string" &&
-                      val.trim() !== "" &&
-                      !isNaN(Number(val)));
-
                   return (
                     <td
                       key={h}
                       className={`px-3 py-2 whitespace-nowrap tabular-nums text-left`}
                     >
-                      {isNum
-                        ? Number(val).toLocaleString()
-                        : String(val ?? "-")}
+                      {formatCellValue(val)}
                     </td>
                   );
                 })}

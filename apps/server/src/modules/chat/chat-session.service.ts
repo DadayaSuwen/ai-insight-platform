@@ -1,33 +1,86 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import { randomUUID } from "crypto";
 
+/**
+ * [Sprint 2+5] V3 多数据源绑定 + 多租户
+ *
+ * Sprint 2: ChatSession.dataSourceId nullable
+ *
+ * Sprint 5 行为:
+ *   - createSession({title?, dataSourceId?, userId}) — userId 必填
+ *   - getByIdForUser / getSessionsForUser / deleteForUser — 强制加 WHERE userId
+ *   - 跨用户访问 → NotFoundException(不泄露存在性)
+ */
 @Injectable()
 export class ChatSessionService {
   constructor(private readonly db: DatabaseService) {}
 
-  async createSession(title: string = "新对话") {
-    const session = await this.db.db
+  async createSession(opts: {
+    title?: string;
+    dataSourceId?: string | null;
+    userId: string; // [Sprint 5] 必填
+  }) {
+    return this.db.db
       .insertInto("ChatSession")
       .values({
-        title,
-        id: randomUUID(), // ★ 这里加上 id
-        updatedAt: new Date(), // ★ 这里加上 updatedAt
+        title: opts.title ?? "新对话",
+        id: randomUUID(),
+        userId: opts.userId, // [Sprint 5]
+        dataSourceId: opts.dataSourceId ?? null,
+        updatedAt: new Date(),
       })
       .returningAll()
       .executeTakeFirst();
-    return session;
   }
 
-  async getSessions() {
+  /**
+   * [Sprint 5] 单 session 查询 + ownership 校验。越权 → NotFound(不泄露存在性)
+   */
+  async getByIdForUser(sessionId: string, userId: string) {
     return this.db.db
       .selectFrom("ChatSession")
       .selectAll()
+      .where("id", "=", sessionId)
+      .where("userId", "=", userId)
+      .executeTakeFirst();
+  }
+
+  /**
+   * [Sprint 2] SSE 链路入口前调用:拿 session 时连带 dataSourceId。
+   *
+   * [Sprint 5] 加 userId 校验
+   */
+  async getSessionById(sessionId: string, userId: string) {
+    return this.getByIdForUser(sessionId, userId);
+  }
+
+  /**
+   * 决定实际数据源:
+   *   - session.dataSourceId 显式设置 → 用它
+   *   - NULL → 空字符串 (前端应提示用户先选择数据源)
+   */
+  static resolveDataSourceId(
+    session: { dataSourceId: string | null } | undefined | null,
+  ): string {
+    return session?.dataSourceId ?? "";
+  }
+
+  async getSessionsForUser(userId: string) {
+    return this.db.db
+      .selectFrom("ChatSession")
+      .selectAll()
+      .where("userId", "=", userId)
       .orderBy("updatedAt", "desc")
       .execute();
   }
 
-  async getMessagesBySessionId(sessionId: string) {
+  async getMessagesBySessionId(sessionId: string, userId: string) {
+    // 隐式 ownership 校验:getSessionById 已做 userId 过滤
+    const session = await this.getByIdForUser(sessionId, userId);
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
     return this.db.db
       .selectFrom("ChatMessage")
       .selectAll()
@@ -38,61 +91,67 @@ export class ChatSessionService {
 
   async saveMessage(
     sessionId: string,
+    userId: string,
     role: string,
     content: string,
     metadata?: Record<string, unknown>,
   ) {
+    // 隐式 ownership 校验
+    const session = await this.getByIdForUser(sessionId, userId);
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
     return this.db.db
       .insertInto("ChatMessage")
       .values({
-        id: randomUUID(), // ★ 这里加上 id
+        id: randomUUID(),
         sessionId,
         role,
         content,
-        // pg 驱动对 JSONB 列自动处理 JS 对象 → JSON 字符串的转换；
-        // 应用层手动 JSON.stringify 是导致后续读取/前端双重 parse 失败的根源。
-        // 直接传对象，让驱动做它该做的事。
         metadata: metadata ?? null,
       })
       .returningAll()
       .executeTakeFirst();
   }
 
-  /**
-   * 重命名会话，返回更新后的整行。
-   * returningAll() 让调用方拿到新的 updatedAt 一起回给前端，省一次 SELECT。
-   */
-  async updateSessionTitle(sessionId: string, title: string) {
-    return this.db.db
+  async updateSessionTitle(
+    sessionId: string,
+    userId: string,
+    title: string,
+  ) {
+    const result = await this.db.db
       .updateTable("ChatSession")
-      .set({ title })
+      .set({ title, updatedAt: new Date() })
       .where("id", "=", sessionId)
+      .where("userId", "=", userId)
       .returningAll()
       .executeTakeFirst();
+    if (!result) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+    return result;
   }
 
-  async deleteSession(sessionId: string) {
-    // 两表强关联（FK RESTRICT），用事务包保证原子性——
-    // 否则中途失败会留孤儿 ChatMessage
+  async deleteSession(sessionId: string, userId: string) {
+    const session = await this.getByIdForUser(sessionId, userId);
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
     await this.db.db.transaction().execute(async (trx) => {
-      // 先删消息（FK 约束是 ON DELETE RESTRICT，不能直接删父表）
       await trx
         .deleteFrom("ChatMessage")
         .where("sessionId", "=", sessionId)
         .execute();
-      await trx
-        .deleteFrom("ChatSession")
-        .where("id", "=", sessionId)
-        .execute();
+      await trx.deleteFrom("ChatSession").where("id", "=", sessionId).execute();
     });
   }
 
-  /** 刷新 updatedAt 并返回新行。 */
-  async touchSession(sessionId: string) {
+  async touchSession(sessionId: string, userId: string) {
     return this.db.db
       .updateTable("ChatSession")
       .set({ updatedAt: new Date() })
       .where("id", "=", sessionId)
+      .where("userId", "=", userId)
       .returningAll()
       .executeTakeFirst();
   }

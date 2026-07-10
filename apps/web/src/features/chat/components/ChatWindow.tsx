@@ -8,6 +8,7 @@ import { useSSEChat } from "../hooks";
 import { useChatActions } from "../hooks/useChatActions";
 import { chatSessionApi } from "../api";
 import { recordToChatMessage } from "../utils/recordToChatMessage";
+import DataSourcePicker from "../../datasources/DataSourcePicker";
 import {
   saveCurrentSessionId,
   saveSessions,
@@ -104,6 +105,8 @@ function ChatWindow() {
   const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
   const historyLoading = useChatStore((s) => s.historyLoading);
   const navigate = useNavigate();
+  const selectedDataSourceId = useChatStore((s) => s.selectedDataSourceId);
+  const setSelectedDataSourceId = useChatStore((s) => s.setSelectedDataSourceId);
   const currentSession = currentSessionId
     ? sessions.find((s) => s.id === currentSessionId)
     : undefined;
@@ -245,11 +248,31 @@ function ChatWindow() {
 
   // ─── User Actions ───────────────────────────────────────────
 
+  // [Sprint 5.7+] 编辑消息：将文本填入输入框
+  const [editText, setEditText] = useState("");
+
   const handleSend = useCallback(
     async (text: string) => {
+      setEditText(""); // 发送后清空编辑文本
       await sendInCurrentSession(text, { sendMessage, abort, newId });
     },
     [sendInCurrentSession, sendMessage, abort],
+  );
+
+  // [Sprint 5.7+] 重试：找到当前助手消息对应的用户问题并重新发送
+  const handleRetry = useCallback(
+    (assistantMsgId: string) => {
+      const idx = messages.findIndex((m) => m.id === assistantMsgId);
+      if (idx <= 0) return;
+      // 向前找到最近的用户消息
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          handleSend(messages[i].content);
+          return;
+        }
+      }
+    },
+    [messages, handleSend],
   );
 
   const handleQuickCommand = (query: string) => {
@@ -319,6 +342,14 @@ function ChatWindow() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* [Sprint 3] 数据源徽标选择器 */}
+            <DataSourcePicker
+              value={selectedDataSourceId}
+              onChange={id => setSelectedDataSourceId(id)}
+            />
+
+            {/* [Sprint 5] 用户信息 + 退出登录 */}
+            <UserMenu />
             <button
               onClick={() => navigate("/settings")}
               className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
@@ -453,7 +484,12 @@ function ChatWindow() {
             <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
             {messages.map((m) => (
               <div key={m.id} className="msg-enter">
-                <MessageBubble message={m} onSuggestionClick={handleSend} />
+                <MessageBubble
+                  message={m}
+                  onSuggestionClick={handleSend}
+                  onRetry={m.role === "user" ? () => handleRetry(m.id) : undefined}
+                  onEdit={m.role === "user" ? setEditText : undefined}
+                />
               </div>
             ))}
             </div>
@@ -498,6 +534,7 @@ function ChatWindow() {
             onSend={handleSend}
             onStop={abort}
             isLoading={isLoading}
+            editText={editText}
           />
         )}
       </main>
@@ -506,3 +543,63 @@ function ChatWindow() {
 }
 
 export default ChatWindow;
+
+/**
+ * [Sprint 5] UserMenu — 显示当前用户邮箱 + 退出登录按钮
+ *
+ * 从 localStorage 读 user(由 LoginPage / RegisterPage 写入)。
+ * 不在这里调用 /auth/me(那需要 token,改用 Axios 拦截器统一处理)。
+ */
+function UserMenu() {
+  const [user, setUser] = useState<{ email: string } | null>(() => {
+    try {
+      const raw = localStorage.getItem('aiip.auth.user.v1');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const navigate = useNavigate();
+
+  if (!user) return null;
+
+  const handleLogout = () => {
+    localStorage.removeItem('aiip.auth.token.v1');
+    localStorage.removeItem('aiip.auth.user.v1');
+    // 清空本地 store 中的 sessions,避免下次登录看到上个用户的会话
+    try {
+      localStorage.removeItem('aiip.chat.sessions.v1');
+      localStorage.removeItem('aiip.chat.currentId.v1');
+    } catch {
+      // ignore
+    }
+    setUser(null);
+    navigate('/login');
+  };
+
+  return (
+    <div
+      className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px]"
+      style={{
+        borderColor: 'var(--border)',
+        background: 'var(--bg-secondary)',
+        color: 'var(--text-secondary)',
+      }}
+      title={user.email}
+    >
+      <span
+        className="inline-block h-2 w-2 rounded-full"
+        style={{ background: 'var(--success)' }}
+      />
+      <span className="max-w-[100px] truncate">{user.email}</span>
+      <button
+        onClick={handleLogout}
+        className="ml-1 underline"
+        style={{ color: 'var(--text-muted)' }}
+        title="退出登录"
+      >
+        退出
+      </button>
+    </div>
+  );
+}

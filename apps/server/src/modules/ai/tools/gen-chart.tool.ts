@@ -1,195 +1,165 @@
 import { tool } from "@langchain/core/tools";
-import { sql } from "kysely";
 import { Logger } from "@nestjs/common";
-import { GenChartArgsSchema, type ChartIntent } from "./schemas";
-import { DatabaseService } from "../../database/database.service";
+import { GenChartArgsSchema, type ChartIntent, type GenChartArgs } from "./schemas";
 import { ChartHelper, ChartAssembleError } from "./chart.helper";
 import { ChartAgent } from "../agents/chart.agent";
-import {
-  DIMENSION_BUILDERS,
-  METRIC_SELECTORS,
-  METRIC_LABELS,
-  type QB,
-  type MetricKey,
-  type DimensionKey,
-} from "./dimensions";
+import { DatasourceService } from "../../datasource/datasource.service";
+import { MetadataService } from "../../datasource/metadata/metadata.service";
+import { QueryGatewayService } from "../../datasource/query-gateway/query-gateway.service";
+import type { QueryIntent } from "@workspace/types";
 import { traceLogger } from "../debug-log";
+import { buildFieldMapping } from "./field-mapping";
 
 /**
- * gen_chart 工具工厂 (V2 重构 — 意图驱动 + 确定性装配)
+ * [Sprint 2] V3 gen_chart — 跨数据源通用图表工具
  *
- * [M13-V2] 新链路:
- *   1. SQL 聚合拿到 rows (M9 GUARD-4a/b 保留)
- *   2. chartAgent.extractIntent(rows, message, ctx) → ChartIntent (LLM 仅输出意图)
- *   3. chartHelper.assemble(intent, rows, ctx) → EChartsOption (代码 100% 装配)
- *   4. 返回 {chart, chartType, chartSource, metrics, metricLabels, groupBy, rows, intent}
+ * 输入 dataSourceId + 任意 table/column(同 query_details 的 QueryIntent
+ * 形态),通过 QueryGateway 拿 rows,然后仍走 V2 的:
+ *   chartAgent.extractIntent(rows, message, ctx) → ChartIntent
+ *   chartHelper.assemble(intent, rows, ctx)     → EChartsOption
  *
- * [GUARD-V2-2] 装配失败抛 ChartAssembleError → tool 返回 {error, rows, intent},
- *   前端 DynamicChart Canvas 像素探针触发 → ChartErrorBoundary 内联 CollapsibleTable
+ * V2 chart.helper.ts / chart.agent.ts 完全不动,只换上游数据来源。
  */
 export function createGenChartTool(
-  db: DatabaseService,
+  ds: DatasourceService,
+  metadata: MetadataService,
+  gateway: QueryGatewayService,
   chartHelper: ChartHelper,
   chartAgent: ChartAgent,
+  currentUserId: string, // [Sprint 5]
 ) {
   const logger = new Logger("GenChartTool");
   return tool(
     async (
-      input: import("zod").infer<typeof GenChartArgsSchema> & {
+      input: GenChartArgs & {
         // 由 Planner 注入的运行时上下文 (不来自 LLM args)
         originalMessage?: string;
-        // [M6-L3] Planner 注入的 sessionId
         sessionId?: string;
       },
     ) => {
-      const { region, category, timeRange, groupBy, chartType, metrics, topN } = input;
-      const groupField = ((groupBy ?? "category") as DimensionKey);
-      // [M9-Bug D] metrics:[] 兜底为 ["sales"]
-      const metricList = (
-        metrics && metrics.length > 0 ? metrics : ["sales"]
-      ) as MetricKey[];
-
       try {
-        const builder = DIMENSION_BUILDERS[groupField];
-        if (!builder) {
-          return { error: `Unsupported groupBy: ${groupBy}` };
+        const {
+          dataSourceId,
+          table,
+          groupBy,
+          metrics,
+          filters,
+          topN,
+          chartType,
+        } = input;
+        const metricList = metrics;
+        const groupField = groupBy[0] ?? null;
+
+        // 1. 取 snapshot + config
+        const record = await ds.getByIdForUser(dataSourceId, currentUserId);
+        if (!record) {
+          return { error: `DataSource "${dataSourceId}" not found` };
         }
+        const snapshot = await metadata.get(dataSourceId);
 
-        // [GUARD-4a] 默认时间范围 (M9-Bug A 修复)
-        let dateFilter: ReturnType<typeof sql> = sql<boolean>`1=1`;
-        const now = new Date();
-        const tRange = timeRange ?? null;
-        if (tRange === "今天") {
-          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          dateFilter = sql`o."orderDate" >= ${startOfDay}`;
-        } else if (tRange === "本月") {
-          dateFilter = sql`o."orderDate" >= ${new Date(now.getFullYear(), now.getMonth(), 1)}`;
-        } else if (tRange === "上月") {
-          const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-          dateFilter = sql<boolean>`o."orderDate" >= ${lastMonth} AND o."orderDate" < ${thisMonth}`;
-        } else if (tRange === "今年") {
-          dateFilter = sql`o."orderDate" >= ${new Date(now.getFullYear(), 0, 1)}`;
-        }
+        // [Sprint 5.7] 构建 fieldMapping: 物理名 → 中文名
+        const metricAliases = metricList.map(m => m.alias);
+        const fieldMapping = buildFieldMapping(snapshot, table, metricAliases);
 
-        // 1. 基础查询 + 维度 join
-        let qb: QB = db.db.selectFrom("SalesOrderItem as s");
-        qb = builder.joins(qb);
+        // 2. 构造 QueryIntent
+        const intent: QueryIntent = {
+          dataSourceId,
+          intentType: groupBy.length > 0 ? "aggregate" : "detail",
+          table,
+          joins: [],
+          groupBy,
+          metrics: metricList.map(m => ({
+            column: m.column,
+            agg: m.agg,
+            alias: m.alias,
+            label: m.label,
+          })),
+          filters,
+          orderBy:
+            metricList.length > 0
+              ? { column: metricList[0].alias, direction: "DESC" }
+              : undefined,
+          limit: groupBy.length === 0 ? Math.min(topN, 50) : topN,
+        };
 
-        // 2. 应用 region/category filter
-        if (region && region !== "全部") {
-          qb = qb
-            .innerJoin("SalesOrder as _o_r", "_o_r.id", "s.orderId")
-            .innerJoin("Customer as _c_r", "_c_r.id", "_o_r.customerId");
-          qb = qb.where("_c_r.region", "=", region);
-        }
-        if (category && category !== "全部") {
-          qb = qb.innerJoin("Product as _p_c", "_p_c.id", "s.productId");
-          qb = qb.where("_p_c.category", "=", category);
-        }
+        // 3. 走 QueryGateway
+        const result = await gateway.executeIntent(
+          dataSourceId,
+          currentUserId, // [Sprint 5]
+          intent,
+          snapshot,
+        );
 
-        // 3. SELECT name + 多 metric
-        qb = qb.select([
-          builder.key.as("name"),
-          ...metricList.map((m) => METRIC_SELECTORS[m].as(m)),
-        ]);
-
-        // 4. 应用 dateFilter
-        qb = qb.where(dateFilter);
-
-        // 5. GROUP BY
-        if (groupField !== "none") {
-          qb = qb.groupBy(builder.key);
-        }
-
-        // 6. 排序
-        qb = qb.orderBy(METRIC_SELECTORS[metricList[0]] as any, "desc");
-
-        // [GUARD-4b] LIMIT 保护
-        const effectiveLimit =
-          groupField === "none" ? 50 : Math.min(topN ?? 1000, 1000);
-        qb = qb.limit(effectiveLimit);
-
-        // SQL 计时
-        const sqlStart = Date.now();
-        const result = await qb.execute();
-        traceLogger.trace({
-          phase: "sql-execute",
-          ctx: {
-            groupField,
-            metricList,
-            region,
-            category,
-            tRange,
-            ms: Date.now() - sqlStart,
-            rowCount: result.length,
-          },
-          level: "log",
-        });
-
-        // 数据 shape
-        const rows: Record<string, number | string>[] = result.map((r: any) => {
-          const row: Record<string, number | string> = {
-            name: String(r.name ?? ""),
-          };
-          for (const m of metricList) {
-            row[m] =
-              m === "discount"
-                ? Number(Number(r[m] ?? 0).toFixed(4))
-                : Number(r[m] ?? 0);
+        // 4. 标准化 rows — 第一列重命名为 'name' (沿用 V2 chartHelper 契约)
+        // [Sprint 5.7+] 日期格式化: ISO 字符串 → YYYY-MM-DD
+        const fmtDate = (v: unknown): string => {
+          const s = String(v ?? "");
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) {
+            return s.slice(0, 10); // "2016-12-31T..." → "2016-12-31"
           }
-          return row;
+          return s;
+        };
+        const firstGroup = groupBy[0];
+        const rows = result.rows.map(r => {
+          const normalized: Record<string, number | string> = {};
+          if (firstGroup && firstGroup in r) {
+            normalized.name = fmtDate(r[firstGroup]);
+            for (const g of groupBy.slice(1)) {
+              if (g in r) normalized[g] = fmtDate(r[g]);
+            }
+          } else {
+            normalized.name = firstGroup
+              ? "(no group)"
+              : String(Object.values(r)[0] ?? "");
+          }
+          for (const m of metricList) {
+            normalized[m.alias] = Number(r[m.alias] ?? 0);
+          }
+          return normalized;
         });
 
         if (rows.length === 0) {
           return { error: "未查询到相关数据,无法生成图表" };
         }
 
+        // 5. [V2 装配路径] — 100% 复用 chartAgent + chartHelper
         const metricLabels = metricList.reduce(
-          (acc, m) => ({ ...acc, [m]: METRIC_LABELS[m] }),
+          (acc, m) => ({ ...acc, [m.alias]: m.label }),
           {} as Record<string, string>,
         );
-
-        // [M13-V2] 阶段 2: 提取意图 (LLM 仅输出 ChartIntent)
-        const contextMessage =
-          input.originalMessage ?? `${groupField} ${chartType} chart`;
+        const contextMessage = input.originalMessage ?? `${table} ${chartType} chart`;
         const ctx = {
           chartTypeHint: chartType,
-          groupBy: groupField,
-          groupLabel: builder.label,
-          metrics: metricList,
+          groupBy: firstGroup ?? "none",
+          groupLabel: firstGroup ?? "明细",
+          metrics: metricList.map(m => m.alias),
           metricLabels,
           sessionId: input.sessionId,
           originalMessage: input.originalMessage,
-          // [M5-Patch-Fix] Planner 显式传的样式/地图/布局 → 注入 ctx,
-          //   chartAgent.fillIntentFields() 会优先使用 explicit 值,不覆盖
           explicitColorPalette: input.colorPalette ?? null,
           explicitMapType: input.mapType ?? null,
           explicitLayout: input.layout ?? null,
         };
-        const intent: ChartIntent = await chartAgent.extractIntent(
+        const chartIntent: ChartIntent = await chartAgent.extractIntent(
           rows,
           contextMessage,
           ctx,
         );
 
-        // [M13-V2] 阶段 3: 确定性装配 (不 try/catch,失败由 ChartAssembleError 上抛)
         let chart: Record<string, unknown>;
         let chartSource: "agent" | "fallback" = "agent";
         try {
-          chart = chartHelper.assemble(intent, rows, {
-            groupLabel: builder.label,
-          }) as Record<string, unknown>;
+          chart = chartHelper.assemble(chartIntent, rows, {
+            groupLabel: ctx.groupLabel,
+          }, fieldMapping) as Record<string, unknown>;
         } catch (assembleErr) {
-          // [GUARD-V2-2] ChartAssembleError → trace + 返回 error + rows
-          //   前端 Canvas 像素探针或 Boundary 接住,渲染表格兜底
           if (assembleErr instanceof ChartAssembleError) {
             traceLogger.trace({
               phase: "chart-assemble",
               ctx: {
-                chartType: intent.chartType,
-                groupBy: groupField,
-                metrics: metricList,
+                chartType: chartIntent.chartType,
+                groupBy: firstGroup,
+                metrics: metricList.map(m => m.alias),
                 rowCount: rows.length,
                 reason: assembleErr.reason,
               },
@@ -202,38 +172,37 @@ export function createGenChartTool(
             return {
               error: assembleErr.message,
               chart: null,
-              chartType: intent.chartType,
+              chartType: chartIntent.chartType,
               chartSource: "fallback" as const,
-              metrics: metricList,
+              metrics: metricList.map(m => m.alias),
               metricLabels,
-              groupBy: groupField,
-              rows, // [M13-V2] rows 用于前端表格降级
-              intent,
+              groupBy: firstGroup,
+              rows,
+              intent: chartIntent,
+              fieldMapping,
             };
           }
           throw assembleErr;
         }
 
         return {
-          chartType: intent.chartType,
+          chartType: chartIntent.chartType,
           chart,
           chartSource,
-          metrics: metricList,
+          metrics: metricList.map(m => m.alias),
           metricLabels,
-          groupBy: groupField,
-          rows, // [M6-L4] SQL 聚合结果,前端 ErrorBoundary 表格降级用
-          intent, // [M13-V2] 返回意图便于前端展示/调试
+          groupBy: firstGroup,
+          rows,
+          intent: chartIntent,
+          fieldMapping,
         };
       } catch (err) {
         traceLogger.trace({
           phase: "tool-result",
           ctx: {
-            chartType,
-            groupBy: groupField,
-            metrics: metricList,
-            region,
-            category,
-            timeRange: timeRange ?? "(default 30d)",
+            dataSourceId: input.dataSourceId,
+            table: input.table,
+            metrics: input.metrics.map(m => m.alias),
             sessionId: input.sessionId,
           },
           err,
@@ -245,20 +214,15 @@ export function createGenChartTool(
     {
       name: "gen_chart",
       description:
-        // [M9-Bug B Step 1] 强化触发词 + [M13-V2] 提示 LLM 仅输出意图
-        // [M5-Patch-Fix] 严禁 ASCII 兜底;明确 colorPalette/mapType/layout 字段已开放
-        "【强制图表触发】生成销售数据可视化图表。**当用户提到 占比/分布/地图/趋势/对比/可视化/画图/饼图/柱状图/折线图/热力图/桑基/漏斗/雷达/3D/水球/词云/紫色/红色/全屏展示 等任何图表或样式关键词时,必须调用本工具,严禁用 ASCII 字符手绘图表、严禁用纯文字描述图表!**\n\n" +
+        "**V3 通用图表工具**:对当前会话绑定的数据源生成可视化图表。" +
+        "**当用户提到 占比/分布/地图/趋势/对比/可视化/画图/饼图/柱状图/折线图/热力图/桑基/漏斗/雷达/3D/水球/词云/紫色/红色/全屏展示 等任何图表或样式关键词时,必须调用本工具,严禁用 ASCII 字符手绘图表、严禁用纯文字描述图表!**\n\n" +
         "支持全量 ECharts 系列 (30 类):line/bar/pie/scatter/area/heatmap/treemap/sankey/funnel/gauge/radar/parallel/sunburst/boxplot/candlestick/graph/tree/themeRiver/map/bar3D/scatter3D/surface3D/map3D/liquidFill/wordCloud/custom。\n\n" +
-        "**【M5-Patch-Fix】样式与布局字段已开放 — 后端会自动注入用户指定的样式,LLM 不需要也无法自行绘图**:\n" +
-        "- colorPalette: 字符串数组,中文颜色名 (红/蓝/紫/金黄/...) 自动转 hex;颜色系 (红色系/暖色调) 转 3-5 个同色系 hex\n" +
-        "- mapType: 'china' (默认) / 'world' / 'usa' / 'prov-<拼音>'\n" +
-        "- layout: 'inline' (默认) / 'fullscreen'\n" +
-        "**【M12】map 系列已支持中国省份 GeoJSON**,series.data[].name 用中文省份名 ('北京' / '广东' / '上海' 等);map3D 仍降级 bar。\n\n" +
-        "**【M13-V2】chartType 字段由后端 ChartAssembler 装配,你只需选择最合适的 chartType,装配逻辑由代码 100% 完成**。\n\n" +
-        "参数提示:\n" +
-        "- 看趋势必须 line + groupBy=month|day|week|quarter\n" +
-        "- 多 metric 自动展开为多 series + 双 Y 轴\n" +
-        "- groupBy 默认查全量历史(不限时间); 用户明确指定 timeRange (今天/本月/上月/今年) 才过滤",
+        "样式/地图/布局字段:\n" +
+        "- colorPalette: 字符串数组\n" +
+        "- mapType: 'china' / 'world' / 'usa' / 'prov-<拼音>'\n" +
+        "- layout: 'inline' (默认) / 'fullscreen'\n\n" +
+        "**传入与 query_details 同构的 QueryIntent**:dataSourceId + table + groupBy[] + metrics[] + filters[] + topN。\n" +
+        "**必须**先确认 system prompt 中的 MetadataSnapshot 列出该 table 与 column;若看不到全量字段,先调 get_table_schema。",
       schema: GenChartArgsSchema,
     },
   );

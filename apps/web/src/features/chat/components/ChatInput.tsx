@@ -7,6 +7,8 @@ interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   maxLength?: number;
+  /** [Sprint 5.7+] 编辑时预填文本 */
+  editText?: string;
 }
 
 const PLACEHOLDERS = [
@@ -38,12 +40,18 @@ function ChatInput({
   disabled,
   placeholder,
   maxLength = 2000,
+  editText,
 }: ChatInputProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(editText ?? "");
   const [placeholderIdx] = useState(() =>
     Math.floor(Math.random() * PLACEHOLDERS.length),
   );
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  // [Sprint 5.7+] 编辑消息: 当 editText 变化时填入输入框
+  useEffect(() => {
+    if (editText) setValue(editText);
+  }, [editText]);
 
   // Auto-resize textarea — capped at ~6 lines, then scrolls internally
   useEffect(() => {

@@ -10,6 +10,8 @@ interface ChartErrorBoundaryProps {
   onSwitchToTable?: () => void;
   /** [M13-V2] GUARD-V2-3: 直接渲染表格(无需点击切换) */
   fallbackRows?: Array<Record<string, unknown>>;
+  /** [Sprint 5.7] 物理名 → 中文名映射表,透传给 fallback 表格 */
+  fieldMapping?: Record<string, string>;
 }
 
 interface ChartErrorBoundaryState {
@@ -53,7 +55,7 @@ export class ChartErrorBoundary extends Component<
     if (this.state.hasError) {
       // [M13-V2] GUARD-V2-3: 有 fallbackRows 时直接渲染表格 (Canvas 像素探针触发后)
       if (this.props.fallbackRows && this.props.fallbackRows.length > 0) {
-        return <CollapsibleTable rows={this.props.fallbackRows} />;
+        return <CollapsibleTable rows={this.props.fallbackRows} fieldMapping={this.props.fieldMapping} />;
       }
       // GUARD-2b: 友好兜底 UI,严禁白屏
       return (

@@ -5,6 +5,7 @@ const KEY_CURRENT = "aiip.chat.currentSessionId.v1";
 const KEY_SIDEBAR = "aiip.chat.sidebarOpen.v1";
 const KEY_SIDEBAR_COLLAPSED = "aiip.chat.sidebarCollapsed.v1";
 const KEY_SEARCH_QUERY = "aiip.chat.searchQuery.v1";
+const KEY_DATASOURCE = "aiip.chat.dataSourceId.v1";
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -78,4 +79,17 @@ export function pruneMissingSessionId(
 ): string | null {
   if (!id) return null;
   return sessions.some((s) => s.id === id) ? id : null;
+}
+
+// ── [Sprint 3] 默认选中的数据源(下次创建会话生效) ────────────────
+
+export function loadSelectedDataSourceId(): string | null {
+  if (!isBrowser()) return null;
+  return localStorage.getItem(KEY_DATASOURCE) ?? null;
+}
+
+export function saveSelectedDataSourceId(id: string | null): void {
+  if (!isBrowser()) return;
+  if (id) localStorage.setItem(KEY_DATASOURCE, id);
+  else localStorage.removeItem(KEY_DATASOURCE);
 }

@@ -77,6 +77,15 @@ export async function ensureMap(mapType: string = "china"): Promise<void> {
       return resp.json();
     })
     .then((geoJson: unknown) => {
+      // [Sprint 5.7+] 检测空占位 GeoJSON — 抛错让 Boundary 兜底表格
+      const geo = geoJson as Record<string, unknown>;
+      if (
+        geo.type === "FeatureCollection" &&
+        Array.isArray(geo.features) &&
+        geo.features.length === 0
+      ) {
+        throw new Error(`地图 ${mapType} 是空占位文件，GeoJSON 数据待补充`);
+      }
       echarts.registerMap(mapType, geoJson as GeoJsonType);
       registeredMaps.add(mapType);
     })
