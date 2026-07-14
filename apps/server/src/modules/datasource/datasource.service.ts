@@ -91,6 +91,8 @@ export class DatasourceService {
         connectionConfig: storedConfig,
         status: "active",
         lastError: null,
+        exploreStatus: "pending",
+        schemaUnderstanding: null,
         updatedAt: new Date(),
       })
       .returningAll()

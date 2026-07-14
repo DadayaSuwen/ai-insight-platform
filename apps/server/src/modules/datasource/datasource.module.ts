@@ -44,6 +44,7 @@ import { CsvImportService } from "./upload/csv-import.service";
     DatasourceService,
     MetadataService,
     MetadataCacheService,
+    SemanticInferenceService,
     QueryGatewayService,
     QueryCacheService,
     ExecutorFactory,

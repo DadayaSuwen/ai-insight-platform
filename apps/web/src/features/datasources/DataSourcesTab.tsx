@@ -91,6 +91,16 @@ export default function DataSourcesTab() {
     }
   };
 
+  const handleExplore = (id: string) => {
+    navigate(`/explore/${encodeURIComponent(id)}`);
+  };
+
+  const handleRegistered = (id: string) => {
+    void reload();
+    // 注册成功后跳转到探索页
+    navigate(`/explore/${encodeURIComponent(id)}`);
+  };
+
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`确认删除数据源 "${name}"?关联会话将无法查询。`)) {
       return;
@@ -220,7 +230,7 @@ export default function DataSourcesTab() {
 
       {/* 数据库连接表单 (Sprint 4) */}
       <section>
-        <DatabaseConnectionForm onRegistered={() => void reload()} />
+        <DatabaseConnectionForm onRegistered={(id) => handleRegistered(id)} />
       </section>
 
       {/* 列表 */}
@@ -260,6 +270,17 @@ export default function DataSourcesTab() {
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => handleExplore(ds.id)}
+                    className="rounded-md px-2 py-1 text-[10px] font-medium"
+                    style={{
+                      background: 'var(--accent)',
+                      color: 'white',
+                    }}
+                    title="开始自主探索 Schema"
+                  >
+                    探索
+                  </button>
                   <button
                     onClick={() => handleRefresh(ds.id)}
                     disabled={refreshing === ds.id}

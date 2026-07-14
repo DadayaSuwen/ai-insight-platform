@@ -27,6 +27,8 @@ import { CurrentUser } from "./auth.decorators";
 const EmailPasswordSchema = z.object({
   email: z.string().email().max(200),
   password: z.string().min(6).max(200),
+  name: z.string().max(100).optional(),
+  inviteCode: z.string().max(20).optional(),
 });
 
 @Controller("auth")
@@ -42,7 +44,12 @@ export class AuthController {
     }
     return {
       success: true,
-      data: await this.auth.register(parsed.data),
+      data: await this.auth.register({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        name: parsed.data.name,
+        inviteCode: parsed.data.inviteCode,
+      }),
     };
   }
 

@@ -10,6 +10,17 @@ import ChatWindow from './features/chat/components/ChatWindow';
 import SettingsPage from './features/settings/SettingsPage';
 import LoginPage from './features/auth/LoginPage';
 import RegisterPage from './features/auth/RegisterPage';
+import OnboardingPage from './features/onboarding/OnboardingPage';
+import ExplorePage from './features/explore/ExplorePage';
+import SchemaReviewPage from './features/schema-review/SchemaReviewPage';
+import ConfirmPage from './features/schema-review/ConfirmPage';
+import DashboardPage from './features/dashboard/DashboardPage';
+import InsightsPage from './features/insights/InsightsPage';
+import UsersPage from './features/admin/UsersPage';
+import RolesPage from './features/admin/RolesPage';
+import ProfilePage from './features/profile/ProfilePage';
+import HistoryPage from './features/history/HistoryPage';
+import AppShell from './components/layout/AppShell';
 import { useChatStore } from './features/chat/store';
 import { ToastContainer } from './components/ToastContainer';
 import { TOKEN_KEY } from './core/api/AxiosInstance';
@@ -24,16 +35,24 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* 认证页 — 无布局 */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route
-          path="/"
-          element={<RequireAuth><ChatWindow /></RequireAuth>}
-        />
-        <Route
-          path="/settings"
-          element={<RequireAuth><SettingsPage /></RequireAuth>}
-        />
+
+        {/* 受保护页面 — 都通过 AppShell 包裹 */}
+        <Route path="/onboarding" element={<Shell><OnboardingPage /></Shell>} />
+        <Route path="/explore/:datasourceId" element={<Shell><ExplorePage /></Shell>} />
+        <Route path="/schema-review/:datasourceId" element={<Shell><SchemaReviewPage /></Shell>} />
+        <Route path="/confirm/:datasourceId" element={<Shell><ConfirmPage /></Shell>} />
+        <Route path="/dashboard/:datasourceId" element={<Shell><DashboardPage /></Shell>} />
+        <Route path="/insights/:datasourceId" element={<Shell><InsightsPage /></Shell>} />
+        <Route path="/admin/users" element={<Shell><UsersPage /></Shell>} />
+        <Route path="/admin/roles" element={<Shell><RolesPage /></Shell>} />
+        <Route path="/profile" element={<Shell><ProfilePage /></Shell>} />
+        <Route path="/history" element={<Shell><HistoryPage /></Shell>} />
+        <Route path="/" element={<Shell><ChatWindow /></Shell>} />
+        <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastContainer />
@@ -42,9 +61,18 @@ function App() {
 }
 
 /**
- * [Sprint 5] 路由守卫:未登录访问 / 或 /settings → 跳 /login
- *
- * 注:仅检查 localStorage 是否有 token。后端 JwtAuthGuard 兜底真实校验。
+ * [Sprint 6] Shell 包装 — RequireAuth + AppShell
+ */
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <AppShell>{children}</AppShell>
+    </RequireAuth>
+  );
+}
+
+/**
+ * [Sprint 5] 路由守卫:未登录 → 跳 /login
  */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();

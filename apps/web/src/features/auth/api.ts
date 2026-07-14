@@ -13,6 +13,8 @@ import axiosInstance, { TOKEN_KEY } from '../../core/api/AxiosInstance';
 export interface AuthUser {
   id: string;
   email: string;
+  role?: string;
+  name?: string | null;
 }
 
 export interface AuthResponse {

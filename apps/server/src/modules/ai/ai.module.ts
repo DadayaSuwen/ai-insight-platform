@@ -31,6 +31,6 @@ import { DatasourceModule } from "../datasource/datasource.module";
     InsightAgent,
     ToolResultContext,
   ],
-  exports: [AiService],
+  exports: [AiService, InsightAgent],
 })
 export class AiModule {}

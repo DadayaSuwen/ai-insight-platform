@@ -17,6 +17,8 @@ import { signJwt } from "./jwt-secret";
 export interface AuthenticatedUser {
   id: string;
   email: string;
+  role: string;
+  name?: string | null;
 }
 
 const BCRYPT_COST = 10;
@@ -30,6 +32,8 @@ export class AuthService {
 
   /**
    * 注册新用户。
+   * [Sprint 6] 增加 name / inviteCode 参数。
+   * - 首个注册用户自动 role=admin,后续需邀请码且 role=analyst
    * - email 已存在 → 409 Conflict
    * - password < 6 chars → 400 BadRequest(由 controller 校验)
    * - 创建后立即签发 token
@@ -37,6 +41,8 @@ export class AuthService {
   async register(opts: {
     email: string;
     password: string;
+    name?: string;
+    inviteCode?: string;
   }): Promise<{ token: string; user: AuthenticatedUser }> {
     const email = opts.email.trim().toLowerCase();
     const passwordHash = await bcrypt.hash(opts.password, BCRYPT_COST);
@@ -51,19 +57,73 @@ export class AuthService {
       throw new ConflictException("Email already registered");
     }
 
+    // [Sprint 6] 首个用户自动 admin
+    const userCount = await this.db.db
+      .selectFrom("User")
+      .select((eb) => eb.fn.countAll<number>().as("cnt"))
+      .executeTakeFirst();
+
+    const isFirstUser = (userCount?.cnt ?? 0) === 0;
+    const role = isFirstUser ? "admin" : "analyst";
+
+    // [Sprint 6] 非首个用户需邀请码校验
+    if (!isFirstUser) {
+      if (!opts.inviteCode) {
+        throw new ConflictException("需要邀请码才能注册");
+      }
+      const invite = await this.db.db
+        .selectFrom("InviteCode")
+        .selectAll()
+        .where("code", "=", opts.inviteCode.trim())
+        .executeTakeFirst();
+
+      if (!invite) {
+        throw new ConflictException("邀请码无效");
+      }
+      if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+        throw new ConflictException("邀请码已过期");
+      }
+      if (invite.usedCount >= invite.maxUses) {
+        throw new ConflictException("邀请码已达使用上限");
+      }
+      // 更新使用计数
+      await this.db.db
+        .updateTable("InviteCode")
+        .set({ usedCount: invite.usedCount + 1 })
+        .where("id", "=", invite.id)
+        .execute();
+    }
+
     const created = await this.db.db
       .insertInto("User")
       .values({
         email,
         passwordHash,
+        name: opts.name ?? null,
+        role,
+        status: "active",
         updatedAt: new Date(),
       })
-      .returning(["id", "email"])
+      .returning(["id", "email", "role", "name"])
       .executeTakeFirstOrThrow();
 
-    this.logger.log(`User registered: ${created.email} (${created.id})`);
-    const token = signJwt({ sub: created.id, email: created.email });
-    return { token, user: { id: created.id, email: created.email } };
+    this.logger.log(
+      `User registered: ${created.email} (${created.id}) role=${created.role}`,
+    );
+    const token = signJwt({
+      sub: created.id,
+      email: created.email,
+      role: created.role,
+    });
+    return {
+      token,
+      user: {
+        id: created.id,
+        email: created.email,
+        role: created.role,
+        name: created.name,
+      },
+    };
   }
 
   /**
@@ -79,21 +139,36 @@ export class AuthService {
 
     const user = await this.db.db
       .selectFrom("User")
-      .select(["id", "email", "passwordHash"])
+      .select(["id", "email", "passwordHash", "role", "name", "status"])
       .where("email", "=", email)
       .executeTakeFirst();
 
     if (!user) {
       throw new UnauthorizedException("Invalid email or password");
     }
+    if (user.status === "disabled") {
+      throw new UnauthorizedException("Account disabled");
+    }
     const ok = await bcrypt.compare(opts.password, user.passwordHash);
     if (!ok) {
       throw new UnauthorizedException("Invalid email or password");
     }
 
-    const token = signJwt({ sub: user.id, email: user.email });
-    this.logger.log(`User login: ${user.email} (${user.id})`);
-    return { token, user: { id: user.id, email: user.email } };
+    const token = signJwt({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+    this.logger.log(`User login: ${user.email} (${user.id}) role=${user.role}`);
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+      },
+    };
   }
 
   /**
@@ -102,7 +177,7 @@ export class AuthService {
   async getById(id: string): Promise<AuthenticatedUser | null> {
     const user = await this.db.db
       .selectFrom("User")
-      .select(["id", "email"])
+      .select(["id", "email", "role", "name"])
       .where("id", "=", id)
       .executeTakeFirst();
     return user ?? null;

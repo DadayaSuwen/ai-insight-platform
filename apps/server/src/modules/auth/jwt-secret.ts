@@ -36,10 +36,12 @@ export function resetJwtSecretForTests(): void {
 
 /**
  * JWT payload 接口(签发 / 验证共用)
+ * [Sprint 6] 增加 role 字段用于 RBAC
  */
 export interface JwtPayload {
   sub: string; // userId
   email: string;
+  role?: string; // [Sprint 6] admin | analyst | viewer
   iat?: number;
   exp?: number;
 }
@@ -48,8 +50,9 @@ const TOKEN_TTL_SEC = 7 * 24 * 60 * 60; // 7 天
 
 /**
  * 签发 token
+ * [Sprint 6] 增加 role 字段
  */
-export function signJwt(payload: { sub: string; email: string }): string {
+export function signJwt(payload: { sub: string; email: string; role?: string }): string {
   return jwt.sign(payload, loadSecret(), { expiresIn: TOKEN_TTL_SEC });
 }
 

@@ -19,12 +19,13 @@ import { inferSemantics } from "./infer-semantics";
  *   - LLM 调用失败时降级为纯规则推断 (不阻断注册流程)
  */
 
-/** LLM 返回的单列推断结果 */
+/** LLM 返回的单列推断结果 — [Sprint 6] 增加 confidence */
 const InferredColumnSchema = z.object({
   name: z.string(),
   chineseName: z.string(),
   role: z.enum(["dimension", "measure", "time", "identifier"]),
   description: z.string(),
+  confidence: z.number().min(0).max(1).optional(),
 });
 
 const InferredColumnsSchema = z.array(InferredColumnSchema);
@@ -223,4 +224,81 @@ ${fieldLines}
 - 如果是数值类型（含小数），一般设为 measure
 - 如果是短文本且有明显的枚举特征（如 "男"/"女"），一般设为 dimension`;
   }
+
+  /**
+   * [Sprint 6] 计算字段置信度 (0-1)
+   *
+   * 基于启发式规则:
+   *   - name 清晰度: 含常见词 (id/name/date/time/amount/price/count/status/type/category) → +0.3
+   *   - 采样值分布: 有明确模式 (枚举/日期/数值) → +0.2
+   *   - LLM 推断一致性: chineseName ≠ physicalName 且 role 确定 → +0.3
+   *   - 基础分: 0.2
+   *
+   * 阈值 >= 0.85 → 自动确认; < 0.85 → 需要用户确认
+   */
+  computeConfidence(col: {
+    name: string;
+    rawType: string;
+    chineseName?: string;
+    semanticRole?: string;
+  }): number {
+    let score = 0.2; // 基础分
+
+    const name = col.name.toLowerCase();
+
+    // name 清晰度
+    const clearPatterns = [
+      /\bid\b/, /\bname\b/, /\bdate\b/, /\btime\b/,
+      /\bamount\b/, /\bprice\b/, /\bcount\b/, /\bqty\b/,
+      /\bstatus\b/, /\btype\b/, /\bcategor/i,
+      /\bemail\b/, /\bphone\b/, /\baddress\b/,
+      /\bcreated\b/, /\bupdated\b/, /\bdeleted\b/,
+    ];
+    const hasClearPattern = clearPatterns.some((p) => p.test(name));
+    if (hasClearPattern) score += 0.3;
+
+    // 采样值分布 (通过 rawType 推断)
+    const typeLower = (col.rawType || "").toLowerCase();
+    if (
+      typeLower.includes("int") ||
+      typeLower.includes("decimal") ||
+      typeLower.includes("numeric") ||
+      typeLower.includes("float") ||
+      typeLower.includes("double")
+    ) {
+      score += 0.15; // 数值类型 → 很可能是 measure
+    } else if (
+      typeLower.includes("timestamp") ||
+      typeLower.includes("date")
+    ) {
+      score += 0.25; // 时间类型 → 很可能是 time
+    } else if (
+      typeLower.includes("bool")
+    ) {
+      score += 0.2; // 布尔 → 维度
+    } else if (
+      typeLower.includes("varchar") ||
+      typeLower.includes("text") ||
+      typeLower.includes("char")
+    ) {
+      // 短文本 → 可能是维度, 但不确定性更高
+      score += 0.1;
+    }
+
+    // LLM 推断一致性
+    if (col.chineseName && col.chineseName !== col.name) {
+      score += 0.2;
+    }
+    if (
+      col.semanticRole &&
+      col.semanticRole !== "identifier"
+    ) {
+      score += 0.15;
+    }
+
+    return Math.min(score, 1.0);
+  }
+
+  /** 置信度阈值 — >= 此值自动确认 */
+  static readonly CONFIDENCE_THRESHOLD = 0.85;
 }

@@ -2,10 +2,14 @@
 import { Generated } from "kysely";
 
 // [Sprint 5] User 表 — Multi-Tenant
+// [Sprint 6] 增加 name / role / status 字段
 export interface UserTable {
   id: Generated<string>;
   email: string;
   passwordHash: string;
+  name: string | null;
+  role: string;        // admin | analyst | viewer
+  status: string;      // active | disabled
   createdAt: Generated<Date>;
   updatedAt: Date;
 }
@@ -36,7 +40,6 @@ export interface ChatMessageTable {
 // [Sprint 5.5] 业务表接口(CustomerTable/ProductTable/SalesOrderTable/
 // SalesOrderItemTable)已删除。主数据库只存平台元数据。
 
-// 更新 Database 接口
 export interface Database {
   User: UserTable;
   ChatSession: ChatSessionTable;
@@ -44,6 +47,9 @@ export interface Database {
   LLMConfig: LLMConfigTable;
   DataSource: DataSourceTable;
   DataSourceSnapshot: DataSourceSnapshotTable;
+  SchemaReview: SchemaReviewTable;
+  Insight: InsightTable;
+  InviteCode: InviteCodeTable;
 }
 
 export interface LLMConfigTable {
@@ -60,17 +66,18 @@ export interface LLMConfigTable {
 }
 
 // ─── [Sprint 1] Multi-Datasource V3 ───────────────────────────
+// [Sprint 6] 增加 exploreStatus / schemaUnderstanding
 export interface DataSourceTable {
   id: string;
-  // [Sprint 5] userId 必填,FK 到 User,delete user → cascade delete
   userId: string;
   name: string;
   description: string | null;
-  type: string; // 'postgres' | 'mysql' | 'duckdb-csv'
-  // JSONB 列:connectionConfig 是 discriminated union (ConnectionConfigSchema)
+  type: string;
   connectionConfig: Record<string, unknown>;
   status: string; // 'active' | 'paused' | 'error'
   lastError: string | null;
+  exploreStatus: string;          // pending | exploring | reviewing | finalized
+  schemaUnderstanding: Record<string, unknown> | null;
   createdAt: Generated<Date>;
   updatedAt: Date;
 }
@@ -84,3 +91,39 @@ export interface DataSourceSnapshotTable {
   truncated: boolean;
 }
 
+// ─── [Sprint 6] Schema Review / Insight / InviteCode ───────────
+
+export interface SchemaReviewTable {
+  id: Generated<string>;
+  datasourceId: string;
+  status: string;
+  pendingFields: number;
+  confirmedFields: number;
+  messages: Record<string, unknown>;
+  createdAt: Generated<Date>;
+  finalizedAt: Date | null;
+}
+
+export interface InsightTable {
+  id: Generated<string>;
+  datasourceId: string;
+  type: string;
+  severity: string;
+  title: string;
+  description: string;
+  evidence: Record<string, unknown>;
+  suggestion: string | null;
+  status: string;
+  detectedAt: Generated<Date>;
+  handledAt: Date | null;
+}
+
+export interface InviteCodeTable {
+  id: Generated<string>;
+  code: string;
+  createdBy: string;
+  maxUses: number;
+  usedCount: number;
+  expiresAt: Date | null;
+  createdAt: Generated<Date>;
+}
