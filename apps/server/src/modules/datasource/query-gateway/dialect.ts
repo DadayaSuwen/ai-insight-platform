@@ -69,7 +69,7 @@ class PostgresDialect implements SqlDialect {
     }
     for (const m of intent.metrics) {
       const aggFn = m.agg;
-      const expr = `${aggFn}("${m.column}")`;
+      const expr = m.column === "*" ? `${aggFn}(*)` : `${aggFn}("${m.column}")`;
       const aliased = `${expr} AS "${m.alias}"`;
       selectParts.push(aliased);
       columnAliases[m.alias] = m.column;
@@ -139,7 +139,7 @@ class MysqlDialect implements SqlDialect {
     }
     for (const m of intent.metrics) {
       const aggFn = m.agg;
-      const expr = `${aggFn}(\`${m.column}\`)`;
+      const expr = m.column === "*" ? `${aggFn}(*)` : `${aggFn}(\`${m.column}\`)`;
       const aliased = `${expr} AS \`${m.alias}\``;
       selectParts.push(aliased);
       columnAliases[m.alias] = m.column;
@@ -212,7 +212,7 @@ export class DuckDbDialect implements SqlDialect {
       const aggFn = m.agg;
       // DuckDB 不接受 double-quoted alias 包含特殊字符,但 Zod 已校验 alias 为
       // snake_case,所以双引号安全
-      const expr = `${aggFn}("${m.column}")`;
+      const expr = m.column === "*" ? `${aggFn}(*)` : `${aggFn}("${m.column}")`;
       const aliased = `${expr} AS "${m.alias}"`;
       selectParts.push(aliased);
       columnAliases[m.alias] = m.column;

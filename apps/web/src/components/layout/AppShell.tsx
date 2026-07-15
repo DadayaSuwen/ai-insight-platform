@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -10,12 +10,11 @@ import {
   Settings,
   Users,
   Shield,
-  ChevronDown,
   Sparkles,
 } from 'lucide-react';
 import { TOKEN_KEY } from '../../core/api/AxiosInstance';
-import axiosInstance from '../../core/api/AxiosInstance';
 import { useDatasourceStore } from '../../core/store/datasource-store';
+import DataSourcePicker from '../../features/datasources/DataSourcePicker';
 
 const BREADCRUMB_MAP: Record<string, string> = {
   onboarding: '欢迎',
@@ -67,27 +66,9 @@ export default function AppShell({ children }: AppShellProps) {
   const currentDsName = useDatasourceStore((s) => s.currentDatasourceName);
   const setCurrent = useDatasourceStore((s) => s.setCurrent);
   const hasDS = currentDsId !== null;
-  const datasource = currentDsId && currentDsName
-    ? { id: currentDsId, name: currentDsName }
-    : null;
-
-  // [Fix-5 Task 5.7] 数据源切换器下拉 — 拉列表 + 选中切 store + 跳 dashboard
-  const [dsList, setDsList] = useState<Array<{ id: string; name: string }>>([]);
-  const [showDsList, setShowDsList] = useState(false);
-  useEffect(() => {
-    // 切页面时拉一次
-    axiosInstance.get('/api/datasources')
-      .then((res) => {
-        const list = (res.data as { success: boolean; data: Array<{ id: string; name: string }> }).data || [];
-        setDsList(list);
-      })
-      .catch(() => { /* ignore */ });
-  }, [location.pathname]);
-  const handleSwitchDs = (ds: { id: string; name: string }) => {
-    setCurrent(ds.id, ds.name);
-    setShowDsList(false);
-    navigate(`/dashboard/${ds.id}`);
-  };
+  const datasource = currentDsId
+    ? { id: currentDsId, name: currentDsName || currentDsId.slice(0, 8) + '...' }
+    : { id: null as string | null, name: '' };
 
   const isAdmin = user.role === 'admin';
 
@@ -112,40 +93,15 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        {/* 数据源切换器 — [Fix-5 Task 5.7] 下拉选择 + store setCurrent */}
-        <div
-          className="datasource-switcher"
-          onClick={() => setShowDsList((v) => !v)}
-        >
-          <div className="datasource-name">
-            <span>{datasource?.name ?? '未配置'}</span>
-            <ChevronDown size={14} />
-          </div>
-          <div className="datasource-meta">
-            {datasource ? `ID: ${datasource.id}` : '点击配置数据源'}
-          </div>
-          {showDsList && (
-            <div className="ds-dropdown" onClick={(e) => e.stopPropagation()}>
-              {dsList.length === 0 && (
-                <div className="ds-item ds-empty">暂无数据源</div>
-              )}
-              {dsList.map((ds) => (
-                <div
-                  key={ds.id}
-                  className={`ds-item${ds.id === currentDsId ? ' active' : ''}`}
-                  onClick={() => handleSwitchDs(ds)}
-                >
-                  {ds.name}
-                </div>
-              ))}
-              <div
-                className="ds-item ds-add"
-                onClick={() => { setShowDsList(false); navigate('/datasources'); }}
-              >
-                + 添加新数据源
-              </div>
-            </div>
-          )}
+        {/* 数据源切换器 — position:relative + overflow:visible 保证下拉不被裁剪 */}
+        <div style={{ padding: '0 12px', marginBottom: 8, position: 'relative', overflow: 'visible', zIndex: 20 }}>
+          <DataSourcePicker
+            value={datasource.id}
+            onChange={(newDsId) => {
+              setCurrent(newDsId, '');
+              navigate(`/dashboard/${newDsId}`);
+            }}
+          />
         </div>
 
         {/* 导航 */}

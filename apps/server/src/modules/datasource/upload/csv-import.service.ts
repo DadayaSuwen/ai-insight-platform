@@ -2,10 +2,10 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pipeline } from "node:stream/promises";
 import csv from "csv-parser";
 import { DatabaseService } from "../../database/database.service";
-import { sql } from "kysely";
+import { sql, Kysely } from "kysely";
+import type { Database } from "../../../core/kysely/types";
 
 /**
  * [Sprint 5.6] CSV 列定义 — inferSchema 的返回值
@@ -126,8 +126,14 @@ export class CsvImportService {
   /**
    * 在 PG 主库创建表:
    *   CREATE TABLE "csv_dataset_<uuid>" ("col1" TYPE, "col2" TYPE, ...)
+   *
+   * @param executor 可选的事务 Kysely 实例, 传入时在事务内执行 DDL
    */
-  async createTable(tableName: string, columns: ColumnDef[]): Promise<void> {
+  async createTable(
+    tableName: string,
+    columns: ColumnDef[],
+    executor?: Kysely<Database>,
+  ): Promise<void> {
     if (!tableName.startsWith("csv_dataset_")) {
       throw new Error(`Invalid table name: ${tableName}`);
     }
@@ -140,10 +146,11 @@ export class CsvImportService {
       .join(", ");
 
     const ddl = `CREATE TABLE "${tableName}" (${colDefs})`;
+    const db = executor ?? this.db.db;
     this.logger.log(`Creating table: ${ddl}`);
 
     try {
-      await sql`${sql.raw(ddl)}`.execute(this.db.db);
+      await sql`${sql.raw(ddl)}`.execute(db);
     } catch (err) {
       this.logger.error(
         `Failed to create table ${tableName}: ${err instanceof Error ? err.message : String(err)}`,
@@ -158,11 +165,16 @@ export class CsvImportService {
    * 流式解析 CSV → 批量 INSERT 到 PG 表。
    * 每 BATCH_SIZE 行 flush 一次; 超过 MAX_ROWS 行中断 + 回滚(DROP TABLE)。
    * 导入完成后删除临时文件。
+   *
+   * 使用 for-await-of 迭代 csv-parser 流, 自动处理背压 (Node.js 18+)。
+   *
+   * @param executor 可选的事务 Kysely 实例, 传入时在事务内执行 INSERT
    */
   async importCsv(
     tableName: string,
     filePath: string,
     columns: ColumnDef[],
+    executor?: Kysely<Database>,
   ): Promise<{ rowCount: number }> {
     if (!tableName.startsWith("csv_dataset_")) {
       throw new Error(`Invalid table name: ${tableName}`);
@@ -171,6 +183,7 @@ export class CsvImportService {
     // colNames: PG 列名 (slugified), csvHeaders: CSV 原始 header (读 row 用)
     const pgColNames = columns.map((c) => c.name);
     const csvHeaders = columns.map((c) => c.originalName);
+    const db = executor ?? this.db.db;
     let batch: Record<string, string>[] = [];
     let totalRows = 0;
 
@@ -195,7 +208,7 @@ export class CsvImportService {
       const insertSql = `INSERT INTO "${tableName}" (${pgColNames.map((c) => `"${c}"`).join(", ")}) VALUES ${valueTuples.join(", ")}`;
 
       try {
-        await this.db.executeQuery(insertSql);
+        await sql`${sql.raw(insertSql)}`.execute(db);
       } catch (err) {
         throw new Error(
           `Batch insert failed at row ~${totalRows}: ${err instanceof Error ? err.message : String(err)}`,
@@ -203,73 +216,68 @@ export class CsvImportService {
       }
     };
 
-    return new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(filePath, "utf8").pipe(
-        csv({
-          strict: false,
-          skipLines: 0,
-          mapHeaders: ({ header }: { header: string }) => header,
-        }),
-      );
+    const stream = fs.createReadStream(filePath, "utf8").pipe(
+      csv({
+        strict: false,
+        skipLines: 0,
+      }),
+    );
 
-      stream.on("data", async (row: Record<string, string>) => {
-        // 暂停流, 等当前 batch flush 完再继续
-        if (totalRows >= this.MAX_ROWS) {
-          stream.destroy();
-          return;
-        }
+    try {
+      for await (const row of stream) {
+        if (totalRows >= this.MAX_ROWS) break;
 
         totalRows++;
-        batch.push(row);
+        batch.push(row as Record<string, string>);
 
         if (batch.length >= this.BATCH_SIZE) {
-          stream.pause();
-          try {
-            await doFlush(batch);
-            batch = [];
-          } catch (err) {
-            stream.destroy();
-            return reject(err);
-          }
-          stream.resume();
-        }
-      });
-
-      stream.on("end", async () => {
-        try {
-          // flush 剩余行
           await doFlush(batch);
-          if (totalRows >= this.MAX_ROWS) {
-            // 超限: 回滚
-            await this.dropTable(tableName);
-            return reject(
-              new Error(
-                `CSV 数据量过大 (≥${this.MAX_ROWS} 行), 请精简后上传或直接接入业务数据库`,
-              ),
-            );
-          }
-          // 删除临时文件
-          try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-          this.logger.log(
-            `Imported ${totalRows} rows into "${tableName}"`,
-          );
-          resolve({ rowCount: totalRows });
-        } catch (err) {
-          reject(err);
+          batch = [];
         }
-      });
+      }
 
-      stream.on("error", (err) => {
-        reject(
-          new Error(
-            `CSV import error: ${err instanceof Error ? err.message : String(err)}`,
-          ),
+      // flush 剩余行
+      await doFlush(batch);
+
+      if (totalRows >= this.MAX_ROWS) {
+        // 超限: 回滚
+        if (!executor) {
+          // 非事务模式: 直接 DROP
+          await this.dropTable(tableName);
+        }
+        throw new Error(
+          `CSV 数据量过大 (≥${this.MAX_ROWS} 行), 请精简后上传或直接接入业务数据库`,
         );
-      });
-    });
+      }
+
+      // 删除临时文件
+      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      this.logger.log(
+        `Imported ${totalRows} rows into "${tableName}"`,
+      );
+      return { rowCount: totalRows };
+    } catch (err) {
+      // 事务模式下不单独 dropTable — 让事务回滚处理
+      if (!executor) {
+        try { await this.dropTable(tableName); } catch { /* ignore */ }
+      }
+      throw err;
+    }
   }
 
   /* ───────── 清理 ───────── */
+
+  /**
+   * 在 Kysely 事务内执行回调。
+   * 用于保证 CREATE TABLE + INSERT 的原子性。
+   */
+  async withTransaction<T>(
+    fn: (trx: Kysely<Database>) => Promise<T>,
+  ): Promise<T> {
+    return this.db.db.transaction().execute(async (trx) => {
+      return fn(trx);
+    });
+  }
 
   /**
    * 删除数据源时联动 DROP TABLE

@@ -65,65 +65,71 @@ export class MetadataService {
     const config = record.connectionConfig as Record<string, unknown>;
     const columnAliases = (config?.columnAliases as Record<string, unknown>) ?? {};
 
-    // [Sprint 5.7] LLM 语义推断 (在规则推断之后,覆盖 role + 补充 chineseName/description)
-    for (const table of inferred.tables) {
-      const llmResult = await this.semanticInference
-        .inferColumns(table.columns, table.name)
-        .catch((err) => {
-          this.logger.warn(
-            `Semantic inference failed for table "${table.name}", using rule-based: ${(err as Error).message}`,
-          );
-          return null; // 降级: 不阻断
-        });
-
-      if (llmResult) {
-        table.columns = llmResult;
-      } else {
-        // LLM 失败 → 用默认 chineseName (physicalName)
-        table.columns = this.semanticInference.fallbackColumns(table.columns);
-      }
-    }
-
-    // [Sprint 5.7+] 用户确认的中文别名覆盖 LLM 推断 (最高优先级)
-    // [Fix-1 Task 1.4] 兼容旧格式(纯字符串 chineseName) + 新格式({chineseName, role, description})
+    // [Sprint 5.7+] 用户确认的中文别名先覆盖规则推断 (最高优先级, 快速路径)
     if (Object.keys(columnAliases).length > 0) {
-      for (const table of inferred.tables) {
-        for (const col of table.columns) {
-          const alias = columnAliases[col.name];
-          if (alias == null) continue;
-          if (typeof alias === "string") {
-            // 旧格式：纯字符串 chineseName
-            col.chineseName = alias;
-          } else if (typeof alias === "object") {
-            // 新格式：{ chineseName, role, description }
-            const obj = alias as {
-              chineseName?: string;
-              role?: string;
-              description?: string;
-            };
-            if (obj.chineseName) col.chineseName = obj.chineseName;
-            // role 是字面量联合类型, 收窄到 4 个允许值
-            if (
-              obj.role === "dimension" ||
-              obj.role === "measure" ||
-              obj.role === "time" ||
-              obj.role === "identifier"
-            ) {
-              col.semanticRole = obj.role;
-            }
-            if (obj.description) col.description = obj.description;
-          }
-        }
-      }
+      applyUserAliases(inferred.tables, columnAliases);
     }
 
+    // 先用规则推断结果缓存, 快速返回 (避免 LLM 语义推断阻塞请求)
     this.cache.set(dataSourceId, inferred);
-    // 持久化最近一份 snapshot 到 Prisma (供审计)
-    await this.ds.persistSnapshot(inferred);
+
+    // [Batch 6 B17] LLM 语义推断改为 fire-and-forget, 异步更新缓存
+    // 首次请求会立即返回规则推断结果, LLM 增强结果在后台补充
+    this.enrichWithLlmAsync(dataSourceId, inferred, columnAliases);
+
+    // 持久化最近一份 snapshot 到 Prisma (供审计) — 失败不阻断元数据流
+    try {
+      await this.ds.persistSnapshot(inferred);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to persist snapshot for ${dataSourceId}: ${(err as Error).message}`,
+      );
+    }
     this.logger.log(
       `Metadata[${dataSourceId}] cached: ${inferred.tables.length} tables`,
     );
     return inferred;
+  }
+
+  /**
+   * [Batch 6 B17] 异步 LLM 语义推断 — fire-and-forget, 不阻塞请求。
+   * 在后台逐个表调用 LLM, 结果写回缓存。
+   */
+  private enrichWithLlmAsync(
+    dataSourceId: string,
+    snapshot: MetadataSnapshot,
+    columnAliases: Record<string, unknown>,
+  ): void {
+    Promise.resolve().then(async () => {
+      for (const table of snapshot.tables) {
+        try {
+          const llmResult = await this.semanticInference
+            .inferColumns(table.columns, table.name);
+          if (llmResult) {
+            table.columns = llmResult;
+          } else {
+            table.columns = this.semanticInference.fallbackColumns(table.columns);
+          }
+          // 重新应用用户别名覆盖 LLM 推断
+          if (Object.keys(columnAliases).length > 0) {
+            applyUserAliases(snapshot.tables, columnAliases);
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Async semantic inference failed for table "${table.name}": ${(err as Error).message}`,
+          );
+        }
+      }
+      // 用 LLM 增强结果更新缓存
+      this.cache.set(dataSourceId, snapshot);
+      this.logger.log(
+        `Metadata[${dataSourceId}] LLM-enriched: ${snapshot.tables.length} tables`,
+      );
+    }).catch((err) => {
+      this.logger.warn(
+        `Async LLM enrichment failed for ${dataSourceId}: ${(err as Error).message}`,
+      );
+    });
   }
 
   /**
@@ -133,5 +139,33 @@ export class MetadataService {
     const snap = await this.get(dataSourceId);
     const out = serializeForPrompt(snap);
     return out.text;
+  }
+}
+
+/** [Batch 6 B17] 将用户确认的别名覆盖到快照列上 (规则+LLM 推断都适用) */
+function applyUserAliases(
+  tables: MetadataSnapshot["tables"],
+  columnAliases: Record<string, unknown>,
+): void {
+  for (const table of tables) {
+    for (const col of table.columns) {
+      const alias = columnAliases[col.name];
+      if (alias == null) continue;
+      if (typeof alias === "string") {
+        col.chineseName = alias;
+      } else if (typeof alias === "object") {
+        const obj = alias as { chineseName?: string; role?: string; description?: string };
+        if (obj.chineseName) col.chineseName = obj.chineseName;
+        if (
+          obj.role === "dimension" ||
+          obj.role === "measure" ||
+          obj.role === "time" ||
+          obj.role === "identifier"
+        ) {
+          col.semanticRole = obj.role;
+        }
+        if (obj.description) col.description = obj.description;
+      }
+    }
   }
 }

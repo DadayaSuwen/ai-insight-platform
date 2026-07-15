@@ -70,6 +70,7 @@ export function createQueryDetailsTool(
           snapshot,
           intent.table,
           intent.metrics.map(m => m.alias),
+          metricLabels,
         );
         return {
           dataSourceId: input.dataSourceId,

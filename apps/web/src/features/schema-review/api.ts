@@ -57,6 +57,14 @@ export async function startReview(datasourceId: string): Promise<StartReviewResp
   return res.data.data;
 }
 
+export async function confirmAllFields(reviewId: string): Promise<{ confirmed: number; total: number }> {
+  const res = await axiosInstance.post<{ success: boolean; data: { confirmed: number; total: number } }>(
+    '/api/schema/review/confirm-all',
+    { reviewId },
+  );
+  return res.data.data;
+}
+
 export async function finalizeReview(reviewId: string): Promise<{ schemaUnderstanding: Record<string, unknown> }> {
   const res = await axiosInstance.post<{ success: boolean; data: { schemaUnderstanding: Record<string, unknown> } }>(
     '/api/schema/review/finalize',
@@ -83,4 +91,16 @@ export async function getDatasourceSchema(datasourceId: string): Promise<{
     schemaUnderstanding: res.data.data?.schemaUnderstanding ?? null,
     exploreStatus: res.data.data?.exploreStatus ?? 'unknown',
   };
+}
+
+/** Schema 修订 — 保存手动编辑的列别名 */
+export async function saveColumns(
+  datasourceId: string,
+  columns: Record<string, { chineseName: string; role?: string; description?: string }>,
+): Promise<{ updated: number }> {
+  const res = await axiosInstance.post<{ success: boolean; data: { updated: number } }>(
+    `/api/datasources/${datasourceId}/columns`,
+    { columns },
+  );
+  return res.data.data;
 }

@@ -14,21 +14,20 @@ import { toast } from '../../store/toast';
 const DB_TYPES = [
   { key: 'postgres', icon: '🐘', name: 'PostgreSQL' },
   { key: 'mysql', icon: '🐬', name: 'MySQL' },
-  { key: 'sqlite', icon: '📦', name: 'SQLite' },
-  { key: 'sqlserver', icon: '🪣', name: 'SQL Server' },
+  // SQLite / SQL Server 暂不支持, coming soon
 ];
 
 export default function ConnectDatabasePage() {
   const navigate = useNavigate();
   const [dbType, setDbType] = useState('postgres');
   const [form, setForm] = useState({
-    host: '192.168.1.100',
+    host: '',
     port: '5432',
-    database: 'ecommerce_db',
+    database: '',
     schema: 'public',
-    user: 'readonly_user',
-    password: 'demo-password',
-    name: '电商订单库',
+    user: '',
+    password: '',
+    name: '',
   });
   const [testing, setTesting] = useState(false);
   const [submitting, setSubmitting] = useState(false);

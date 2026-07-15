@@ -9,6 +9,7 @@ import {
   type UploadPreviewResponse,
 } from './api';
 import { toast } from '../../store/toast';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 import CsvPreviewModal from './CsvPreviewModal';
 import DatabaseConnectionForm from './DatabaseConnectionForm';
 
@@ -108,6 +109,11 @@ export default function DataSourcesTab() {
     try {
       await deleteDataSource(id);
       toast.success('已删除');
+      const cur = useDatasourceStore.getState().currentDatasourceId;
+      if (cur === id) {
+        useDatasourceStore.getState().clear();
+        localStorage.removeItem('aiip.chat.dataSourceId.v1');
+      }
       await reload();
     } catch (err) {
       toast.error(`删除失败：${err instanceof Error ? err.message : String(err)}`);

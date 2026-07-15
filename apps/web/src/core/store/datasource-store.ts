@@ -29,6 +29,8 @@ export const useDatasourceStore = create<DatasourceState>((set) => ({
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY_ID, id);
       localStorage.setItem(STORAGE_KEY_NAME, name);
+      // [Fix] 同步到 chat store 的 selectedDataSourceId, 防止旧值残留
+      localStorage.setItem('aiip.chat.dataSourceId.v1', id);
     }
     set({ currentDatasourceId: id, currentDatasourceName: name });
   },

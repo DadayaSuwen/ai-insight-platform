@@ -59,7 +59,11 @@ export function createGenChartTool(
 
         // [Sprint 5.7] 构建 fieldMapping: 物理名 → 中文名
         const metricAliases = metricList.map(m => m.alias);
-        const fieldMapping = buildFieldMapping(snapshot, table, metricAliases);
+        const fieldMetricLabels = metricList.reduce(
+          (acc, m) => (m.label ? { ...acc, [m.alias]: m.label } : acc),
+          {} as Record<string, string>,
+        );
+        const fieldMapping = buildFieldMapping(snapshot, table, metricAliases, fieldMetricLabels);
 
         // 2. 构造 QueryIntent
         const intent: QueryIntent = {

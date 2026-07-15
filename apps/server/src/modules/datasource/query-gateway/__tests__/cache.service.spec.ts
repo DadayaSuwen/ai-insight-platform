@@ -55,6 +55,9 @@ const fakeResult = (n: number) => ({
   durationMs: 5,
 });
 
+const U1 = "user-1";
+const U2 = "user-2";
+
 describe("[Sprint 4 / V3] QueryCacheService", () => {
   let cache: QueryCacheService;
   let now = 1_000_000;
@@ -68,58 +71,64 @@ describe("[Sprint 4 / V3] QueryCacheService", () => {
 
   test("set → get 返回同 result", () => {
     const r = fakeResult(3);
-    cache.set("ds1", intentA, r);
-    expect(cache.get("ds1", intentA)).toEqual(r);
+    cache.set("ds1", U1, intentA, r);
+    expect(cache.get("ds1", U1, intentA)).toEqual(r);
   });
 
   test("key 顺序稳定:相同 intent 不同 key 顺序 → 命中", () => {
     const r = fakeResult(2);
-    cache.set("ds1", intentA, r);
-    expect(cache.get("ds1", intentAReordered)).toEqual(r);
+    cache.set("ds1", U1, intentA, r);
+    expect(cache.get("ds1", U1, intentAReordered)).toEqual(r);
   });
 
   test("不同 intent → miss", () => {
     const r = fakeResult(2);
-    cache.set("ds1", intentA, r);
-    expect(cache.get("ds1", intentB)).toBeNull();
+    cache.set("ds1", U1, intentA, r);
+    expect(cache.get("ds1", U1, intentB)).toBeNull();
+  });
+
+  test("不同 userId 同一 intent → miss (租户隔离)", () => {
+    const r = fakeResult(3);
+    cache.set("ds1", U1, intentA, r);
+    expect(cache.get("ds1", U2, intentA)).toBeNull();
   });
 
   test("invalidate(dataSourceId) 删除所有该 id 的 entry", () => {
-    cache.set("ds1", intentA, fakeResult(1));
-    cache.set("ds1", intentB, fakeResult(2));
-    cache.set("ds2", intentA, fakeResult(3));
+    cache.set("ds1", U1, intentA, fakeResult(1));
+    cache.set("ds1", U1, intentB, fakeResult(2));
+    cache.set("ds2", U1, intentA, fakeResult(3));
     expect(cache.size()).toBe(3);
     const removed = cache.invalidate("ds1");
     expect(removed).toBe(2);
     expect(cache.size()).toBe(1);
     // ds2 的 intentA 仍存在
-    expect(cache.get("ds2", intentA)).not.toBeNull();
+    expect(cache.get("ds2", U1, intentA)).not.toBeNull();
   });
 
   test("空结果 30s TTL,过期后 miss", () => {
     const empty = fakeResult(0);
-    cache.set("ds1", intentA, empty);
+    cache.set("ds1", U1, intentA, empty);
     // 29s 后仍在
     now += 29_000;
-    expect(cache.get("ds1", intentA)).toEqual(empty);
+    expect(cache.get("ds1", U1, intentA)).toEqual(empty);
     // 31s 后过期
     now += 2_000;
-    expect(cache.get("ds1", intentA)).toBeNull();
+    expect(cache.get("ds1", U1, intentA)).toBeNull();
   });
 
   test("非空 5min TTL", () => {
-    cache.set("ds1", intentA, fakeResult(5));
+    cache.set("ds1", U1, intentA, fakeResult(5));
     // 4min 后仍在
     now += 4 * 60_000;
-    expect(cache.get("ds1", intentA)).not.toBeNull();
+    expect(cache.get("ds1", U1, intentA)).not.toBeNull();
     // 6min 后过期
     now += 2 * 60_000;
-    expect(cache.get("ds1", intentA)).toBeNull();
+    expect(cache.get("ds1", U1, intentA)).toBeNull();
   });
 
   test("invalidateAll 清空所有", () => {
-    cache.set("ds1", intentA, fakeResult(1));
-    cache.set("ds2", intentB, fakeResult(2));
+    cache.set("ds1", U1, intentA, fakeResult(1));
+    cache.set("ds2", U1, intentB, fakeResult(2));
     cache.invalidateAll();
     expect(cache.size()).toBe(0);
   });

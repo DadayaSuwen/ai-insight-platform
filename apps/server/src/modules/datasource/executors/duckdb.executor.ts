@@ -12,7 +12,6 @@ import type {
   TableMetadata,
 } from "@workspace/types";
 import type { QueryIntent } from "@workspace/types";
-import { guardSql } from "../security/sql-guard";
 import type {
   DataSourceExecutor,
   QueryResult,
@@ -224,12 +223,9 @@ export class DuckDbExecutor implements DataSourceExecutor {
   async executeRaw(rawSql: string): Promise<QueryResult> {
     await this.initPromise;
     const start = Date.now();
-    const guard = guardSql(rawSql);
-    if (guard.rejected) {
-      throw new Error(`SQL rejected by guard: ${guard.reason}`);
-    }
+    // [Batch 3 B6] gateway 层已做过 guardSql + LIMIT 护栏,executor 不再重复解析 AST
     try {
-      const rawRows = (await this.conn.all(guard.sql)) as Array<
+      const rawRows = (await this.conn.all(rawSql)) as Array<
         Record<string, unknown>
       >;
       const durationMs = Date.now() - start;
@@ -237,7 +233,7 @@ export class DuckDbExecutor implements DataSourceExecutor {
       return {
         rows: normalized,
         rowCount: normalized.length,
-        truncated: guard.modified && normalized.length >= 1000,
+        truncated: normalized.length >= 1000,
         durationMs,
       };
     } catch (err) {

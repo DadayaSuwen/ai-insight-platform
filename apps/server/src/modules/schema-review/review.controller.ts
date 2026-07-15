@@ -135,6 +135,14 @@ export class ReviewController {
     });
   }
 
+  @Post("confirm-all")
+  @Permissions(PERMISSIONS.SCHEMA_REVIEW)
+  async confirmAll(@Body() body: unknown, @CurrentUser() user: { sub: string }) {
+    const parsed = FinalizeSchema.parse(body); // reuses { reviewId }
+    const result = await this.reviewService.confirmAllFields(parsed.reviewId, user.sub);
+    return { success: true, data: result };
+  }
+
   @Post("finalize")
   @Permissions(PERMISSIONS.SCHEMA_REVIEW)
   async finalize(@Body() body: unknown, @CurrentUser() user: { sub: string }) {

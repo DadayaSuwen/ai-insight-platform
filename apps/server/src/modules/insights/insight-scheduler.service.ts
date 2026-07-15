@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import * as cron from "node-cron";
 import { DatabaseService } from "../database/database.service";
 import { InsightAgent } from "../ai/agents/insight.agent";
@@ -238,12 +239,6 @@ export class InsightSchedulerService implements OnModuleInit {
         );
       }
     }
-
-    try {
-      await executor.dispose();
-    } catch {
-      // dispose 失败不影响主流程
-    }
     return series;
   }
 
@@ -269,6 +264,7 @@ export class InsightSchedulerService implements OnModuleInit {
     await this.db.db
       .insertInto("Insight")
       .values({
+        id: randomUUID(),
         datasourceId,
         type: result.type,
         severity: result.severity,

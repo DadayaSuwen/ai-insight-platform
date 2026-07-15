@@ -44,9 +44,9 @@ const InsightSpecSchema = z.object({
 });
 
 const DashboardConfigSchema = z.object({
-  kpis: z.array(KpiSchema).min(3).max(8),
-  charts: z.array(ChartSpecSchema).min(2).max(6),
-  insights: z.array(InsightSpecSchema).min(2).max(5),
+  kpis: z.array(KpiSchema).min(1).max(8),
+  charts: z.array(ChartSpecSchema).min(1).max(6),
+  insights: z.array(InsightSpecSchema).min(1).max(5),
 });
 
 export type DashboardConfig = z.infer<typeof DashboardConfigSchema>;

@@ -24,6 +24,7 @@ export interface DataSourceListItem {
   /** "postgres" | "mysql" | "duckdb-csv" */
   type: string;
   status: string;
+  exploreStatus?: string;
   lastError: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -177,4 +178,25 @@ export async function registerCsvFromPreview(opts: {
  */
 export async function cancelUpload(uploadId: string): Promise<void> {
   await axiosInstance.delete(`/api/datasources/upload/${uploadId}`);
+}
+
+/** 更新数据源连接配置 */
+export async function updateDataSource(
+  id: string,
+  data: {
+    name?: string;
+    host?: string;
+    port?: number;
+    database?: string;
+    user?: string;
+    password?: string;
+    ssl?: boolean;
+    schema?: string;
+  },
+): Promise<DataSourceListItem> {
+  const res = await axiosInstance.put<{ success: boolean; data: DataSourceListItem }>(
+    `/api/datasources/${id}`,
+    data,
+  );
+  return res.data.data;
 }

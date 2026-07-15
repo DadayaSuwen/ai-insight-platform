@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   ForbiddenException,
+  Put,
   Get,
   HttpCode,
   HttpException,
@@ -85,6 +86,68 @@ export class DatasourceController {
       throw new NotFoundException(`DataSource ${id} not found`);
     }
     return { success: true, data: item };
+  }
+
+  /** Schema 修订 — 手动保存列别名/角色/描述 */
+  @Post(":id/columns")
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
+  async saveColumns(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: { sub: string },
+  ) {
+    const parsed = z
+      .object({ columns: z.record(z.object({ chineseName: z.string(), role: z.string().optional(), description: z.string().optional() })) })
+      .parse(body);
+    const result = await this.ds.updateColumnAliases(id, user.sub, parsed.columns);
+    // 刷新元数据缓存
+    this.cache.invalidate(id);
+    return { success: true, data: result };
+  }
+
+  /** 编辑数据源连接配置 */
+  @Put(":id")
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
+  async update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: { sub: string },
+  ) {
+    const parsed = z.object({
+      name: z.string().min(1).max(200).optional(),
+      description: z.string().max(1000).optional(),
+      host: z.string().min(1).optional(),
+      port: z.number().int().positive().optional(),
+      database: z.string().min(1).optional(),
+      user: z.string().min(1).optional(),
+      password: z.string().optional(),
+      ssl: z.boolean().optional(),
+      schema: z.string().optional(),
+    }).parse(body);
+
+    // 校验所有权
+    const record = await this.ds.getByIdForUser(id, user.sub);
+    if (!record) throw new NotFoundException(`DataSource ${id} not found`);
+
+    // 合并 connectionConfig
+    const config = (record.connectionConfig as Record<string, unknown>) ?? {};
+    if (parsed.host !== undefined) config.host = parsed.host;
+    if (parsed.port !== undefined) config.port = parsed.port;
+    if (parsed.database !== undefined) config.database = parsed.database;
+    if (parsed.user !== undefined) config.user = parsed.user;
+    if (parsed.password !== undefined) config.password = parsed.password;
+    if (parsed.ssl !== undefined) config.ssl = parsed.ssl;
+    if (parsed.schema !== undefined) config.schema = parsed.schema;
+
+    const updated = await this.ds.updateConnection(id, user.sub, {
+      name: parsed.name,
+      description: parsed.description,
+      connectionConfig: config,
+    });
+
+    this.cache.invalidate(id);
+    await this.factory.evict(id);
+    return { success: true, data: updated };
   }
 
   @Post()

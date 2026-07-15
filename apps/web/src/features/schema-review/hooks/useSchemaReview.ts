@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { TOKEN_KEY } from '../../../core/api/AxiosInstance';
-import { startReview as apiStartReview, finalizeReview } from '../api';
+import { startReview as apiStartReview, finalizeReview, confirmAllFields } from '../api';
 import type { PendingField, StartReviewResponse } from '../api';
 import { useDatasourceStore } from '../../../core/store/datasource-store';
 
@@ -41,6 +41,7 @@ interface UseSchemaReviewReturn {
   error: string | null;
   startReview: (datasourceId: string) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
+  confirmAll: () => Promise<void>;
   finalize: () => Promise<void>;
 }
 
@@ -211,6 +212,25 @@ export function useSchemaReview(): UseSchemaReviewReturn {
     await sendSSEMessage(reviewId, message);
   }, [reviewId, sendSSEMessage]);
 
+  const confirmAll = useCallback(async () => {
+    if (!reviewId || fields.length === 0) return;
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const result = await confirmAllFields(reviewId);
+      setFields([]);
+      setDone({ remaining: 0, allConfirmed: true });
+      setMessages((prev) => [
+        ...prev,
+        { role: 'ai' as const, content: `✓ 已批量确认 ${result.confirmed} 个字段，全部采纳 AI 推断值。` },
+      ]);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [reviewId, fields.length]);
+
   const finalize = useCallback(async () => {
     if (!reviewId) return;
     setIsProcessing(true);
@@ -234,6 +254,7 @@ export function useSchemaReview(): UseSchemaReviewReturn {
     error,
     startReview,
     sendMessage,
+    confirmAll,
     finalize,
   };
 }

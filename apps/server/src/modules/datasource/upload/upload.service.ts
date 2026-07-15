@@ -5,6 +5,7 @@ import { MetadataCacheService } from "../metadata/metadata-cache.service";
 import { MetadataService } from "../metadata/metadata.service";
 import { DatasourceService } from "../datasource.service";
 import { CsvImportService, ColumnDef } from "./csv-import.service";
+import { parsePgUrl } from "../parse-pg-url";
 
 /**
  * [Sprint 5.6] CSV 上传服务 — 流式 PG 入库版
@@ -110,23 +111,32 @@ export class UploadService {
     // 2. 应用用户列覆写 (如果有)
     const columns = applyOverrides(rawColumns, opts.columnOverrides);
 
-    // 3. CREATE TABLE + COPY 导入
+    // 3. CREATE TABLE + COPY 导入 (事务保证原子性, 避免崩溃遗留孤儿表)
     try {
-      await this.csvImport.createTable(tableName, columns);
-      const { rowCount } = await this.csvImport.importCsv(
-        tableName,
-        uploadPath,
-        columns,
-      );
+      const { rowCount } = await this.csvImport.withTransaction(async (trx) => {
+        await this.csvImport.createTable(tableName, columns, trx);
+        return this.csvImport.importCsv(tableName, uploadPath, columns, trx);
+      });
       // importCsv 成功后已删除临时文件
 
       // 4. 注册 DataSource (type: postgres, 指向主库)
-      const pgConfig = parseDatabaseUrl();
+      const databaseUrl = process.env.DATABASE_URL;
+      if (!databaseUrl) throw new Error("DATABASE_URL not set");
+      const parsed = parsePgUrl(databaseUrl);
+      if (!parsed) throw new Error(`Cannot parse DATABASE_URL: ${databaseUrl}`);
+      const pgConfig = {
+        host: parsed.host,
+        port: parsed.port,
+        database: parsed.database,
+        user: parsed.user,
+        password: parsed.password ?? "",
+      };
       // [Sprint 5.7+] 提取用户确认的中文别名, 存入 connectionConfig
-      const columnAliases: Record<string, string> = {};
+      // 使用新格式 { chineseName } 以兼容 metadata.service.ts 的优先级覆盖逻辑
+      const columnAliases: Record<string, { chineseName: string }> = {};
       for (const ov of opts.columnOverrides) {
         if (ov.alias && ov.alias.trim() && ov.alias.trim() !== ov.originalName) {
-          columnAliases[ov.originalName] = ov.alias.trim();
+          columnAliases[ov.originalName] = { chineseName: ov.alias.trim() };
         }
       }
       const created = await this.ds.register({
@@ -247,28 +257,3 @@ function applyOverrides(
   });
 }
 
-/** 从 DATABASE_URL 解析 PG 连接信息 */
-function parseDatabaseUrl(): {
-  host: string;
-  port: number;
-  database: string;
-  user: string;
-  password: string;
-} {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-
-  // postgresql://user:password@host:port/database
-  const match = url.match(
-    /^postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)$/,
-  );
-  if (!match) throw new Error(`Cannot parse DATABASE_URL: ${url}`);
-
-  return {
-    user: match[1],
-    password: match[2],
-    host: match[3],
-    port: parseInt(match[4], 10),
-    database: match[5],
-  };
-}

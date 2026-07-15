@@ -146,15 +146,9 @@ export class PlannerAgent {
       ? serializeForPrompt(snapshot).text
       : `(正在加载 ${dataSourceId} 的 schema…`;
 
-    // 2. 工具描述 (动态从 Zod schema 抽)
-    const toolNames = [
-      "query_details",
-      "gen_chart",
-      "generate_insight",
-      "get_table_schema",
-    ];
+    // 2. 工具描述 (按名称匹配,防重构时顺序偏移)
     const toolDescs = tools
-      .map((t, i) => `- ${toolNames[i] ?? t.name}: ${t.description}`)
+      .map((t) => `- ${t.name}: ${t.description}`)
       .join("\n");
 
     // [Sprint 2] 完全重写。零硬编码业务列名。

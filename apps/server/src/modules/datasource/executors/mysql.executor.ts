@@ -11,7 +11,6 @@ import type {
   TableMetadata,
 } from "@workspace/types";
 import type { QueryIntent } from "@workspace/types";
-import { guardSql } from "../security/sql-guard";
 import type {
   DataSourceExecutor,
   QueryResult,
@@ -169,13 +168,10 @@ export class MysqlExecutor implements DataSourceExecutor, OnModuleDestroy {
 
   async executeRaw(rawSql: string): Promise<QueryResult> {
     const start = Date.now();
-    const guard = guardSql(rawSql);
-    if (guard.rejected) {
-      throw new Error(`SQL rejected by guard: ${guard.reason}`);
-    }
+    // [Batch 3 B6] gateway 层已做过 guardSql + LIMIT 护栏,executor 不再重复解析 AST
     try {
       // [架构师避坑 #1] 用 .execute(sql) 参数化路径,不暴露 query
-      const [rows, fields] = (await this.pool.execute(guard.sql)) as [
+      const [rows, fields] = (await this.pool.execute(rawSql)) as [
         Array<Record<string, unknown>>,
         unknown,
       ];
@@ -184,7 +180,7 @@ export class MysqlExecutor implements DataSourceExecutor, OnModuleDestroy {
       return {
         rows: normalized,
         rowCount: normalized.length,
-        truncated: guard.modified && normalized.length >= 1000,
+        truncated: normalized.length >= 1000,
         durationMs,
       };
     } catch (err) {

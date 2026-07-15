@@ -1,117 +1,237 @@
 /**
- * [Fix-7 Task 7.13] Schema 修订页 — 1:1 还原原型 PAGES.schema (pages.js L1087-1130)
+ * Schema 修订页 — 手动编辑每个字段的中文名/角色/描述
  *
- * 当前 Schema 概览 + 3 个修订入口
+ * 从 API 加载当前 schema，逐字段可编辑，保存后写入 DataSource.columnAliases。
  */
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { getDatasourceSchema, saveColumns, type SchemaUnderstanding } from './api';
+import { toast } from '../../store/toast';
 
-const SCENARIOS = [
-  { text: 'Agent 错误理解了某字段的含义,需要修正', icon: '💬', color: 'var(--green)', bg: 'var(--green-lighter)' },
-  { text: '业务上线后字段含义发生变化', icon: '🔄', color: 'var(--orange)', bg: 'var(--orange-light)' },
-  { text: '新增了字段、删除了表或调整了表结构', icon: '🆕', color: 'var(--info)', bg: 'var(--info-light)' },
-  { text: '数据敏感级别变化,需要重新脱敏处理', icon: '🛡️', color: 'var(--amber)', bg: 'var(--warning-light)' },
+interface ColEdit {
+  table: string;
+  name: string;
+  rawType: string;
+  chineseName: string;
+  role: string;
+  description: string;
+  sampleValues?: string[];
+  dirty: boolean;
+}
+
+const ROLE_OPTIONS = [
+  { value: 'dimension', label: '维度' },
+  { value: 'measure', label: '度量' },
+  { value: 'time', label: '时间' },
+  { value: 'identifier', label: '标识符' },
 ];
 
 export default function SchemaRevisePage() {
   const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
+  const [cols, setCols] = useState<ColEdit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!datasourceId) return;
+    setLoading(true);
+    getDatasourceSchema(datasourceId)
+      .then(({ schemaUnderstanding }) => {
+        if (!schemaUnderstanding?.tables) {
+          setCols([]);
+          return;
+        }
+        const edits: ColEdit[] = [];
+        for (const t of schemaUnderstanding.tables) {
+          for (const c of t.columns) {
+            edits.push({
+              table: t.name,
+              name: c.name,
+              rawType: c.rawType,
+              chineseName: c.chineseName ?? '',
+              role: c.semanticRole ?? 'dimension',
+              description: c.description ?? '',
+              dirty: false,
+            });
+          }
+        }
+        setCols(edits);
+        // 默认展开所有表
+        const exp: Record<string, boolean> = {};
+        for (const t of schemaUnderstanding.tables) exp[t.name] = true;
+        setExpanded(exp);
+      })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false));
+  }, [datasourceId]);
+
+  const updateCol = (idx: number, field: keyof ColEdit, value: string) => {
+    setCols((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value, dirty: true } : c)));
+  };
+
+  const dirtyCount = cols.filter((c) => c.dirty).length;
+
+  const handleSave = async () => {
+    if (!datasourceId) { toast.error('缺少数据源 ID'); return; }
+    const dirty = cols.filter((c) => c.dirty);
+    if (dirty.length === 0) { toast.info('没有需要保存的修改'); return; }
+    setSaving(true);
+    try {
+      const payload: Record<string, { chineseName: string; role?: string; description?: string }> = {};
+      for (const c of dirty) {
+        payload[c.name] = {
+          chineseName: c.chineseName || c.name,
+          role: c.role,
+          description: c.description,
+        };
+      }
+      const result = await saveColumns(datasourceId, payload);
+      // 保存成功后刷新页面让 metadata 缓存重新加载别名
+      toast.success(`已保存 ${result.updated} 个字段`);
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      console.error('[SchemaRevise] save failed', err);
+      toast.error(`保存失败: ${(err as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 按表分组
+  const tables = [...new Set(cols.map((c) => c.table))];
+  const tableGroups = tables.map((t) => ({ name: t, cols: cols.filter((c) => c.table === t) }));
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '40vh' }}>
+        <p style={{ color: 'var(--text-muted)' }}>加载 Schema...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <p style={{ color: 'var(--error)', marginBottom: 16 }}>{error}</p>
+        <button className="btn btn-secondary btn-sm" onClick={() => navigate('/datasources')}>返回</button>
+      </div>
+    );
+  }
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Schema 修订 · 重新进入对话</h1>
-          <p className="page-subtitle">数据库结构变化或 Agent 理解有误时,可重新进入纠错对话</p>
+          <h1 className="page-title">Schema 修订 · 手动编辑字段</h1>
+          <p className="page-subtitle">
+            直接修改每个字段的中文名、语义角色和描述
+            {dirtyCount > 0 && <span style={{ color: 'var(--amber)', marginLeft: 8 }}>（{dirtyCount} 个未保存）</span>}
+          </p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-            导出 JSON
+          <button className="btn btn-secondary btn-sm" onClick={() => datasourceId && navigate(`/schema-review/${datasourceId}`)}>
+            💬 AI 纠错对话
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId ?? 'mock'}`)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-            进入纠错对话
+          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/explore/${datasourceId}`)}>
+            🔄 重新探索
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleSave}
+            disabled={dirtyCount === 0 || saving}
+          >
+            {saving ? '保存中...' : `保存修改${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
           </button>
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-header">
-          <div className="card-title">当前 Schema 理解(2026-07-14 14:32 敲定)</div>
-          <span className="badge badge-success">已确认</span>
-        </div>
-        <div className="card-body" style={{ padding: 16 }}>
-          <div className="grid grid-4">
-            <StatBox value="8" label="业务表" color="var(--green-dark)" />
-            <StatBox value="67" label="字段总数" color="var(--green-dark)" />
-            <StatBox value="7" label="表关系" color="var(--green-dark)" />
-            <StatBox value="2" label="敏感字段" color="var(--warning)" />
+      {tableGroups.map((tg) => (
+        <div key={tg.name} className="card" style={{ marginBottom: 16 }}>
+          <div
+            className="card-header"
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setExpanded((prev) => ({ ...prev, [tg.name]: !prev[tg.name] }))}
+          >
+            <div className="card-title">
+              {expanded[tg.name] ? '▾' : '▸'} {tg.name}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>
+                {tg.cols.length} 个字段
+              </span>
+            </div>
           </div>
+          {expanded[tg.name] && (
+            <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
+              <table className="table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 160 }}>物理名</th>
+                    <th style={{ width: 90 }}>类型</th>
+                    <th style={{ width: 160 }}>中文名</th>
+                    <th style={{ width: 100 }}>语义角色</th>
+                    <th>描述</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tg.cols.map((c, i) => {
+                    const idx = cols.findIndex((x) => x.table === c.table && x.name === c.name);
+                    return (
+                      <tr key={c.name} style={c.dirty ? { background: 'var(--warning-light)' } : undefined}>
+                        <td>
+                          <code style={{ fontSize: 11 }}>{c.name}</code>
+                        </td>
+                        <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.rawType}</td>
+                        <td>
+                          <input
+                            className="input input-sm"
+                            style={{ width: '100%', fontSize: 12 }}
+                            value={c.chineseName}
+                            onChange={(e) => updateCol(idx, 'chineseName', e.target.value)}
+                            placeholder={c.name}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="input input-sm"
+                            style={{ width: '100%', fontSize: 12 }}
+                            value={c.role}
+                            onChange={(e) => updateCol(idx, 'role', e.target.value)}
+                          >
+                            {ROLE_OPTIONS.map((r) => (
+                              <option key={r.value} value={r.value}>{r.label}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            className="input input-sm"
+                            style={{ width: '100%', fontSize: 12 }}
+                            value={c.description}
+                            onChange={(e) => updateCol(idx, 'description', e.target.value)}
+                            placeholder="业务含义说明..."
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </div>
+      ))}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-header">
-          <div className="card-title">何时需要重新探索</div>
+      {cols.length === 0 && (
+        <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+          <div style={{ fontSize: 14 }}>该数据源尚未完成 Schema 探索，请先</div>
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigate(`/explore/${datasourceId}`)}>
+            开始探索
+          </button>
         </div>
-        <div className="card-body" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {SCENARIOS.map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12, background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: s.bg, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
-                  {s.icon}
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{s.text}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><div className="card-title">修订入口</div></div>
-        <div className="card-body" style={{ padding: 20 }}>
-          <div className="grid grid-3">
-            <div
-              onClick={() => navigate(`/schema-review/${datasourceId ?? 'mock'}`)}
-              style={{ padding: 20, background: 'var(--green-lighter)', borderRadius: 10, cursor: 'pointer', border: '1px solid var(--green-light)' }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>💬</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>进入纠错对话</div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                与 Agent 对话,修正字段理解或补充业务上下文。保留已有探索结果,只修正有问题的部分。
-              </div>
-            </div>
-            <div
-              style={{ padding: 20, background: 'var(--bg-secondary)', borderRadius: 10, cursor: 'pointer', border: '1px solid var(--border)' }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>🔄</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>完全重新探索</div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                清空已有理解,从零开始探索。适用于数据库结构大规模重构后的场景。
-              </div>
-            </div>
-            <div
-              style={{ padding: 20, background: 'var(--bg-secondary)', borderRadius: 10, cursor: 'pointer', border: '1px solid var(--border)' }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>📝</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>手动编辑 JSON</div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                直接编辑 Schema 理解的 JSON 配置,适用于高级用户或批量修改。
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
     </>
-  );
-}
-
-function StatBox({ value, label, color }: { value: string; label: string; color: string }) {
-  return (
-    <div style={{ textAlign: 'center', padding: 16, background: 'var(--bg-secondary)', borderRadius: 10 }}>
-      <div className="num" style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{label}</div>
-    </div>
   );
 }

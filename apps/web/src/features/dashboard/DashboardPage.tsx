@@ -35,8 +35,10 @@ export default function DashboardPage() {
           table: kpi.table,
           metric: kpi.metric,
         });
-        const val = result.rows?.[0]?.value;
-        return { label: kpi.label, value: typeof val === 'number' ? val : null };
+        const raw = result.rows?.[0]?.value;
+        // pg 驱动 SUM() 返回 numeric 为字符串, 需转换
+        const val = raw != null ? Number(raw) : NaN;
+        return { label: kpi.label, value: Number.isFinite(val) ? val : null };
       } catch (err) {
         console.warn(`KPI "${kpi.label}" 加载失败`, err);
         return { label: kpi.label, value: null };

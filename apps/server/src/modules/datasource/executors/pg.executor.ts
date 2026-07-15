@@ -8,7 +8,6 @@ import type {
   TableMetadata,
 } from "@workspace/types";
 import type { QueryIntent } from "@workspace/types";
-import { guardSql } from "../security/sql-guard";
 import type {
   DataSourceExecutor,
   QueryResult,
@@ -44,11 +43,22 @@ export class PgExecutor implements DataSourceExecutor {
       password: config.password,
       ssl: config.ssl,
       max: poolSize, // [Sprint 5] 由 ExecutorFactory 注入(默认 DB_POOL_SIZE=10)
-      connectionTimeoutMillis: 5_000,
+      connectionTimeoutMillis: 10_000,   // [Fix-12] 建立连接超时 10s
+      idleTimeoutMillis: 30_000,         // [Fix-12] 空闲 30s 后回收，避免僵尸连接
+      allowExitOnIdle: false,
     });
     this.kysely = new Kysely<unknown>({
       dialect: new PostgresDialect({ pool: this.pool }),
     });
+
+    // [Fix-12] 设置 statement_timeout（60s），防止慢查询长期占用连接
+    this.kysely.executeQuery(
+      sql`SET statement_timeout = 60000`.compile(this.kysely),
+    ).catch(() => {});
+    this.kysely.executeQuery(
+      sql`SET idle_in_transaction_session_timeout = 60000`.compile(this.kysely),
+    ).catch(() => {});
+
     this.logger.log(
       `PgExecutor[${dataSourceId}] connected to ${config.host}:${config.port}/${config.database}`,
     );
@@ -185,12 +195,9 @@ export class PgExecutor implements DataSourceExecutor {
 
   async executeRaw(rawSql: string): Promise<QueryResult> {
     const start = Date.now();
-    const guard = guardSql(rawSql);
-    if (guard.rejected) {
-      throw new Error(`SQL rejected by guard: ${guard.reason}`);
-    }
+    // [Batch 3 B6] gateway 层已做过 guardSql + LIMIT 护栏,executor 不再重复解析 AST
     try {
-      const result = await sql`${sql.raw(guard.sql)}`.execute(this.kysely);
+      const result = await sql`${sql.raw(rawSql)}`.execute(this.kysely);
       const rows = result.rows.map(r =>
         normalizeRow(r as Record<string, unknown>),
       );
@@ -201,8 +208,7 @@ export class PgExecutor implements DataSourceExecutor {
       return {
         rows,
         rowCount: affected ?? rows.length,
-        truncated:
-          guard.modified && rows.length >= (affected ?? rows.length),
+        truncated: rows.length >= 1000,
         durationMs: Date.now() - start,
       };
     } catch (err) {

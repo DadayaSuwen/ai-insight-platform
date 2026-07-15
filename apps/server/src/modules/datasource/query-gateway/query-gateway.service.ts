@@ -83,19 +83,24 @@ export class QueryGatewayService {
     intent: QueryIntent,
     snapshot: MetadataSnapshot,
   ): Promise<QueryResult> {
-    // 0. [Sprint 4] 先查缓存(用 currentUserId 隔离:同 intent 不同 user 视为不同)
-    const cached = this.cache.get(dataSourceId, intent);
-    if (cached) {
-      return cached;
-    }
-
-    // 0.5 [Sprint 5] 所有权校验:仅校验通过才走后续 SQL 路径
+    // 0. [Sprint 5] 所有权校验先于缓存查询,确保租户隔离
     const record = await this.ds.getByIdForUser(dataSourceId, currentUserId);
     if (!record) {
       throw new ForbiddenException(
         `DataSource ${dataSourceId} not accessible to current user`,
       );
     }
+
+    // [Sprint 5.7] 保存原始 intent 用于缓存 key (中文名 key,防止 remap 后 key 不一致)
+    // QueryIntent 是纯 Zod-validated 对象,JSON round-trip 足够深拷贝
+    const originalIntent: QueryIntent = JSON.parse(JSON.stringify(intent));
+
+    // 0.5 [Sprint 4] 查缓存 (key 含 userId + dataSourceId + 原始 intent hash)
+    const cached = this.cache.get(dataSourceId, currentUserId, originalIntent);
+    if (cached) {
+      return cached;
+    }
+
     const config = this.ds.decryptConfigForExecutor(
       record.connectionConfig as unknown as ConnectionConfig,
     );
@@ -141,8 +146,8 @@ export class QueryGatewayService {
     // 5. 执行
     const result = await this.executeSQL(dataSourceId, currentUserId, guard.sql);
 
-    // 6. [Sprint 4] 写缓存
-    this.cache.set(dataSourceId, intent, result);
+    // 6. [Sprint 4] 写缓存 (用 originalIntent 做 key,保证中文名查询可命中)
+    this.cache.set(dataSourceId, currentUserId, originalIntent, result);
     return result;
   }
 }

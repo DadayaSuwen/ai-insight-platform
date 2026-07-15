@@ -23,7 +23,10 @@ export default function ProfilePage() {
   const [user] = useState<{ name: string; email: string; role: string }>(() => {
     try {
       const raw = localStorage.getItem('aiip.auth.user.v1');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.name && parsed?.email) return parsed;
+      }
     } catch { /* ignore */ }
     return { name: '用户', email: 'user@example.com', role: 'analyst' };
   });
@@ -49,7 +52,7 @@ export default function ProfilePage() {
           <div className="card-header"><div className="card-title">基本信息</div></div>
           <div className="card-body" style={{ padding: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-              <div className="user-avatar" style={{ width: 64, height: 64, fontSize: 24 }}>{user.name[0] || '?'}</div>
+              <div className="user-avatar" style={{ width: 64, height: 64, fontSize: 24 }}>{user.name?.[0] || '?'}</div>
               <div>
                 <button className="btn btn-secondary btn-sm" onClick={() => toast.info('头像上传功能开发中')}>更换头像</button>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>JPG/PNG · 最大 2MB</div>

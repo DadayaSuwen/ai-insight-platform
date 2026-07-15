@@ -45,15 +45,18 @@ const ExecuteSchema = z.object({
   datasourceId: z.string().min(1),
   table: z
     .string()
-    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "table 必须是安全标识符"),
+    .min(1).max(200)
+    .refine((s) => !/[;'"]/.test(s), "table 含非法字符"),
   metric: z.string().min(1).max(120),
   groupBy: z
     .string()
-    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+    .max(200)
+    .refine((s) => !/[;'"]/.test(s), "groupBy 含非法字符")
     .optional(),
   timeField: z
     .string()
-    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+    .max(200)
+    .refine((s) => !/[;'"]/.test(s), "timeField 含非法字符")
     .optional(),
   range: z.string().optional(),
   limit: z.number().int().min(1).max(1000).optional(),
@@ -61,8 +64,10 @@ const ExecuteSchema = z.object({
 
 // [Fix-5 Task 5.11] 放宽 metric 白名单: 允许中文 + 空格 (Fix-1 之后 LLM 可输出中文列名),
 // 拒绝 SQL 注入特殊字符 (单引号/分号/连字符/括号等)
-const SAFE_METRIC = /^[A-Za-z_一-龥][A-Za-z0-9_一-龥\s]*$/;
-const AGG_METRIC = /^(SUM|COUNT|AVG|MIN|MAX)\([A-Za-z_*][A-Za-z0-9_]*\)$/i;
+// 单列名或中文名 (不再在这里校验, 实际 SQL 安全由 dialect + guardSql 保证)
+const SAFE_METRIC = /^[A-Za-z_一-鿿][A-Za-z0-9_一-鿿\s-]*$/;
+// 聚合表达式: SUM(x), COUNT(*), AVG(price), 等
+const AGG_METRIC = /^(SUM|COUNT|AVG|MIN|MAX|COUNT_DISTINCT)\([^;'"\\]+\)$/i;
 
 @Controller("api/dashboard")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -130,33 +135,54 @@ export class DashboardGeneratorController {
     );
     if (!ds) throw new NotFoundException("DataSource not found");
 
+    // 安全: CSV 数据源用 connectionConfig.tableName 覆盖, 防止元数据/LLM 表名漂移
+    const cfg = ds.connectionConfig as Record<string, unknown>;
+    const table = (cfg?.tableName as string) || parsed.table;
+
+    // 根据数据源类型选择标识符引号 (PG→"  MySQL→`)
+    const q = ds.type === "mysql" ? "`" : "\"";
+    const isPg = ds.type !== "mysql";
+
     // range 解析 (默认 30d, 支持 7d/30d/90d/12m)
     const rangeDays = this.parseRangeDays(parsed.range);
 
     // 构造 SQL: 有 groupBy 用 group, 没 groupBy 用整体聚合
     let sql: string;
     if (parsed.groupBy) {
-      const timeFilter = parsed.timeField
-        ? `WHERE "${parsed.timeField}" >= NOW() - INTERVAL '${rangeDays} days'`
+      const timeFieldClause = parsed.timeField
+        ? `${q}${parsed.timeField}${q}`
         : "";
-      sql = `SELECT "${parsed.groupBy}" as name, ${metricExpr} as value
-             FROM "${parsed.table}"
+      const timeFilter = parsed.timeField
+        ? isPg
+          ? `WHERE ${timeFieldClause} >= NOW() - INTERVAL '${rangeDays} days'`
+          : `WHERE ${timeFieldClause} >= DATE_SUB(NOW(), INTERVAL ${rangeDays} DAY)`
+        : "";
+      sql = `SELECT ${q}${parsed.groupBy}${q} as name, ${metricExpr} as value
+             FROM ${q}${table}${q}
              ${timeFilter}
-             GROUP BY "${parsed.groupBy}"
+             GROUP BY ${q}${parsed.groupBy}${q}
              ORDER BY value DESC
              LIMIT ${parsed.limit ?? 1000}`;
     } else if (parsed.timeField) {
       // 时序聚合: 按天分组
-      sql = `SELECT date_trunc('day', "${parsed.timeField}") as time, ${metricExpr} as value
-             FROM "${parsed.table}"
-             WHERE "${parsed.timeField}" >= NOW() - INTERVAL '${rangeDays} days'
+      const timeCol = `${q}${parsed.timeField}${q}`;
+      sql = isPg
+        ? `SELECT date_trunc('day', ${timeCol}) as time, ${metricExpr} as value
+             FROM ${q}${table}${q}
+             WHERE ${timeCol} >= NOW() - INTERVAL '${rangeDays} days'
+             GROUP BY time
+             ORDER BY time
+             LIMIT ${parsed.limit ?? 1000}`
+        : `SELECT DATE(${timeCol}) as time, ${metricExpr} as value
+             FROM ${q}${table}${q}
+             WHERE ${timeCol} >= DATE_SUB(NOW(), INTERVAL ${rangeDays} DAY)
              GROUP BY time
              ORDER BY time
              LIMIT ${parsed.limit ?? 1000}`;
     } else {
       // 整体聚合 (kpi 用)
       sql = `SELECT ${metricExpr} as value
-             FROM "${parsed.table}"
+             FROM ${q}${table}${q}
              LIMIT 1`;
     }
 
@@ -166,11 +192,6 @@ export class DashboardGeneratorController {
       );
       const executor = this.executorFactory.create(parsed.datasourceId, config);
       const result = await executor.executeRaw(sql);
-      try {
-        await executor.dispose();
-      } catch {
-        // 忽略 dispose 失败
-      }
       return { success: true, data: { rows: result.rows, sql } };
     } catch (err) {
       this.logger.warn(

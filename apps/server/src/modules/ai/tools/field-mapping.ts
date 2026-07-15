@@ -15,6 +15,7 @@ export function buildFieldMapping(
   snapshot: MetadataSnapshot,
   tableName: string,
   metrics?: string[],
+  metricLabels?: Record<string, string>,
 ): Record<string, string> {
   const table = snapshot.tables.find((t) => t.name === tableName);
   if (!table) return {};
@@ -35,6 +36,15 @@ export function buildFieldMapping(
         if (col?.chineseName) {
           mapping[m] = col.chineseName;
         }
+      }
+    }
+  }
+
+  // [Batch 6 B21] 计算别名回退到 LLM 提供的 label (如 SUM(salary)→"总工资")
+  if (metricLabels) {
+    for (const [alias, display] of Object.entries(metricLabels)) {
+      if (!mapping[alias]) {
+        mapping[alias] = display;
       }
     }
   }

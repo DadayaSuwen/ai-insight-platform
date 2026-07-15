@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { DatabaseService } from "../database/database.service";
 import { MetadataService } from "../datasource/metadata/metadata.service";
 import { SemanticInferenceService } from "../datasource/metadata/semantic-inference.service";
@@ -98,15 +99,16 @@ export class ReviewService {
       }
     }
 
-    // 创建 review session
+    // 创建 review session (Kysely 不走 Prisma default, 需手动生成 UUID)
     const created = await this.db.db
       .insertInto("SchemaReview")
       .values({
+        id: randomUUID(),
         datasourceId,
         status: "active",
         pendingFields: pendingFields.length,
         confirmedFields: 0,
-        messages: [] as unknown as Record<string, unknown>,
+        messages: JSON.stringify([]) as unknown as Record<string, unknown>,
         createdAt: new Date(),
       })
       .returningAll()
@@ -143,7 +145,7 @@ export class ReviewService {
     if (!review) throw new Error("Review not found");
 
     // 从 messages JSON 重建待确认字段
-    const messages = (review.messages as unknown as ReviewMessage[]) ?? [];
+    const messages = this.parseMessages(review.messages);
     const confirmedFields = new Set(
       messages
         .filter((m) => m.role === "ai" && m.content.includes("✓"))
@@ -253,7 +255,7 @@ export class ReviewService {
       });
 
       // 保存消息
-      const messages = (review.messages as unknown as ReviewMessage[]) ?? [];
+      const messages = this.parseMessages(review.messages);
       messages.push({
         role: "ai",
         content: result.question,
@@ -263,7 +265,7 @@ export class ReviewService {
       });
       await this.db.db
         .updateTable("SchemaReview")
-        .set({ messages: messages as unknown as Record<string, unknown> })
+        .set({ messages: JSON.stringify(messages) as unknown as Record<string, unknown> })
         .where("id", "=", reviewId)
         .execute();
 
@@ -309,7 +311,7 @@ export class ReviewService {
     const review = await this.getReviewOwnedByUser(reviewId, userId);
 
     // 保存用户消息
-    const messages = (review.messages as unknown as ReviewMessage[]) ?? [];
+    const messages = this.parseMessages(review.messages);
     messages.push({ role: "user", content: answer, ts: new Date().toISOString() });
 
     // 找到当前提问的字段
@@ -321,7 +323,7 @@ export class ReviewService {
     if (!targetField) {
       await this.db.db
         .updateTable("SchemaReview")
-        .set({ messages: messages as unknown as Record<string, unknown> })
+        .set({ messages: JSON.stringify(messages) as unknown as Record<string, unknown> })
         .where("id", "=", reviewId)
         .execute();
       return { updated: null, remaining: review.pendingFields as number };
@@ -384,7 +386,7 @@ export class ReviewService {
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: messages as unknown as Record<string, unknown>,
+          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: remaining,
         })
@@ -415,7 +417,7 @@ export class ReviewService {
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: messages as unknown as Record<string, unknown>,
+          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: Math.max(0, (review.pendingFields as number) - 1),
         })
@@ -427,6 +429,84 @@ export class ReviewService {
         remaining: Math.max(0, (review.pendingFields as number) - 1),
       };
     }
+  }
+
+  /**
+   * 批量确认 — 一键将所有待确认字段按当前 AI 推断值确认。
+   * 跳过逐个问答, 直接写入 columnAliases 并标记全部字段为已确认。
+   */
+  async confirmAllFields(reviewId: string, userId: string): Promise<{
+    confirmed: number;
+    total: number;
+  }> {
+    const review = await this.getReviewOwnedByUser(reviewId, userId);
+    const fields = await this.getPendingFields(reviewId);
+
+    if (fields.length === 0) {
+      return { confirmed: 0, total: 0 };
+    }
+
+    // 读取现有 columnAliases
+    const dsRecord = await this.ds.getById(review.datasourceId as string);
+    const config = (dsRecord?.connectionConfig as Record<string, unknown>) ?? {};
+    const aliases = (config.columnAliases as Record<string, unknown>) ?? {};
+
+    const messages = this.parseMessages(review.messages);
+
+    for (const f of fields) {
+      const key = f.field;
+      if (!aliases[key]) {
+        aliases[key] = {
+          chineseName: f.currentGuess,
+          role: f.rawType === "date" || f.rawType === "timestamp"
+            ? "time"
+            : f.currentGuess.includes("额") || f.currentGuess.includes("价") || f.currentGuess.includes("量")
+              ? "measure"
+              : "dimension",
+          description: `批量确认: ${f.currentGuess} (${f.rawType})`,
+        };
+      }
+      messages.push({
+        role: "ai",
+        content: `✓ 批量确认 ${f.table}.${f.field} →「${f.currentGuess}」`,
+        fieldName: `${f.table}.${f.field}`,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // 持久化
+    config.columnAliases = aliases;
+    await this.db.db
+      .updateTable("DataSource")
+      .set({
+        connectionConfig: config as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where("id", "=", review.datasourceId as string)
+      .execute();
+
+    await this.db.db
+      .updateTable("SchemaReview")
+      .set({
+        messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+        confirmedFields: (review.confirmedFields as number) + fields.length,
+        pendingFields: 0,
+      })
+      .where("id", "=", reviewId)
+      .execute();
+
+    // 刷新元数据缓存, 让后续查询使用新别名
+    try {
+      await this.meta.get(review.datasourceId as string, { refresh: true });
+    } catch (err) {
+      this.logger.warn(`Metadata refresh after batch confirm failed: ${(err as Error).message}`);
+    }
+
+    this.logger.log(
+      `Batch confirmed ${fields.length} fields for ${review.datasourceId as string}`,
+    );
+
+    return { confirmed: fields.length, total: fields.length };
   }
 
   /**
@@ -481,6 +561,19 @@ export class ReviewService {
   }
 
   /* ─── helpers ─── */
+
+  /**
+   * 安全解析 review.messages JSONB 字段。
+   * Kysely + pg 驱动有时返回已解析的数组, 有时返回 JSON 字符串,
+   * 这里统一处理两种情况。
+   */
+  private parseMessages(raw: unknown): ReviewMessage[] {
+    if (Array.isArray(raw)) return raw as ReviewMessage[];
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw) as ReviewMessage[]; } catch { return []; }
+    }
+    return [];
+  }
 
   private async countRemaining(
     datasourceId: string,

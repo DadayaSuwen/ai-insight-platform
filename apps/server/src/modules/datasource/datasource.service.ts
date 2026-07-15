@@ -179,6 +179,64 @@ export class DatasourceService {
       .returningAll()
       .executeTakeFirst();
   }
+
+  /**
+   * 编辑数据源连接配置 (名称/描述/连接参数)
+   */
+  async updateConnection(
+    dataSourceId: string,
+    userId: string,
+    opts: {
+      name?: string;
+      description?: string;
+      connectionConfig?: Record<string, unknown>;
+    },
+  ) {
+    const record = await this.getByIdForUser(dataSourceId, userId);
+    if (!record) throw new Error("DataSource not found");
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (opts.name !== undefined) updates.name = opts.name;
+    if (opts.description !== undefined) updates.description = opts.description;
+    if (opts.connectionConfig) {
+      // 重新加密密码
+      const encrypted = encryptConfig(
+        (record.type as "postgres" | "mysql" | "duckdb-csv") ?? "postgres",
+        { ...(record.connectionConfig as Record<string, unknown>), ...opts.connectionConfig },
+      );
+      updates.connectionConfig = encrypted;
+    }
+
+    return this.db.db
+      .updateTable("DataSource")
+      .set(updates as any)
+      .where("id", "=", dataSourceId)
+      .returningAll()
+      .executeTakeFirst();
+  }
+
+  /**
+   * 更新数据源的 columnAliases (Schema 修订手动编辑后保存)
+   */
+  async updateColumnAliases(
+    dataSourceId: string,
+    userId: string,
+    aliases: Record<string, { chineseName: string; role?: string; description?: string }>,
+  ): Promise<{ updated: number }> {
+    const record = await this.getByIdForUser(dataSourceId, userId);
+    if (!record) throw new Error("DataSource not found");
+    const config = (record.connectionConfig as Record<string, unknown>) ?? {};
+    config.columnAliases = aliases;
+    await this.db.db
+      .updateTable("DataSource")
+      .set({
+        connectionConfig: config,
+        updatedAt: new Date(),
+      })
+      .where("id", "=", dataSourceId)
+      .execute();
+    return { updated: Object.keys(aliases).length };
+  }
 }
 
 /**

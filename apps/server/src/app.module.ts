@@ -28,7 +28,7 @@ import { UsersModule } from './modules/users/users.module';
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 30,
+        limit: 100,  // dashboard KPI/chart 并发请求多，30 不够
       },
     ]),
     ChatModule,

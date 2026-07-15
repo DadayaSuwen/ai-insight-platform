@@ -84,6 +84,8 @@ export function validateIntent(
 
   // 3. metrics
   for (const m of intent.metrics) {
+    // COUNT(*) is always valid — skip column existence check
+    if (m.column === "*") continue;
     if (!validColumns.has(m.column)) {
       const physical = chineseToPhysical(m.column, table.columns as any);
       const hint = physical

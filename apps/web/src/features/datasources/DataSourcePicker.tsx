@@ -101,7 +101,7 @@ export default function DataSourcePicker({ value, onChange }: Props) {
 
       {open && (
         <div
-          className="absolute right-0 top-full z-50 mt-1 w-72 rounded-xl border shadow-lg"
+          className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border shadow-lg"
           style={{
             background: 'var(--bg-primary)',
             borderColor: 'var(--border)',

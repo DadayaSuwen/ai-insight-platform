@@ -21,6 +21,7 @@ export default function SchemaReviewPage() {
     error,
     startReview,
     sendMessage,
+    confirmAll,
     finalize,
   } = useSchemaReview();
 
@@ -94,6 +95,17 @@ export default function SchemaReviewPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-9-9c2.39 0 4.68.94 6.4 2.6L21 8" /></svg>
             重新探索
           </button>
+          {fields.length > 0 && (
+            <button
+              className="btn btn-warning btn-sm"
+              onClick={confirmAll}
+              disabled={isProcessing}
+              title="一键采纳 AI 推断的所有字段含义，跳过逐个确认"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+              一键确认全部 ({fields.length})
+            </button>
+          )}
           <button
             className="btn btn-primary btn-sm"
             onClick={handleFinalize}
