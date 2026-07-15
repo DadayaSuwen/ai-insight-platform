@@ -28,8 +28,7 @@ export function SessionList({ onSelect, onConfirmDelete, onRename }: SessionList
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="h-12 w-full animate-pulse rounded-md"
-            style={{ background: "var(--bg-tertiary)" }}
+            className="h-12 w-full animate-pulse rounded-md bg-subtle"
           />
         ))}
       </div>
@@ -38,10 +37,7 @@ export function SessionList({ onSelect, onConfirmDelete, onRename }: SessionList
 
   if (sessions.length === 0) {
     return (
-      <div
-        className="px-4 py-6 text-center text-xs"
-        style={{ color: "var(--text-muted)" }}
-      >
+      <div className="px-4 py-6 text-center text-xs text-muted">
         还没有对话
         <br />
         点击「新建对话」开始
@@ -51,10 +47,7 @@ export function SessionList({ onSelect, onConfirmDelete, onRename }: SessionList
 
   if (filtered.length === 0) {
     return (
-      <div
-        className="px-4 py-6 text-center text-xs"
-        style={{ color: "var(--text-muted)" }}
-      >
+      <div className="px-4 py-6 text-center text-xs text-muted">
         没有匹配「{searchQuery}」的会话
       </div>
     );

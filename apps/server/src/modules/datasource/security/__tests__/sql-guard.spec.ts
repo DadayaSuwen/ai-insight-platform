@@ -164,5 +164,29 @@ describe("[Sprint 1 / V3] sql-guard", () => {
       expect(result.modified).toBe(true);
       expect(result.sql).toMatch(/LIMIT 1000$/);
     });
+
+    // [本次] 修复前的回归: 反引号包裹的 MySQL 标识符在 PG 模式下被
+    // 误判为语法错误。本测试在加 dialect: 'mysql' 后必须通过。
+    test("MySQL 反引号包裹 SELECT → 默认 PG 模式拒绝, mysql 模式接受", () => {
+      const mysqlSql =
+        'SELECT COUNT(*) AS `customer_count` FROM `customer` LIMIT 50';
+      // 默认(postgresql)应被拒
+      const pg = guardSql(mysqlSql);
+      expect(pg.rejected).toBe(true);
+
+      // mysql 模式应通过,且后续 LIMIT 不追加
+      const my = guardSql(mysqlSql, { dialect: "mysql" });
+      expect(my.rejected).toBe(false);
+      expect(my.modified).toBe(false);
+      expect(my.sql).toBe(mysqlSql);
+    });
+
+    test("duckdb 方言视为 postgresql 解析", () => {
+      // DuckDB 用双引号,语法上与 PG 一致
+      const ddSql =
+        'SELECT "c" FROM "t"';
+      const r = guardSql(ddSql, { dialect: "duckdb" });
+      expect(r.rejected).toBe(false);
+    });
   });
 });

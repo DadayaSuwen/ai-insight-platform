@@ -67,19 +67,19 @@ export default function RolesPage() {
         </div>
       </div>
 
-      <div className="grid grid-3" style={{ marginBottom: 24 }}>
+      <div className="grid grid-3 mb-6">
         {ROLES.map((r) => (
           <div key={r.key} className="card">
             <div className="card-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="flex items-center gap-2">
                 <span className="card-title">{r.title}</span>
                 <span className={`badge badge-${r.badge}`}>系统</span>
               </div>
               <span className="chip">{r.count} 人</span>
             </div>
             <div className="card-body">
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>{r.desc}</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              <p className="text-xs text-secondary m-0 mb-3">{r.desc}</p>
+              <div className="flex flex-wrap gap-1">
                 {r.chips.map((c) => (
                   <span key={c} className={`chip${isChipGreen(c) ? ' green' : ''}${c.includes('无') || c.includes('只读') ? ' amber' : ''}`}>
                     {c}
@@ -119,7 +119,7 @@ export default function RolesPage() {
         </table>
         <div className="card-footer">
           <button className="btn btn-primary btn-sm" onClick={handleSave}>保存权限配置</button>
-          <span style={{ marginLeft: 12 }}>
+          <span className="ml-3">
             修改权限后会立即生效,影响所有该角色用户
           </span>
         </div>

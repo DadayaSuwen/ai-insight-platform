@@ -54,7 +54,7 @@ export default function OnboardingPage() {
 
   if (checking) {
     return (
-      <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+      <div className="p-16 text-center text-muted text-sm">
         准备引导页...
       </div>
     );
@@ -94,14 +94,14 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        <div style={{ padding: '14px 16px', background: 'var(--info-light)', borderRadius: 8, fontSize: 12, color: 'var(--info)', textAlign: 'left', lineHeight: 1.6 }}>
+        <div className="px-4 py-3.5 rounded-lg text-xs text-left leading-relaxed" style={{ background: 'var(--info-light)', color: 'var(--info)' }}>
           💡 <strong>首次使用建议：</strong>
           <br />• 如果你有数据库，先用「连接数据库」体验完整流程
           <br />• 如果只想快速试用，上传任意 CSV 即可（如销售记录、成绩单）
           <br />• 配置完成后，Agent 会用 30-60 秒探索数据结构
         </div>
 
-        <div style={{ marginTop: 20, fontSize: 11, color: 'var(--text-muted)' }}>
+        <div className="mt-5 text-xs text-muted">
           🔒 所有数据只读访问 · 不会修改你的任何数据 · 连接信息加密存储
         </div>
       </div>

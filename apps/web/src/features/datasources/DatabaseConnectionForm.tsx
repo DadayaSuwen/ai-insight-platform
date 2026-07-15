@@ -136,14 +136,8 @@ export default function DatabaseConnectionForm(props: {
   };
 
   return (
-    <div
-      className="rounded-xl border p-3"
-      style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
-    >
-      <p
-        className="mb-3 text-xs font-medium"
-        style={{ color: 'var(--text-secondary)' }}
-      >
+    <div className="rounded-xl border border-default p-3 bg-muted">
+      <p className="mb-3 text-xs font-medium text-secondary">
         数据库连接
       </p>
 
@@ -153,11 +147,10 @@ export default function DatabaseConnectionForm(props: {
           <button
             key={t}
             onClick={() => handleTypeChange(t)}
-            className="rounded-md px-3 py-1.5 text-xs"
+            className="rounded-md px-3 py-1.5 text-xs border border-default"
             style={{
               background: form.type === t ? 'var(--accent)' : 'transparent',
               color: form.type === t ? 'white' : 'var(--text-secondary)',
-              border: '1px solid var(--border)',
             }}
           >
             {t === 'postgres' ? 'PostgreSQL' : 'MySQL'}
@@ -247,7 +240,7 @@ export default function DatabaseConnectionForm(props: {
                   checked={form.ssl}
                   onChange={e => setField('ssl', e.target.checked)}
                 />
-                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <span className="text-xs text-secondary">
                   启用 TLS
                 </span>
               </label>
@@ -276,23 +269,14 @@ export default function DatabaseConnectionForm(props: {
         <button
           onClick={handleTest}
           disabled={testing || !form.host || !form.database || !form.user}
-          className="rounded-md px-3 py-1.5 text-xs disabled:opacity-50"
-          style={{
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border)',
-          }}
+          className="rounded-md px-3 py-1.5 text-xs disabled:opacity-50 bg-transparent text-secondary border border-default"
         >
           {testing ? '测试中...' : '测试连接'}
         </button>
         <button
           onClick={handleSubmit}
           disabled={submitting || !form.id || !form.name}
-          className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-          style={{
-            background: 'var(--accent)',
-            color: 'white',
-          }}
+          className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50 bg-accent text-white"
         >
           {submitting ? '注册中...' : '注册数据源'}
         </button>
@@ -324,10 +308,7 @@ function Field(props: {
 }) {
   return (
     <div className={props.full ? 'col-span-2' : ''}>
-      <label
-        className="mb-1 block text-[10px] font-medium"
-        style={{ color: 'var(--text-muted)' }}
-      >
+      <label className="mb-1 block text-[10px] font-medium text-muted">
         {props.label}
       </label>
       {props.children}

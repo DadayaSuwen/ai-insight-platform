@@ -13,6 +13,7 @@ import { jsonrepair } from "jsonrepair";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
 import { DatabaseService } from "../../database/database.service";
 import { createChatModel } from "./llm-factory";
+import { LlmStatsCollector } from "./llm-stats.collector";
 import { traceLogger } from "../debug-log";
 
 /**
@@ -79,6 +80,7 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly config: ConfigService,
     private readonly database: DatabaseService,
+    private readonly statsCollector: LlmStatsCollector,
   ) {
     this.chatReady = this.initFromDatabase();
   }
@@ -112,6 +114,8 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
       chat.invoke(messages as any) as Promise<AIMessage>,
       timeoutMs,
     );
+    // [chat-system-architecture.md §六原则 4] 聚合单轮 token 消耗
+    this.statsCollector.recordUsage(result.usage_metadata);
     return this.normalizeContent(result.content);
   }
 
@@ -150,11 +154,14 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
     try {
       // Track accumulated content to detect new chunks
       let accumulated = "";
+      // 保留最后一个 chunk 用于抽取 usage_metadata(OpenAI 流式 API 通常在尾部发 usage)
+      let lastChunk: unknown = null;
 
       for await (const chunk of stream) {
         if (timedOut) {
           throw new Error(`LLM stream timeout after ${timeoutMs}ms`);
         }
+        lastChunk = chunk;
         const content = this.normalizeContent(
           (chunk as { content: unknown }).content,
         );
@@ -163,6 +170,10 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
           yield content;
         }
       }
+      // [chat-system-architecture.md §六原则 4] 流结束后聚合 token
+      const usage = (lastChunk as { usage_metadata?: unknown } | null)
+        ?.usage_metadata;
+      this.statsCollector.recordUsage(usage as any);
     } catch (err) {
       this.logger.error(
         `[invokeStream] Stream error: ${err instanceof Error ? err.message : String(err)}`,

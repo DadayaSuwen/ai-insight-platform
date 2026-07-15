@@ -120,8 +120,8 @@ export default function UploadCsvPage() {
         </div>
       </div>
 
-      <div className="card" style={{ maxWidth: 720, margin: '0 auto' }}>
-        <div className="card-body" style={{ padding: 32 }}>
+      <div className="card max-w-[720px] mx-auto">
+        <div className="card-body p-8">
           {/* 上传区 */}
           <div
             className={`csv-upload-zone${dragging ? ' dragging' : ''}`}
@@ -145,43 +145,35 @@ export default function UploadCsvPage() {
               type="file"
               accept=".csv"
               multiple
-              style={{ display: 'none' }}
+              className="hidden"
               onChange={handleFileSelect}
             />
           </div>
 
           {/* 已上传文件列表 */}
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>已上传文件</div>
+          <div className="mt-6">
+            <div className="text-sm font-semibold mb-3">已上传文件</div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="flex flex-col gap-2.5">
               {files.map((f) => (
                 <div
                   key={f.id}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '14px 16px', background: 'var(--bg-secondary)',
-                    borderRadius: 10, border: '1px solid var(--border)',
-                  }}
+                  className="flex items-center gap-3 px-4 py-3.5 bg-muted rounded-xl border border-default"
                 >
                   <div
-                    style={{
-                      width: 36, height: 36, borderRadius: 8,
-                      background: f.iconBg, color: f.iconColor,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 18,
-                    }}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-lg"
+                    style={{ background: f.iconBg, color: f.iconColor }}
                   >
                     {f.icon}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{f.name}</div>
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold">{f.name}</div>
                     {uploadProgress[f.name] !== undefined && uploadProgress[f.name] < 100 ? (
-                      <div style={{ marginTop: 4, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div className="mt-1 h-1 rounded-sm overflow-hidden" style={{ background: 'var(--border)' }}>
                         <div style={{ height: '100%', width: `${uploadProgress[f.name]}%`, background: 'var(--primary)', borderRadius: 2, transition: 'width 0.2s' }} />
                       </div>
                     ) : (
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      <div className="text-xs text-muted">
                         {f.rows.toLocaleString()} 行 · {f.cols} 列 · {f.size} · 推断为「{f.inferred}」
                       </div>
                     )}
@@ -208,21 +200,19 @@ export default function UploadCsvPage() {
 
           </div>
 
-          <div style={{ marginTop: 24, padding: '14px 16px', background: 'var(--green-lighter)', borderRadius: 8, borderLeft: '3px solid var(--green)', fontSize: 12, color: 'var(--green-darker)' }}>
+          <div className="mt-6 px-4 py-3.5 rounded-lg text-xs" style={{ background: 'var(--green-lighter)', borderLeft: '3px solid var(--green)', color: 'var(--green-darker)' }}>
             🔒 <strong>数据安全：</strong>CSV 文件上传后存储在 PostgreSQL 主数据库, 不会上传到任何第三方服务。LLM 只看到字段名与抽样数据, 不看到完整数据。
           </div>
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+          <div className="flex gap-2.5 mt-6">
             <button
-              className="btn btn-secondary btn-lg"
-              style={{ flex: 1 }}
+              className="btn btn-secondary btn-lg flex-1"
               onClick={() => fileInputRef.current?.click()}
             >
               继续添加
             </button>
             <button
-              className="btn btn-primary btn-lg"
-              style={{ flex: 1 }}
+              className="btn btn-primary btn-lg flex-1"
               onClick={handleStartExplore}
               disabled={submitting}
             >

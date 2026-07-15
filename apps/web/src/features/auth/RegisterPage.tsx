@@ -106,7 +106,7 @@ export default function RegisterPage() {
           />
         </div>
 
-        <div style={{ marginBottom: 16, padding: '10px 12px', background: 'var(--info-light)', borderRadius: 8, fontSize: 11, color: 'var(--info)', lineHeight: 1.6 }}>
+        <div className="mb-4 px-3 py-2.5 rounded-lg text-xs leading-relaxed" style={{ background: 'var(--info-light)', color: 'var(--info)' }}>
           💡 <strong>角色说明：</strong>首个用户自动成为<strong>管理员</strong>(可管理数据源、用户、模型配置);后续用户默认为<strong>分析师</strong>(可连接数据源、对话分析);管理员可创建<strong>查看者</strong>角色(只读)。
         </div>
 

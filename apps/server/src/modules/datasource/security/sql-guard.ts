@@ -9,7 +9,12 @@
  *   - 强制包裹 LIMIT 1000
  *
  * 函数签名保持向后兼容 (guardSql(sql, opts) → SqlGuardResult),
- * 4 个调用方 (pg/mysql/duckdb executor + query-gateway) 零修改。
+ * 主要调用方: query-gateway.executeIntent() 会带 opts.dialect 传入;
+ * 直 SQL 路径 (executeSQL) 默认仍走 postgresql 解析。
+ *
+ * [本次] opts.dialect: postgresql / mysql / duckdb, 用于让
+ * node-sql-parser 用匹配的 grammar。否则 MySqlDialect 产出的
+ * 反引号包裹标识符会被 PG 模式拒掉(假阳性)。
  */
 import { Parser } from "node-sql-parser";
 
@@ -27,14 +32,27 @@ export interface SqlGuardResult {
 /** 默认最大返回行数 — 与计划文档一致 */
 export const DEFAULT_MAX_ROWS = 1000;
 
+export type SqlDialectKind = "postgresql" | "mysql" | "duckdb";
+
 export interface SqlGuardOptions {
   /** 强制包裹 LIMIT 的上限,默认 1000 */
   maxRows?: number;
   /** 跳过 LIMIT 强制包裹 (例如 SHOW/EXPLAIN) */
   skipLimit?: boolean;
+  /**
+   * [本次] 解析 SQL 时用的方言。与下游 executor 保持一致,
+   * 否则会出现 PG 解析器拒绝 MySQL 的反引号这种假阳性。
+   * 默认 postgresql(向后兼容历史调用方)。
+   */
+  dialect?: SqlDialectKind;
 }
 
 const parser = new Parser();
+
+/** node-sql-parser 的 database 字段名, 与我们的 SqlDialectKind 1:1 对应 */
+function toParserDialect(d: SqlDialectKind): "postgresql" | "mysql" {
+  return d === "duckdb" ? "postgresql" : d;
+}
 
 /**
  * 递归检查 AST 节点不含修改型操作
@@ -92,7 +110,8 @@ export function guardSql(
   // 1. AST 解析 + 白名单校验
   let ast: unknown;
   try {
-    ast = parser.astify(rawSql, { database: "postgresql" });
+    const parserDialect = toParserDialect(opts.dialect ?? "postgresql");
+    ast = parser.astify(rawSql, { database: parserDialect });
   } catch (err) {
     return {
       sql: rawSql,

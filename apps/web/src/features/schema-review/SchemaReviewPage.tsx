@@ -60,17 +60,8 @@ export default function SchemaReviewPage() {
     <>
       {error && (
         <div
-          style={{
-            marginBottom: 16,
-            padding: '12px 16px',
-            background: 'var(--error-light)',
-            borderRadius: 8,
-            fontSize: 13,
-            color: 'var(--error)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
+          className="mb-4 px-4 py-3 rounded-lg text-sm flex items-center justify-between"
+          style={{ background: 'var(--error-light)', color: 'var(--error)' }}
         >
           <span>{error}</span>
           <button className="btn btn-ghost btn-sm" onClick={() => datasourceId && startReview(datasourceId)}>
@@ -79,7 +70,7 @@ export default function SchemaReviewPage() {
         </div>
       )}
 
-      <div className="page-header" style={{ marginBottom: 16 }}>
+      <div className="page-header mb-4">
         <div>
           <h1 className="page-title">Schema 确认 · 帮 Agent 搞懂您的数据</h1>
           <p className="page-subtitle">
@@ -126,7 +117,7 @@ export default function SchemaReviewPage() {
           </div>
           <div className="schema-tree-body">
             {fields.length === 0 ? (
-              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              <div className="p-5 text-center text-muted text-sm">
                 {done?.allConfirmed ? '所有字段已确认 ✓' : '加载中...'}
               </div>
             ) : (
@@ -142,10 +133,10 @@ export default function SchemaReviewPage() {
                     {tableFields.length} 个字段待确认
                   </div>
                   {tableFields.map((f) => (
-                    <div key={f.field} style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 12 }}>
-                      <code style={{ fontFamily: 'monospace', fontSize: 10 }}>{f.field}</code>
-                      <span style={{ marginLeft: 4 }}>{f.currentGuess}</span>
-                      <span style={{ marginLeft: 4, color: f.confidence >= 0.7 ? 'var(--green-dark)' : 'var(--amber)' }}>
+                    <div key={f.field} className="text-xs text-muted mt-0.5 pl-3">
+                      <code className="font-mono-custom text-[10px]">{f.field}</code>
+                      <span className="ml-1">{f.currentGuess}</span>
+                      <span className="ml-1" style={{ color: f.confidence >= 0.7 ? 'var(--green-dark)' : 'var(--amber)' }}>
                         ({f.confidence.toFixed(0)}%)
                       </span>
                     </div>
@@ -154,8 +145,8 @@ export default function SchemaReviewPage() {
               ))
             )}
           </div>
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-light)', fontSize: 11, color: 'var(--text-muted)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="px-4 py-3 border-t border-light text-xs text-muted">
+            <div className="flex justify-between mb-1">
               <span>✓ 已确认</span>
               <span className="num">{done?.allConfirmed ? '全部' : (done?.remaining != null ? `${done.remaining} 剩余` : '计算中...')}</span>
             </div>
@@ -166,8 +157,8 @@ export default function SchemaReviewPage() {
         <div className="review-chat">
           <div className="review-chat-header">
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>与 Agent 对话 · 确认 Schema 理解</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              <div className="text-sm font-semibold">与 Agent 对话 · 确认 Schema 理解</div>
+              <div className="text-xs text-muted mt-0.5">
                 {reviewId ? `Review: ${reviewId.slice(0, 8)}...` : '正在启动...'}
                 {fields.length > 0 && ` · 剩余 ${fields.length} 个字段`}
               </div>
@@ -181,7 +172,7 @@ export default function SchemaReviewPage() {
                 <div className={`review-avatar ${msg.role}`}>
                   {msg.role === 'ai' ? 'AI' : '我'}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="flex-1 min-w-0">
                   <div
                     className="review-bubble"
                     dangerouslySetInnerHTML={{ __html: msg.content }}
@@ -207,7 +198,7 @@ export default function SchemaReviewPage() {
               <div className="review-message ai">
                 <div className="review-avatar ai">AI</div>
                 <div className="review-bubble">
-                  <span style={{ color: 'var(--text-muted)' }}>正在思考...</span>
+                  <span className="text-muted">正在思考...</span>
                 </div>
               </div>
             )}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Trash2, MessageSquare, Pencil } from "lucide-react";
 import type { ChatSession } from "../../../../types/chat";
 import { formatRelative } from "../../utils/formatRelative";
+import { cn } from "../../../../lib/utils";
 
 interface SessionItemProps {
   session: ChatSession;
@@ -99,18 +100,14 @@ export function SessionItem({
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors"
-      style={{
-        background: active ? "var(--bg-hover)" : hover ? "var(--bg-tertiary)" : "transparent",
-        color: "var(--text-primary)",
-        borderLeft: active
-          ? "3px solid var(--accent)"
-          : "3px solid transparent",
-      }}
+      className={cn(
+        "group relative flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors text-default",
+        active ? "bg-hover-custom border-l-[3px] border-l-accent" : hover ? "bg-subtle border-l-[3px] border-l-transparent" : "border-l-[3px] border-l-transparent",
+      )}
     >
       <MessageSquare
         size={14}
-        style={{ color: active ? "var(--accent)" : "var(--text-muted)" }}
+        className={cn(active ? "text-accent" : "text-muted")}
       />
       <div className="min-w-0 flex-1">
         {editing ? (
@@ -129,17 +126,11 @@ export function SessionItem({
                 cancelRename();
               }
             }}
-            className="w-full rounded border px-1 py-0.5 text-sm outline-none"
-            style={{
-              borderColor: "var(--accent)",
-              background: "var(--bg-primary)",
-              color: "var(--text-primary)",
-            }}
+            className="w-full rounded border px-1 py-0.5 text-sm outline-none border-accent bg-surface text-default"
           />
         ) : (
           <div
-            className="truncate text-sm font-medium"
-            style={{ color: "var(--text-primary)" }}
+            className="truncate text-sm font-medium text-default"
             onDoubleClick={(e) => {
               e.stopPropagation();
               setDraft(session.title);
@@ -150,10 +141,7 @@ export function SessionItem({
             {session.title || "新对话"}
           </div>
         )}
-        <div
-          className="truncate text-[11px]"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <div className="truncate text-[11px] text-muted">
           {formatRelative(session.updatedAt)}
         </div>
       </div>
@@ -167,7 +155,7 @@ export function SessionItem({
           className="flex shrink-0 items-center gap-1.5"
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="text-[11px]" style={{ color: "var(--error)" }}>
+          <span className="text-[11px] text-error">
             删除?
           </span>
           <button
@@ -176,19 +164,14 @@ export function SessionItem({
               cancelConfirm();
               onConfirmDelete(session.id);
             }}
-            className="rounded px-1.5 py-0.5 text-[11px] font-medium"
-            style={{ background: "var(--error)", color: "var(--text-inverse)" }}
+            className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-[var(--error)] text-inverse"
           >
             确认
           </button>
           <button
             aria-label="取消删除"
             onClick={cancelConfirm}
-            className="rounded px-1.5 py-0.5 text-[11px]"
-            style={{
-              background: "var(--bg-tertiary)",
-              color: "var(--text-secondary)",
-            }}
+            className="rounded px-1.5 py-0.5 text-[11px] bg-subtle text-secondary"
           >
             取消
           </button>
@@ -205,12 +188,9 @@ export function SessionItem({
               setDraft(session.title);
               setEditing(true);
             }}
-            className={`flex h-6 w-6 items-center justify-center rounded transition-opacity ${
+            className={`flex h-6 w-6 items-center justify-center rounded transition-opacity text-muted hover:!text-accent ${
               hover || active ? "opacity-100" : "opacity-0"
             }`}
-            style={{ color: "var(--text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
           >
             <Pencil size={12} />
           </button>
@@ -220,12 +200,9 @@ export function SessionItem({
               e.stopPropagation();
               startConfirming();
             }}
-            className={`flex h-6 w-6 items-center justify-center rounded transition-opacity ${
+            className={`flex h-6 w-6 items-center justify-center rounded transition-opacity text-muted hover:!text-error ${
               hover || active ? "opacity-100" : "opacity-0"
             }`}
-            style={{ color: "var(--text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--error)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
           >
             <Trash2 size={13} />
           </button>

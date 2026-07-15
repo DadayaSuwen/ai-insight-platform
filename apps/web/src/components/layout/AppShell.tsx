@@ -141,9 +141,13 @@ export default function AppShell({ children }: AppShellProps) {
             <NavItem
               icon={<Edit3 size={16} />}
               label="Schema 修订"
-              active={currentRoute === 'schema-review' || currentRoute === 'confirm'}
+              active={
+                currentRoute === 'schema' ||
+                currentRoute === 'schema-review' ||
+                currentRoute === 'confirm'
+              }
               disabled={!hasDS}
-              onClick={() => currentDsId && navigate(`/schema-review/${currentDsId}`)}
+              onClick={() => currentDsId && navigate(`/schema/${currentDsId}`)}
             />
             <NavItem
               icon={<History size={16} />}
@@ -185,7 +189,7 @@ export default function AppShell({ children }: AppShellProps) {
             <div className="user-info">
               <div className="user-name">
                 <span>{user.name}</span>
-                <span className="badge badge-success" style={{ fontSize: 9, padding: '1px 5px' }}>
+                <span className="badge badge-success text-[9px]" style={{ padding: '1px 5px' }}>
                   {user.role === 'admin' ? '管理员' : user.role === 'analyst' ? '分析师' : '查看者'}
                 </span>
               </div>

@@ -106,6 +106,33 @@ export const ChatSessionSchema = z.object({
 export type ChatSession = z.infer<typeof ChatSessionSchema>;
 
 /**
+ * [chat-system-architecture.md §六原则 4] SSE done 事件的 stats 字段。
+ * 后端 ChatService 在最终 done yield 时把本轮真实 LLM token + 耗时灌进来,
+ * 前端 ChatWindow 右栏渲染"Token 消耗 + 耗时"。
+ *
+ * 所有字段 optional — Anthropic 流式 API 不发 usage_metadata,
+ * 或老数据无 startTs 时,前端用 ?? '—' 兜底。
+ */
+export const SSEDoneStatsSchema = z.object({
+  elapsedMs: z.number().optional(),
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+});
+
+export type SSEDoneStats = z.infer<typeof SSEDoneStatsSchema>;
+
+/**
+ * SSE done 事件 data 形态
+ */
+export const SSEDoneDataSchema = z.object({
+  session: ChatSessionSchema.nullable().optional(),
+  stats: SSEDoneStatsSchema.optional(),
+});
+
+export type SSEDoneData = z.infer<typeof SSEDoneDataSchema>;
+
+/**
  * Chat history response
  */
 export const ChatHistoryResponseSchema = z.object({

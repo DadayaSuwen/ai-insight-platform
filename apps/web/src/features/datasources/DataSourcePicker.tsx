@@ -63,12 +63,7 @@ export default function DataSourcePicker({ value, onChange }: Props) {
     <div ref={wrapRef} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors"
-        style={{
-          background: 'var(--bg-secondary)',
-          borderColor: 'var(--border)',
-          color: 'var(--text-secondary)',
-        }}
+        className="flex items-center gap-1.5 rounded-md border border-default px-2 py-1 text-[11px] transition-colors bg-muted text-secondary"
         title="选择数据源"
       >
         <span
@@ -101,24 +96,14 @@ export default function DataSourcePicker({ value, onChange }: Props) {
 
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border shadow-lg"
-          style={{
-            background: 'var(--bg-primary)',
-            borderColor: 'var(--border)',
-          }}
+          className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-default shadow-lg bg-surface"
         >
-          <p
-            className="border-b px-3 py-2 text-[10px] font-medium"
-            style={{
-              borderColor: 'var(--border)',
-              color: 'var(--text-muted)',
-            }}
-          >
+          <p className="border-b border-default px-3 py-2 text-[10px] font-medium text-muted">
             选择数据源(下次发问生效)
           </p>
           <div className="max-h-72 overflow-y-auto py-1">
             {items.length === 0 ? (
-              <p className="px-3 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+              <p className="px-3 py-3 text-xs text-muted">
                 加载中... (若一直为空,请到 Settings 上传 CSV)
               </p>
             ) : (
@@ -137,16 +122,10 @@ export default function DataSourcePicker({ value, onChange }: Props) {
                     }}
                   >
                     <div className="min-w-0">
-                      <p
-                        className="truncate text-xs font-medium"
-                        style={{ color: 'var(--text-primary)' }}
-                      >
+                      <p className="truncate text-xs font-medium text-default">
                         {ds.name}
                       </p>
-                      <p
-                        className="text-[10px]"
-                        style={{ color: 'var(--text-muted)' }}
-                      >
+                      <p className="text-[10px] text-muted">
                         {ds.id}
                       </p>
                     </div>
@@ -174,21 +153,13 @@ export default function DataSourcePicker({ value, onChange }: Props) {
               })
             )}
           </div>
-          <div
-            className="border-t px-3 py-2"
-            style={{ borderColor: 'var(--border)' }}
-          >
+          <div className="border-t border-default px-3 py-2">
             <button
               onClick={() => {
                 setOpen(false);
                 navigate('/datasources');
               }}
-              className="w-full rounded-md py-1.5 text-[10px]"
-              style={{
-                background: 'transparent',
-                color: 'var(--accent)',
-                border: '1px solid var(--border)',
-              }}
+              className="w-full rounded-md py-1.5 text-[10px] bg-transparent text-accent border border-default"
             >
               + 管理数据源 →
             </button>

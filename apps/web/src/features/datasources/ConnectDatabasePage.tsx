@@ -96,9 +96,9 @@ export default function ConnectDatabasePage() {
         </div>
       </div>
 
-      <div className="card" style={{ maxWidth: 720, margin: '0 auto' }}>
-        <div className="card-body" style={{ padding: 32 }}>
-          <div style={{ marginBottom: 20 }}>
+      <div className="card max-w-[720px] mx-auto">
+        <div className="card-body p-8">
+          <div className="mb-5">
             <label className="input-label">选择数据库类型</label>
             <div className="db-type-grid">
               {DB_TYPES.map((t) => (
@@ -145,13 +145,13 @@ export default function ConnectDatabasePage() {
             </div>
           </div>
 
-          <div style={{ marginTop: 8 }}>
+          <div className="mt-2">
             <label className="input-label">数据源名称(用于展示)</label>
             <input className="input input-lg" value={form.name} onChange={(e) => update('name', e.target.value)} />
           </div>
 
-          <div style={{ marginTop: 20, padding: '14px 16px', background: 'var(--green-lighter)', borderRadius: 8, borderLeft: '3px solid var(--green)', fontSize: 12, color: 'var(--green-darker)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+          <div className="mt-5 px-4 py-3.5 rounded-lg text-xs flex gap-2.5 items-start" style={{ background: 'var(--green-lighter)', borderLeft: '3px solid var(--green)', color: 'var(--green-darker)' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 mt-0.5">
               <circle cx="12" cy="12" r="10" />
               <path d="M12 16v-4M12 8h.01" />
             </svg>
@@ -160,12 +160,12 @@ export default function ConnectDatabasePage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary btn-lg" style={{ flex: 1 }} onClick={handleTest} disabled={testing}>
+          <div className="flex gap-2.5 mt-6">
+            <button className="btn btn-secondary btn-lg flex-1" onClick={handleTest} disabled={testing}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 0 1-9 9c-2.39 0-4.68-.94-6.4-2.6L3 16M3 12a9 9 0 0 1 9-9c2.39 0 4.68.94 6.4 2.6L21 8" /></svg>
               {testing ? '测试中...' : '测试连接'}
             </button>
-            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} onClick={handleStartExplore} disabled={submitting}>
+            <button className="btn btn-primary btn-lg flex-1" onClick={handleStartExplore} disabled={submitting}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
               {submitting ? '创建中...' : '开始探索'}
             </button>

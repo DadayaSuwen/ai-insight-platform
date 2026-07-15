@@ -91,9 +91,9 @@ export default function DashboardPage() {
   /* ─── 加载态 ─── */
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 16 }}>
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--green)' }} />
-        <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Agent 正在生成工作台...</p>
+        <p className="text-sm text-muted">Agent 正在生成工作台...</p>
       </div>
     );
   }
@@ -101,8 +101,8 @@ export default function DashboardPage() {
   /* ─── 错误态 ─── */
   if (error) {
     return (
-      <div style={{ padding: 40, textAlign: 'center' }}>
-        <p style={{ color: 'var(--error)', marginBottom: 16 }}>{error}</p>
+      <div className="p-10 text-center">
+        <p className="text-error mb-4">{error}</p>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/explore/${datasourceId}`)}>
           返回探索
         </button>
@@ -138,17 +138,11 @@ export default function DashboardPage() {
 
       {/* Agent 提示条 */}
       <div
+        className="mb-6 px-4 py-3 rounded-lg text-sm flex items-center gap-2.5"
         style={{
-          marginBottom: 24,
-          padding: '12px 16px',
           background: 'var(--green-lighter)',
           borderLeft: '3px solid var(--green)',
-          borderRadius: 8,
-          fontSize: 13,
           color: 'var(--green-darker)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
         }}
       >
         <span>✦</span>
@@ -156,7 +150,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI 卡片 */}
-      <div className="grid grid-5" style={{ marginBottom: 24 }}>
+      <div className="grid grid-5 mb-6">
         {config.kpis.map((kpi) => {
           const rawValue = kpiValues[kpi.label];
           const value = rawValue ?? undefined;
@@ -172,7 +166,7 @@ export default function DashboardPage() {
                 {value !== undefined ? formatValue(value) : dataLoading ? '加载中...' : '—'}
               </div>
               {kpi.comparison && (
-                <div className="kpi-delta" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <div className="kpi-delta text-xs text-muted mt-1">
                   vs {kpi.comparison === 'PREVIOUS_MONTH' ? '上月' : kpi.comparison === 'PREVIOUS_WEEK' ? '上周' : kpi.comparison}
                 </div>
               )}
@@ -182,11 +176,11 @@ export default function DashboardPage() {
       </div>
 
       {/* 图表区 */}
-      <div className="grid grid-3" style={{ marginBottom: 24 }}>
+      <div className="grid grid-3 mb-6">
         {config.charts.slice(0, 2).map((chart, i) => {
           const isWide = i === 0 && config.charts.length >= 2;
           return (
-            <div key={chart.title} className="card" style={{ gridColumn: isWide ? 'span 2' : undefined, overflow: 'hidden' }}>
+            <div key={chart.title} className="card overflow-hidden" style={{ gridColumn: isWide ? 'span 2' : undefined }}>
               <div className="card-header">
                 <div className="card-title">{chart.title}</div>
                 <span className="chip green">{chart.type}</span>
@@ -201,9 +195,9 @@ export default function DashboardPage() {
 
       {/* 第二行 — 剩余图表 */}
       {config.charts.length > 2 && (
-        <div className="grid grid-3" style={{ marginBottom: 24 }}>
+        <div className="grid grid-3 mb-6">
           {config.charts.slice(2, 5).map((chart) => (
-            <div key={chart.title} className="card" style={{ overflow: 'hidden' }}>
+            <div key={chart.title} className="card overflow-hidden">
               <div className="card-header">
                 <div className="card-title">{chart.title}</div>
                 <span className="chip">{chart.type}</span>
@@ -218,13 +212,13 @@ export default function DashboardPage() {
 
       {/* 洞察列表 */}
       {config.insights && config.insights.length > 0 && (
-        <div className="card" style={{ overflow: 'hidden', marginBottom: 24 }}>
+        <div className="card overflow-hidden mb-6">
           <div className="card-header">
             <div className="card-title">Agent 主动洞察</div>
             <span className="chip amber">{config.insights.length} 条</span>
           </div>
-          <div className="card-body" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="card-body p-4">
+            <div className="flex flex-col gap-3">
               {config.insights.map((insight, i) => {
                 const bgMap = {
                   trend_anomaly: 'var(--error-light)',
@@ -245,16 +239,14 @@ export default function DashboardPage() {
                   risk: 'var(--error-dark)',
                 };
                 return (
-                  <div key={i} style={{
-                    padding: 12,
+                  <div key={i} className="p-3 rounded-lg" style={{
                     background: bgMap[insight.type as keyof typeof bgMap] || 'var(--bg-secondary)',
-                    borderRadius: 8,
                     borderLeft: `3px solid ${borderMap[insight.type as keyof typeof borderMap] || 'var(--border)'}`,
                   }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: colorMap[insight.type as keyof typeof colorMap] || 'var(--text-primary)' }}>
+                    <div className="text-xs font-semibold" style={{ color: colorMap[insight.type as keyof typeof colorMap] || 'var(--text-primary)' }}>
                       {insight.type === 'trend_anomaly' ? '⚠' : insight.type === 'risk' ? '🔴' : insight.type === 'opportunity' ? '✦' : '📊'} {insight.description}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    <div className="text-xs text-muted mt-1">
                       {insight.table}.{insight.metric}
                     </div>
                   </div>
@@ -294,10 +286,10 @@ function ConfigChartRenderer({ chart, data }: { chart: ChartSpec; data: Array<Re
   }, [chart, data]);
 
   if (data.length === 0) {
-    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>暂无数据</div>;
+    return <div className="p-10 text-center text-muted text-sm">暂无数据</div>;
   }
 
-  return <div ref={ref} style={{ width: '100%', height: 280 }} />;
+  return <div ref={ref} className="w-full" style={{ height: 280 }} />;
 }
 
 function buildEChartsOption(chart: ChartSpec, data: Array<Record<string, unknown>>): echarts.EChartsOption {
@@ -441,25 +433,17 @@ function SchemaOverviewCard({ datasourceId }: { datasourceId: string }) {
       <div className="card-header">
         <div className="card-title">数据库结构概览 · {tables.length} 张表</div>
       </div>
-      <div className="card-body" style={{ padding: 16 }}>
-        <div className="grid grid-4" style={{ gap: 12 }}>
+      <div className="card-body p-4">
+        <div className="grid grid-4 gap-3">
           {tables.map((t) => (
             <div
               key={t.name}
-              style={{
-                padding: 14,
-                background: 'var(--bg-secondary)',
-                borderRadius: 10,
-                border: '1px solid var(--border)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-              }}
+              className="p-3.5 bg-muted rounded-xl border border-default flex items-center gap-2.5"
             >
-              <div style={{ fontSize: 22 }}>{t.icon}</div>
+              <div className="text-2xl">{t.icon}</div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                <div className="text-sm font-semibold">{t.name}</div>
+                <div className="text-xs text-muted mt-0.5">
                   <span className="num">{t.rowCount.toLocaleString()}</span> 行 · {t.cols} 列
                 </div>
               </div>

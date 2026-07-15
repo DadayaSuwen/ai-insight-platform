@@ -160,7 +160,7 @@ export default function DataSourcesTab() {
     <div className="flex flex-col gap-6">
       {/* CSV 上传区 */}
       <section>
-        <p className="mb-2 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+        <p className="mb-2 text-xs font-medium text-muted">
           上传 CSV 文件
         </p>
         <div
@@ -183,25 +183,23 @@ export default function DataSourcesTab() {
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            className="mx-auto mb-2"
-            style={{ color: 'var(--text-muted)' }}
+            className="mx-auto mb-2 text-muted"
           >
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm text-secondary">
             拖拽 CSV 文件到此处,或
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="ml-1 underline"
-              style={{ color: 'var(--accent)' }}
+              className="ml-1 underline text-accent"
               disabled={uploading}
             >
               点击选择
             </button>
           </p>
-          <p className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <p className="mt-1 text-[10px] text-muted">
             最大 50MB · UTF-8 / GBK / Latin-1 自动嗅探 · 上传后可在弹窗中改列名 / 类型
           </p>
           <input
@@ -217,7 +215,7 @@ export default function DataSourcesTab() {
           />
           {uploading && (
             <div className="mt-3">
-              <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[10px] text-muted">
                 上传中... {progress}%
               </p>
               <div
@@ -241,15 +239,15 @@ export default function DataSourcesTab() {
 
       {/* 列表 */}
       <section>
-        <p className="mb-2 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+        <p className="mb-2 text-xs font-medium text-muted">
           已注册数据源 ({items?.length ?? '...'})
         </p>
         {!items ? (
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-xs text-muted">
             加载中...
           </p>
         ) : items.length === 0 ? (
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-xs text-muted">
             暂无数据源 — 上传 CSV 自动注册第一个
           </p>
         ) : (
@@ -257,20 +255,16 @@ export default function DataSourcesTab() {
             {items.map(ds => (
               <div
                 key={ds.id}
-                className="flex items-center justify-between rounded-xl border px-3 py-2"
-                style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
+                className="flex items-center justify-between rounded-xl border border-default px-3 py-2 bg-muted"
               >
                 <div className="flex items-center gap-2">
                   <StatusDot ok={ds.status === 'active'} error={ds.lastError ?? undefined} />
                   <TypeBadge type={ds.type} />
                   <div>
-                    <p
-                      className="text-sm font-medium"
-                      style={{ color: 'var(--text-primary)' }}
-                    >
+                    <p className="text-sm font-medium text-default">
                       {ds.name}
                     </p>
-                    <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    <p className="text-[10px] text-muted">
                       {ds.id}
                     </p>
                   </div>
@@ -278,11 +272,7 @@ export default function DataSourcesTab() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleExplore(ds.id)}
-                    className="rounded-md px-2 py-1 text-[10px] font-medium"
-                    style={{
-                      background: 'var(--accent)',
-                      color: 'white',
-                    }}
+                    className="rounded-md px-2 py-1 text-[10px] font-medium bg-accent text-white"
                     title="开始自主探索 Schema"
                   >
                     探索
@@ -290,24 +280,14 @@ export default function DataSourcesTab() {
                   <button
                     onClick={() => handleRefresh(ds.id)}
                     disabled={refreshing === ds.id}
-                    className="rounded-md px-2 py-1 text-[10px] disabled:opacity-50"
-                    style={{
-                      background: 'transparent',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border)',
-                    }}
+                    className="rounded-md px-2 py-1 text-[10px] disabled:opacity-50 bg-transparent text-secondary border border-default"
                     title="重新 introspect + 清查询缓存"
                   >
                     {refreshing === ds.id ? '刷新中...' : '刷新'}
                   </button>
                   <button
                     onClick={() => handleDelete(ds.id, ds.name)}
-                    className="rounded-md px-2 py-1 text-[10px]"
-                    style={{
-                      background: 'transparent',
-                      color: 'var(--error)',
-                      border: '1px solid var(--border)',
-                    }}
+                    className="rounded-md px-2 py-1 text-[10px] bg-transparent text-error border border-default"
                     title="删除"
                   >
                     删除
@@ -320,15 +300,11 @@ export default function DataSourcesTab() {
       </section>
 
       {/* 提示 */}
-      <section
-        className="rounded-xl border p-3 text-xs"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-      >
+      <section className="rounded-xl border border-default p-3 text-xs text-muted">
         💡 数据库密码走 AES-256-GCM 加密存储;点「刷新」会清空该数据源的查询缓存。
         <button
           onClick={() => navigate('/')}
-          className="ml-2 underline"
-          style={{ color: 'var(--accent)' }}
+          className="ml-2 underline text-accent"
         >
           去聊天测试 →
         </button>

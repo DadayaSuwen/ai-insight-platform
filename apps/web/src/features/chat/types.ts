@@ -42,6 +42,17 @@ export interface ErrorEventData {
 /** done 事件可携带 session 字段，用于前端刷新侧栏 */
 export interface DoneEventData {
   session?: { id: string; title: string; createdAt: string; updatedAt: string } | null;
+  /**
+   * [chat-system-architecture.md §六原则 4] 本轮对话的 LLM 真实消耗 + 总耗时。
+   * 后端 ChatService 在最终 done yield 时塞入,前端右栏渲染。
+   * 所有字段 optional:Anthropic 流式 API 不发 usage_metadata 时缺省,前端 ?? '—' 兜底。
+   */
+  stats?: {
+    elapsedMs?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 /**

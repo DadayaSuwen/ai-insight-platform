@@ -43,24 +43,24 @@ export default function ExplorePage() {
   return (
     <div className="explore-page">
       {/* 标题 */}
-      <div style={{ textAlign: 'center', marginBottom: 32 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px' }}>
+      <div className="text-center mb-8">
+        <h1 className="text-2xl font-bold m-0 mb-2">
           {isRunning ? 'Agent 正在自主探索' : done ? '探索完成' : error ? '探索出错' : '准备探索'}
         </h1>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+        <p className="text-sm text-muted">
           {datasourceId ? `${datasourceId.slice(0, 8)}... · 预计 30-60 秒` : '等待数据源...'}
         </p>
       </div>
 
       {/* 进度条 */}
-      <div className="card" style={{ padding: '20px 24px', marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>总进度</span>
-          <span className="num" style={{ fontSize: 13, color: 'var(--green-dark)', fontWeight: 600 }}>
+      <div className="card px-6 py-5 mb-6">
+        <div className="flex justify-between items-center mb-2.5">
+          <span className="text-sm font-semibold">总进度</span>
+          <span className="num text-sm text-green font-semibold">
             {progress}% · 第 {Math.min(completedSteps + 1, 5)}/{totalSteps} 步
           </span>
         </div>
-        <div style={{ height: 8, background: 'var(--bg-tertiary)', borderRadius: 4, overflow: 'hidden' }}>
+        <div className="h-2 bg-subtle rounded overflow-hidden">
           <div
             style={{
               height: '100%',
@@ -76,7 +76,7 @@ export default function ExplorePage() {
       </div>
 
       {/* 步骤时间线 — 真实 SSE 数据 */}
-      <div className="card" style={{ padding: '0 24px' }}>
+      <div className="card px-6">
         {steps.map((s) => (
           <StepRow key={s.step} step={s} progressItems={progressItems.filter((p) => p.step === s.step)} />
         ))}
@@ -84,18 +84,10 @@ export default function ExplorePage() {
 
       {/* 日志面板 — 真实 SSE logs */}
       <div
-        className="num"
+        className="num mt-5 rounded-xl px-5 py-4 text-xs leading-relaxed max-h-50 overflow-y-auto font-mono-custom"
         style={{
-          marginTop: 20,
           background: '#1e293b',
-          borderRadius: 12,
-          padding: '16px 20px',
-          fontSize: 11,
-          lineHeight: 1.8,
           color: '#94a3b8',
-          maxHeight: 200,
-          overflowY: 'auto',
-          fontFamily: '"SF Mono", Menlo, monospace',
         }}
       >
         {logs.length === 0 && <div style={{ color: '#64748b' }}>等待连接...</div>}
@@ -118,7 +110,7 @@ export default function ExplorePage() {
       </div>
 
       {/* 操作区 */}
-      <div style={{ marginTop: 24, textAlign: 'center' }}>
+      <div className="mt-6 text-center">
         {isRunning && (
           <button className="btn btn-secondary btn-lg" onClick={abort}>
             <RotateCw size={16} /> 停止探索
@@ -141,7 +133,7 @@ export default function ExplorePage() {
                 进入工作台 <ArrowRight size={16} />
               </button>
             )}
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+            <p className="text-xs text-muted mt-2">
               {done.reviewNeeded
                 ? `Agent 发现 ${done.pendingFields} 个不确定字段（共 ${done.totalFields} 字段），需要您确认`
                 : `全部 ${done.totalFields} 个字段已自动确认，可直接生成工作台`}
@@ -150,10 +142,10 @@ export default function ExplorePage() {
         )}
         {error && !done && (
           <div>
-            <p style={{ marginBottom: 16, fontSize: 14, color: 'var(--error)' }}>探索失败: {error}</p>
+            <p className="mb-4 text-sm text-error">探索失败: {error}</p>
             {error.includes('LLM_NOT_CONFIGURED') && (
-              <div style={{ marginBottom: 12 }}>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              <div className="mb-3">
+                <p className="text-xs text-muted mb-2">
                   Agent 需要 LLM 来推断字段语义，请先配置 API Key
                 </p>
                 <button className="btn btn-primary btn-lg" onClick={() => navigate('/llm-config')}>
@@ -162,8 +154,8 @@ export default function ExplorePage() {
               </div>
             )}
             {(error.includes('Connection') || error.includes('ECONNREFUSED') || error.includes('timeout')) && (
-              <div style={{ marginBottom: 12 }}>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              <div className="mb-3">
+                <p className="text-xs text-muted mb-2">
                   数据库连接失败，请检查数据源配置
                 </p>
                 <button className="btn btn-secondary btn-lg" onClick={() => navigate('/datasources')}>
@@ -223,7 +215,7 @@ function StepRow({ step, progressItems }: { step: ExploreStep; progressItems: Pr
             const d = p.data as { name: string; rowCount: number; columnCount: number };
             return (
               <div key={i} className="explore-step-detail" style={{ animation: 'slideIn 0.3s ease-out' }}>
-                <span style={{ color: 'var(--green-dark)' }}>▸</span>{' '}
+                <span className="text-green">▸</span>{' '}
                 <strong>{d.name}</strong> ({d.rowCount.toLocaleString()} 行 · {d.columnCount} 列)
               </div>
             );
@@ -242,7 +234,7 @@ function StepRow({ step, progressItems }: { step: ExploreStep; progressItems: Pr
             const d = p.data as { fromTable: string; fromField: string; toTable: string; toField: string; confidence: number };
             return (
               <div key={i} className="explore-step-detail" style={{ animation: 'slideIn 0.3s ease-out' }}>
-                <span style={{ color: 'var(--green-dark)' }}>→</span>{' '}
+                <span className="text-green">→</span>{' '}
                 {d.fromTable}.{d.fromField} → {d.toTable}.{d.toField}
               </div>
             );
@@ -250,7 +242,7 @@ function StepRow({ step, progressItems }: { step: ExploreStep; progressItems: Pr
           return null;
         })}
       </div>
-      <span className="num" style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
+      <span className="num text-xs text-muted flex-shrink-0">
         {step.elapsedMs != null ? `${(step.elapsedMs / 1000).toFixed(1)}s` : ''}
       </span>
     </div>

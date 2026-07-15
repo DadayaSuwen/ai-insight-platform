@@ -109,11 +109,11 @@ export default function LoginPage() {
           />
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+        <div className="flex items-center justify-between mb-4">
+          <label className="flex items-center gap-1.5 text-xs text-secondary cursor-pointer">
             <input type="checkbox" defaultChecked style={{ accentColor: 'var(--green)' }} /> 记住我
           </label>
-          <a style={{ fontSize: 12, color: 'var(--green-dark)', cursor: 'pointer' }}>忘记密码？</a>
+          <a className="text-xs text-green cursor-pointer">忘记密码？</a>
         </div>
 
         <button className="auth-btn" onClick={handleSubmit} disabled={loading}>

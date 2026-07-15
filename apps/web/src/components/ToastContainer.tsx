@@ -42,20 +42,14 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       role="status"
-      className={`pointer-events-auto flex w-[320px] items-start gap-2 rounded-md px-3 py-2.5 shadow-md border ${animClass} transition-all duration-200 ease-out`}
-      style={{
-        background: "var(--bg-primary)",
-        color: "var(--text-primary)",
-        borderColor: "var(--border)",
-      }}
+      className={`pointer-events-auto flex w-[320px] items-start gap-2 rounded-md px-3 py-2.5 shadow-md border bg-surface text-default border-default ${animClass} transition-all duration-200 ease-out`}
     >
       <Icon size={16} style={{ color: accent, marginTop: 2 }} />
       <div className="flex-1 text-sm">{toast.message}</div>
       <button
         onClick={handleDismiss}
         aria-label="关闭"
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
-        style={{ color: "var(--text-muted)" }}
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)] text-muted"
       >
         <X size={13} />
       </button>

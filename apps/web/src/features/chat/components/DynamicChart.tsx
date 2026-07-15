@@ -173,13 +173,8 @@ const DynamicChart = forwardRef<DynamicChartHandle, DynamicChartProps>(
     if (!option || Object.keys(option).length === 0) {
       return (
         <div
-          className="flex items-center justify-center rounded-xl border p-6 text-sm"
-          style={{
-            borderColor: "var(--border)",
-            color: "var(--text-muted)",
-            background: "var(--bg-primary)",
-            minHeight: height,
-          }}
+          className="flex items-center justify-center rounded-xl border p-6 text-sm border-default text-muted bg-surface"
+          style={{ minHeight: height }}
         >
           图表数据为空
         </div>
@@ -196,14 +191,8 @@ const DynamicChart = forwardRef<DynamicChartHandle, DynamicChartProps>(
       return (
         <div
           ref={containerRef}
-          className="flex items-center justify-center rounded-xl border p-6 text-sm"
-          style={{
-            height: finalHeight,
-            minHeight: CHART_HEIGHT,
-            borderColor: "var(--border)",
-            color: "var(--text-muted)",
-            background: "var(--bg-primary)",
-          }}
+          className="flex items-center justify-center rounded-xl border p-6 text-sm border-default text-muted bg-surface"
+          style={{ height: finalHeight, minHeight: CHART_HEIGHT }}
         >
           {loadingMessage ?? "正在加载图表资源..."}
         </div>
@@ -213,11 +202,7 @@ const DynamicChart = forwardRef<DynamicChartHandle, DynamicChartProps>(
     return (
       <div
         ref={containerRef}
-        className="overflow-hidden rounded-xl border p-2"
-        style={{
-          borderColor: "var(--border)",
-          background: "var(--bg-primary)",
-        }}
+        className="overflow-hidden rounded-xl border p-2 border-default bg-surface"
       >
         <ReactECharts
           key={rebuildKey}

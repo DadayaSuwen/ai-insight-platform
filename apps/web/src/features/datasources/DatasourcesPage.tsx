@@ -103,72 +103,48 @@ export default function DatasourcesPage() {
         </div>
       </div>
 
-      <div className="grid grid-4" style={{ marginBottom: 24 }}>
-        <div className="card" style={{ padding: 16 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              marginBottom: 6,
-            }}
-          >
+      <div className="grid grid-4 mb-6">
+        <div className="card p-4">
+          <div className="text-xs text-muted mb-1.5">
             数据源总数
           </div>
-          <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>
+          <div className="num text-2xl font-bold">
             {list.length}
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            <span className="text-sm text-muted">
               {" "}
               个
             </span>
           </div>
         </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              marginBottom: 6,
-            }}
-          >
+        <div className="card p-4">
+          <div className="text-xs text-muted mb-1.5">
             数据库
           </div>
-          <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>
+          <div className="num text-2xl font-bold">
             {dbCount}
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            <span className="text-sm text-muted">
               {" "}
               个
             </span>
           </div>
         </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              marginBottom: 6,
-            }}
-          >
+        <div className="card p-4">
+          <div className="text-xs text-muted mb-1.5">
             CSV 文件
           </div>
-          <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>
+          <div className="num text-2xl font-bold">
             {csvCount}
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            <span className="text-sm text-muted">
               {" "}
               个
             </span>
           </div>
         </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              marginBottom: 6,
-            }}
-          >
+        <div className="card p-4">
+          <div className="text-xs text-muted mb-1.5">
             状态
           </div>
-          <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>
+          <div className="num text-2xl font-bold">
             {list.length > 0 ? "在线" : "—"}
           </div>
         </div>
@@ -176,29 +152,16 @@ export default function DatasourcesPage() {
 
       <div className="card">
         {loading ? (
-          <div
-            style={{
-              padding: 40,
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 14,
-            }}
-          >
+          <div className="p-10 text-center text-muted text-sm">
             加载数据源列表...
           </div>
         ) : error ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: "center",
-              color: "var(--text-muted)",
-            }}
-          >
-            <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
-            <div style={{ fontSize: 14, marginBottom: 4 }}>
+          <div className="p-12 text-center text-muted">
+            <div className="text-4xl mb-2">⚠️</div>
+            <div className="text-sm mb-1">
               加载失败
             </div>
-            <div style={{ fontSize: 12, marginBottom: 16, color: 'var(--error)' }}>
+            <div className="text-xs mb-4 text-error">
               {error}
             </div>
             <button
@@ -209,18 +172,12 @@ export default function DatasourcesPage() {
             </button>
           </div>
         ) : list.length === 0 ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: "center",
-              color: "var(--text-muted)",
-            }}
-          >
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
-            <div style={{ fontSize: 14, marginBottom: 4 }}>
+          <div className="p-12 text-center text-muted">
+            <div className="text-4xl mb-2">📭</div>
+            <div className="text-sm mb-1">
               还没有配置数据源
             </div>
-            <div style={{ fontSize: 12, marginBottom: 16 }}>
+            <div className="text-xs mb-4">
               连接数据库或上传 CSV 开始使用
             </div>
             <button
@@ -245,28 +202,19 @@ export default function DatasourcesPage() {
               {list.map((ds) => (
                 <tr key={ds.id}>
                   <td>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 10 }}
-                    >
+                    <div className="flex items-center gap-2.5">
                       <div
+                        className="flex items-center justify-center w-7 h-7 rounded-md"
                         style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
                           background: "var(--green-lighter)",
                           color: "var(--green-dark)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
                         }}
                       >
                         {ds.type === "duckdb-csv" ? "📄" : "🐘"}
                       </div>
                       <div>
-                        <div style={{ fontWeight: 600 }}>{ds.name}</div>
-                        <div
-                          style={{ fontSize: 11, color: "var(--text-muted)" }}
-                        >
+                        <div className="font-semibold">{ds.name}</div>
+                        <div className="text-xs text-muted">
                           {ds.description || ds.type}
                         </div>
                       </div>
@@ -282,7 +230,7 @@ export default function DatasourcesPage() {
                       {(ds.exploreStatus && EXPLORE_LABELS[ds.exploreStatus]) || (ds.status === "active" ? "在线" : ds.status)}
                     </span>
                   </td>
-                  <td style={{ fontSize: 12 }}>
+                  <td className="text-xs">
                     {new Date(ds.createdAt).toLocaleDateString("zh-CN")}
                   </td>
                   <td>
@@ -322,8 +270,7 @@ export default function DatasourcesPage() {
                       </button>
                     )}
                     <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ color: "var(--error)" }}
+                      className="btn btn-ghost btn-sm text-error"
                       onClick={async () => {
                         if (
                           !window.confirm(
@@ -359,33 +306,30 @@ export default function DatasourcesPage() {
       {/* 编辑连接弹窗 */}
       {editDs && (
         <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 100,
-          }}
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.4)" }}
           onClick={() => setEditDs(null)}
         >
           <div
+            className="bg-surface rounded-xl p-6"
             style={{
-              background: "var(--bg-primary)", borderRadius: 12, padding: 24,
               width: 480, maxHeight: "80vh", overflowY: "auto",
               boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700 }}>编辑连接 · {editDs.name}</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <h3 className="m-0 mb-4 text-base font-bold">编辑连接 · {editDs.name}</h3>
+            <div className="flex flex-col gap-2.5">
               <div>
                 <label className="input-label">数据源名称</label>
                 <input className="input" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
               </div>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div className="flex gap-2.5">
                 <div style={{ flex: 1 }}>
                   <label className="input-label">主机</label>
                   <input className="input" value={editForm.host} onChange={(e) => setEditForm((f) => ({ ...f, host: e.target.value }))} />
                 </div>
-                <div style={{ width: 100 }}>
+                <div className="w-25">
                   <label className="input-label">端口</label>
                   <input className="input" value={editForm.port} onChange={(e) => setEditForm((f) => ({ ...f, port: e.target.value }))} />
                 </div>
@@ -394,7 +338,7 @@ export default function DatasourcesPage() {
                 <label className="input-label">数据库</label>
                 <input className="input" value={editForm.database} onChange={(e) => setEditForm((f) => ({ ...f, database: e.target.value }))} />
               </div>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div className="flex gap-2.5">
                 <div style={{ flex: 1 }}>
                   <label className="input-label">用户</label>
                   <input className="input" value={editForm.user} onChange={(e) => setEditForm((f) => ({ ...f, user: e.target.value }))} />
@@ -409,7 +353,7 @@ export default function DatasourcesPage() {
                 <input className="input" value={editForm.schema} onChange={(e) => setEditForm((f) => ({ ...f, schema: e.target.value }))} />
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>
+            <div className="flex gap-2.5 mt-5 justify-end">
               <button className="btn btn-secondary btn-sm" onClick={() => setEditDs(null)}>取消</button>
               <button
                 className="btn btn-primary btn-sm"

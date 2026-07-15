@@ -41,6 +41,18 @@
   --accent: var(--green-dark);
   --accent-hover: var(--green-darker);
   --accent-light: var(--green-lighter);
+  /* SQL syntax highlight */
+  --sql-keyword: var(--green-dark);
+  --sql-func:    var(--info);
+  --sql-string:  var(--orange);
+  --sql-number:  var(--amber);
+  /* severity chips */
+  --sev-good-bg: var(--green-light);
+  --sev-good-fg: var(--green-darker);
+  --sev-warn-bg: var(--amber-light);
+  --sev-warn-fg: var(--amber);
+  --sev-bad-bg:  var(--error-light);
+  --sev-bad-fg:  var(--error);
 }
 * { box-sizing: border-box; }
 html, body {
@@ -454,6 +466,9 @@ textarea.input { font-family: inherit; resize: vertical; min-height: 80px; }
   --text-muted:     #837D71;
   --green-light:   #1F3A2E;
   --green-lighter: #1A2D24;
+  --sql-keyword: var(--green);
+  --sev-good-fg: var(--green);
+  --sev-bad-fg:  #E08D82;
   color-scheme: dark;
 }
 
@@ -1338,4 +1353,120 @@ textarea.input { font-family: inherit; resize: vertical; min-height: 80px; }
 }
 @media (min-width: 1281px) {
   .chat-context-panel { display: flex; }
+}
+
+/* ============================================================
+ * CSS Variable Utility Classes (Migration 2026-07)
+ * Bridge Tailwind's inability to express var(--xxx) natively.
+ * Replace style={{ color: "var(--text-muted)" }} → className="text-muted"
+ * ============================================================ */
+@layer utilities {
+  /* ───── Backgrounds ───── */
+  .bg-surface        { background-color: var(--bg-primary); }
+  .bg-muted          { background-color: var(--bg-secondary); }
+  .bg-subtle         { background-color: var(--bg-tertiary); }
+  .bg-hover-custom   { background-color: var(--bg-hover); }
+  .bg-accent         { background-color: var(--accent); }
+  .bg-accent-hover   { background-color: var(--accent-hover); }
+  .bg-green-lighter  { background-color: var(--green-lighter); }
+  .bg-green-light    { background-color: var(--green-light); }
+  .bg-error-light    { background-color: var(--error-light); }
+  .bg-warning-light  { background-color: var(--warning-light); }
+  .bg-info-light     { background-color: var(--info-light); }
+  .bg-amber-light    { background-color: var(--amber-light); }
+  .bg-sev-good       { background-color: var(--sev-good-bg); }
+  .bg-sev-warn       { background-color: var(--sev-warn-bg); }
+  .bg-sev-bad        { background-color: var(--sev-bad-bg); }
+
+  /* ───── Text colors ───── */
+  .text-default      { color: var(--text-primary); }
+  .text-secondary    { color: var(--text-secondary); }
+  .text-muted        { color: var(--text-muted); }
+  .text-inverse      { color: var(--text-inverse); }
+  .text-green        { color: var(--green-dark); }
+  .text-error        { color: var(--error); }
+  .text-warning      { color: var(--warning); }
+  .text-accent       { color: var(--accent); }
+  .text-sev-good     { color: var(--sev-good-fg); }
+  .text-sev-warn     { color: var(--sev-warn-fg); }
+  .text-sev-bad      { color: var(--sev-bad-fg); }
+
+  /* ───── Border colors ───── */
+  .border-default    { border-color: var(--border); }
+  .border-light      { border-color: var(--border-light); }
+
+  /* ───── Font families ───── */
+  .font-mono-custom  { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+}
+
+/* ============================================================
+ * Component-level CSS Classes (Migration 2026-07)
+ * Patterns repeated across files that deserve a dedicated class.
+ * ============================================================ */
+@layer components {
+  /* Chat section headings — repeats 7x in ChatWindow */
+  .chat-section-heading {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Suggestion chip (WelcomeScreen + MessageBubble DynamicSuggestions) */
+  .suggestion-chip {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    cursor: pointer;
+  }
+  .suggestion-chip:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+    color: var(--text-primary);
+  }
+
+  /* Severity-based backgrounds */
+  .sev-high, .sev-error, .sev-risk     { background: var(--error-light);    color: var(--error);    border-color: var(--error); }
+  .sev-medium, .sev-warning, .sev-warn { background: var(--warning-light);  color: var(--warning);  border-color: var(--warning); }
+  .sev-low, .sev-info, .sev-opportunity, .sev-good { background: var(--green-lighter);  color: var(--green-dark);  border-color: var(--green); }
+
+  /* Tool step status dots (ThinkProcess in MessageBubble) */
+  [data-tool-step="done"]    { background: var(--green) !important; color: white !important; }
+  [data-tool-step="active"]  { background: var(--amber) !important; }
+  [data-tool-step="pending"] { background: var(--bg-hover) !important; color: transparent !important; }
+
+  /* Common empty/loading state */
+  .page-empty-state {
+    padding: 48px;
+    text-align: center;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
+  /* Inline flex row with space-between pattern */
+  .flex-row-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* InsightPanel severity cards */
+  .insight-card-info       { background: color-mix(in srgb, var(--info) 8%, transparent);    border-left: 3px solid color-mix(in srgb, var(--info) 30%, transparent); }
+  .insight-card-warning    { background: color-mix(in srgb, var(--warning) 8%, transparent); border-left: 3px solid color-mix(in srgb, var(--warning) 30%, transparent); }
+  .insight-card-opportunity{ background: color-mix(in srgb, var(--success) 8%, transparent); border-left: 3px solid color-mix(in srgb, var(--success) 30%, transparent); }
+  .insight-card-risk       { background: color-mix(in srgb, var(--error) 8%, transparent);   border-left: 3px solid color-mix(in srgb, var(--error) 30%, transparent); }
+  .insight-badge-info       { background: color-mix(in srgb, var(--info) 30%, transparent); }
+  .insight-badge-warning    { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+  .insight-badge-opportunity{ background: color-mix(in srgb, var(--success) 30%, transparent); }
+  .insight-badge-risk       { background: color-mix(in srgb, var(--error) 30%, transparent); }
 }

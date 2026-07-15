@@ -135,7 +135,15 @@ export class QueryGatewayService {
     const { sql } = dialect.translate(args, snapshot);
 
     // 4. 安全护栏 + LIMIT 包裹
-    const guard = guardSql(sql);
+    // [本次] 把下游方言告诉 guardSql, 否则 MySqlDialect 产出的反引号包裹
+    // 标识符会被 PG 模式解析器误判, 报"SQL 语法错误"。
+    const parserDialect: "postgresql" | "mysql" | "duckdb" =
+      config.type === "mysql"
+        ? "mysql"
+        : config.type === "duckdb-csv"
+        ? "duckdb"
+        : "postgresql";
+    const guard = guardSql(sql, { dialect: parserDialect });
     if (guard.rejected) {
       throw new Error(`SQL rejected by guard: ${guard.reason}`);
     }
@@ -148,39 +156,50 @@ export class QueryGatewayService {
 
     // 6. [Sprint 4] 写缓存 (用 originalIntent 做 key,保证中文名查询可命中)
     this.cache.set(dataSourceId, currentUserId, originalIntent, result);
-    return result;
+    // [本次] 透出实际执行的 SQL,供工具结果 / 前端展示用
+    return { ...result, sql: guard.sql };
   }
 }
 
 /**
- * [Sprint 5.7] 中文→物理列名反查 + 自动修正
+ * [Sprint 5.7 / Fix] 中文→物理名反查 + 自动修正（表名 + 列名）
  *
- * 如果 LLM 误把 chineseName 写进了 QueryIntent 的 groupBy/metrics/filters/orderBy，
- * 这里静默转换为物理列名，避免抛 IntentValidationError 让 LLM 重试。
+ * 如果 LLM 误把 chineseName 写进了 QueryIntent 的 table/groupBy/metrics/filters/orderBy，
+ * 这里静默转换为物理名，避免抛 IntentValidationError 让 LLM 陷入重试死循环。
  *
- * 仅当 chineseName 存在于 snapshot 中时才替换，否则保持原值（让 validator 报错）。
+ * [Fix] 关键修复:先把 intent.table 解析为物理表名（原实现只按物理名精确匹配，
+ * 一旦 LLM 用中文/大小写不一致的表名，find 返回 undefined → 整个 remap 被跳过，
+ * 列名也拿不到映射 → 每轮 validateIntent 失败 → 重试死循环）。
+ *
+ * 仅当能在 snapshot 中定位到对应物理名时才替换，否则保持原值（让 validator 报错）。
  */
 function remapChineseToPhysical(
   intent: QueryIntent,
   snapshot: MetadataSnapshot,
 ): QueryIntent {
-  const table = snapshot.tables.find((t) => t.name === intent.table);
-  if (!table) return intent;
+  // 1. [Fix] 先解析物理表名:精确 → 大小写不敏感 → 去除空白/分隔符的模糊匹配
+  const physicalTable = resolvePhysicalTable(intent.table, snapshot);
+  const table = snapshot.tables.find((t) => t.name === physicalTable);
+  if (!table) return intent; // 无法定位表,交给 validator 报错
 
-  // 构建 中文名 → 物理名 映射
+  // 2. 构建 列中文名 → 物理列名 映射
   const cnMap = new Map<string, string>();
   for (const col of table.columns) {
     if (col.chineseName && col.chineseName !== col.name) {
       cnMap.set(col.chineseName, col.name);
     }
   }
-  if (cnMap.size === 0) return intent; // 没有中文映射，直接返回
 
   const remap = (val: string) => cnMap.get(val) ?? val;
+  const tableChanged = physicalTable !== intent.table;
+
+  // 若表名无需改、且无列中文映射,原样返回
+  if (!tableChanged && cnMap.size === 0) return intent;
 
   // 深拷贝以避免副作用影响缓存 key
   return {
     ...intent,
+    table: physicalTable,
     groupBy: intent.groupBy?.map(remap),
     metrics: intent.metrics?.map((m) => ({ ...m, column: remap(m.column) })),
     filters: intent.filters?.map((f) => ({ ...f, column: remap(f.column) })),
@@ -188,4 +207,28 @@ function remapChineseToPhysical(
       ? { ...intent.orderBy, column: remap(intent.orderBy.column) }
       : undefined,
   };
+}
+
+/**
+ * [Fix] 把 LLM 给的表名解析为 snapshot 中真实存在的物理表名。
+ * 表元数据没有 chineseName 字段,所以只能靠标准化匹配:
+ *   1) 精确匹配 → 直接用
+ *   2) 大小写不敏感匹配
+ *   3) 去除空白/下划线/连字符后的规范化匹配
+ * 都失败则原样返回(交给 validator 报错)。
+ */
+function resolvePhysicalTable(
+  wanted: string,
+  snapshot: MetadataSnapshot,
+): string {
+  if (snapshot.tables.some((t) => t.name === wanted)) return wanted;
+
+  const lower = wanted.toLowerCase();
+  const ci = snapshot.tables.find((t) => t.name.toLowerCase() === lower);
+  if (ci) return ci.name;
+
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]/g, "");
+  const target = norm(wanted);
+  const fuzzy = snapshot.tables.find((t) => norm(t.name) === target);
+  return fuzzy ? fuzzy.name : wanted;
 }

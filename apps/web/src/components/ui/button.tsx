@@ -8,10 +8,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "text-white",
+        default: "bg-accent text-inverse",
         ghost: "hover:bg-[var(--bg-hover)]",
-        outline: "border bg-transparent",
-        destructive: "text-white",
+        outline: "border bg-transparent border-default",
+        destructive: "bg-[var(--error)] text-inverse",
       },
       size: {
         default: "h-9 px-4 py-2",
@@ -33,25 +33,12 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, style, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    const baseStyle: React.CSSProperties = {
-      ...style,
-    };
-    if (variant === "default") {
-      baseStyle.background = "var(--accent)";
-      baseStyle.color = "var(--text-inverse)";
-    } else if (variant === "destructive") {
-      baseStyle.background = "var(--error)";
-      baseStyle.color = "var(--text-inverse)";
-    } else if (variant === "outline") {
-      baseStyle.borderColor = "var(--border)";
-    }
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        style={baseStyle}
         {...props}
       />
     );

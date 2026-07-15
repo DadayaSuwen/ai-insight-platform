@@ -56,12 +56,12 @@ export default function HistoryPage() {
 
       <div className="card">
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>加载历史记录...</div>
+          <div className="p-10 text-center text-muted text-sm">加载历史记录...</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
-            <div style={{ fontSize: 14, marginBottom: 4 }}>暂无探索历史</div>
-            <div style={{ fontSize: 12 }}>连接数据源后，探索记录会显示在这里</div>
+          <div className="p-12 text-center text-muted">
+            <div className="text-4xl mb-2">📭</div>
+            <div className="text-sm mb-1">暂无探索历史</div>
+            <div className="text-xs">连接数据源后，探索记录会显示在这里</div>
           </div>
         ) : (
           <table className="table">
@@ -77,7 +77,7 @@ export default function HistoryPage() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i}>
-                  <td className="num" style={{ fontSize: 12 }}>{r.time}</td>
+                  <td className="num text-xs">{r.time}</td>
                   <td><TypeBadge type={r.event} badge={r.badge} /></td>
                   <td>{r.ds}</td>
                   <td>{r.detail}</td>

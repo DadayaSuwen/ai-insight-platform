@@ -125,7 +125,7 @@ export default function LlmConfigPage() {
       {/* Provider 配置 tab */}
       {tab === 'provider' && (
         <>
-          <div className="grid grid-2" style={{ marginBottom: 24 }}>
+          <div className="grid grid-2 mb-6">
             {(Object.keys(PROVIDER_META) as LLMProvider[]).map((p) => {
               const meta = PROVIDER_META[p];
               const saved = llmConfigs[p];
@@ -135,24 +135,24 @@ export default function LlmConfigPage() {
               return (
                 <div key={p} className="card">
                   <div className="card-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 20 }}>{meta.icon}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{meta.icon}</span>
                       <div>
                         <div className="card-title">
                           {meta.name}
-                          {isActive && <span className="chip green" style={{ marginLeft: 6, fontSize: 10 }}>活跃</span>}
+                          {isActive && <span className="chip green ml-1.5 text-[10px]">活跃</span>}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{meta.models}</div>
+                        <div className="text-xs text-muted">{meta.models}</div>
                       </div>
                     </div>
                     <span className={`badge ${saved?.apiKey ? 'badge-success' : 'badge-warning'}`}>
                       {saved?.apiKey ? '已配置' : '未配置'}
                     </span>
                   </div>
-                  <div className="card-body" style={{ padding: 16 }}>
+                  <div className="card-body p-4">
                     {isSelected ? (
                       <>
-                        <div style={{ marginBottom: 12 }}>
+                        <div className="mb-3">
                           <label className="input-label">API Key</label>
                           <input
                             className="input"
@@ -162,19 +162,19 @@ export default function LlmConfigPage() {
                             placeholder={saved?.apiKey ? `已保存 (${maskKey(saved.apiKey)})` : `输入 API Key`}
                           />
                         </div>
-                        <div style={{ marginBottom: 12 }}>
+                        <div className="mb-3">
                           <label className="input-label">Base URL</label>
                           <input className="input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
                         </div>
-                        <div style={{ marginBottom: 12 }}>
+                        <div className="mb-3">
                           <label className="input-label">模型</label>
                           <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
                         </div>
-                        <div style={{ marginBottom: 12 }}>
+                        <div className="mb-3">
                           <label className="input-label">Temperature ({temperature})</label>
-                          <input className="input" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} style={{ padding: 0 }} />
+                          <input className="input p-0" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} />
                         </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div className="flex gap-2">
                           <button className="btn btn-secondary btn-sm" onClick={handleTestHealth} disabled={testingHealth}>
                             {testingHealth ? '测试中...' : '测试连接'}
                           </button>
@@ -194,17 +194,17 @@ export default function LlmConfigPage() {
             })}
           </div>
 
-          <div style={{ padding: '12px 14px', background: 'var(--error-light)', borderRadius: 8, fontSize: 12, color: 'var(--error)' }}>
+          <div className="px-3.5 py-3 rounded-lg text-xs text-error" style={{ background: 'var(--error-light)' }}>
             🔐 API Key 通过 AES-256-GCM 加密后存入数据库，不进日志，不下发给前端。
           </div>
         </>
       )}
 
       {tab === 'default' && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card mb-4">
           <div className="card-header"><div className="card-title">默认模型选择</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="card-body p-5">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="input-label">Schema 理解模型（消耗较多 Token）</label>
                 <select className="input">
@@ -212,7 +212,7 @@ export default function LlmConfigPage() {
                   <option>gpt-4o-mini (省钱)</option>
                   <option>claude-3-5-sonnet</option>
                 </select>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>用于：字段语义推断 · 表关系识别 · 提问生成</div>
+                <div className="text-xs text-muted mt-1">用于：字段语义推断 · 表关系识别 · 提问生成</div>
               </div>
               <div>
                 <label className="input-label">对话分析模型（高频调用）</label>
@@ -221,7 +221,7 @@ export default function LlmConfigPage() {
                   <option>gpt-4o</option>
                   <option>claude-3-5-haiku</option>
                 </select>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>用于：对话追问 · SQL 生成 · 洞察分析</div>
+                <div className="text-xs text-muted mt-1">用于：对话追问 · SQL 生成 · 洞察分析</div>
               </div>
             </div>
           </div>
@@ -231,8 +231,8 @@ export default function LlmConfigPage() {
       {tab === 'quota' && (
         <div className="card">
           <div className="card-header"><div className="card-title">Token 配额</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          <div className="card-body p-5">
+            <div className="text-sm text-secondary">
               Token 配额由各 Provider 控制，可在此页面配置 API Key 后使用。
             </div>
           </div>
@@ -242,9 +242,9 @@ export default function LlmConfigPage() {
       {tab === 'log' && (
         <div className="card">
           <div className="card-header"><div className="card-title">调用日志</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              调用日志功能开发中。可在服务端通过 <code style={{ fontFamily: 'monospace', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: 4 }}>CHART_DEBUG=1</code> 开启详细日志。
+          <div className="card-body p-5">
+            <div className="text-sm text-muted">
+              调用日志功能开发中。可在服务端通过 <code className="font-mono-custom bg-muted px-1.5 py-0.5 rounded">CHART_DEBUG=1</code> 开启详细日志。
             </div>
           </div>
         </div>

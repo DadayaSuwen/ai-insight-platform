@@ -50,24 +50,24 @@ export default function ProfilePage() {
       <div className="grid grid-2">
         <div className="card">
           <div className="card-header"><div className="card-title">基本信息</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-              <div className="user-avatar" style={{ width: 64, height: 64, fontSize: 24 }}>{user.name?.[0] || '?'}</div>
+          <div className="card-body p-5">
+            <div className="flex items-center gap-4 mb-5">
+              <div className="user-avatar text-2xl" style={{ width: 64, height: 64 }}>{user.name?.[0] || '?'}</div>
               <div>
                 <button className="btn btn-secondary btn-sm" onClick={() => toast.info('头像上传功能开发中')}>更换头像</button>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>JPG/PNG · 最大 2MB</div>
+                <div className="text-xs text-muted mt-1.5">JPG/PNG · 最大 2MB</div>
               </div>
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               <label className="input-label">姓名</label>
               <input className="input" defaultValue={user.name} />
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               <label className="input-label">邮箱</label>
               <input className="input" defaultValue={user.email} disabled />
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>邮箱不可修改</div>
+              <div className="text-xs text-muted mt-1">邮箱不可修改</div>
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               <label className="input-label">角色</label>
               <input className="input" defaultValue={roleLabels[user.role] || user.role} disabled />
             </div>
@@ -77,16 +77,16 @@ export default function ProfilePage() {
 
         <div className="card">
           <div className="card-header"><div className="card-title">修改密码</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ marginBottom: 14 }}>
+          <div className="card-body p-5">
+            <div className="mb-3.5">
               <label className="input-label">当前密码</label>
               <input className="input" type="password" placeholder="••••••••" />
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               <label className="input-label">新密码</label>
               <input className="input" type="password" placeholder="至少 8 位,含大小写字母和数字" />
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               <label className="input-label">确认新密码</label>
               <input className="input" type="password" placeholder="再次输入新密码" />
             </div>
@@ -94,31 +94,31 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="card" style={{ gridColumn: 'span 2' }}>
+        <div className="card col-span-2">
           <div className="card-header"><div className="card-title">会话与安全</div></div>
-          <div className="card-body" style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border-light)' }}>
+          <div className="card-body p-5">
+            <div className="flex items-center justify-between py-3 border-b border-light">
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>双因素认证</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>使用 TOTP 应用增强账号安全</div>
+                <div className="text-sm font-semibold">双因素认证</div>
+                <div className="text-xs text-muted mt-0.5">使用 TOTP 应用增强账号安全</div>
               </div>
               <div className="switch" onClick={() => { setTwoFactor(!twoFactor); toast.info('双因素认证功能开发中'); }}>
                 <div className={`switch-track${twoFactor ? ' on' : ''}`}><div className="switch-thumb" /></div>
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border-light)' }}>
+            <div className="flex items-center justify-between py-3 border-b border-light">
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>登录通知</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>异地登录时邮件通知</div>
+                <div className="text-sm font-semibold">登录通知</div>
+                <div className="text-xs text-muted mt-0.5">异地登录时邮件通知</div>
               </div>
               <div className="switch" onClick={() => { setLoginNotify(!loginNotify); toast.info('登录通知功能开发中'); }}>
                 <div className={`switch-track${loginNotify ? ' on' : ''}`}><div className="switch-thumb" /></div>
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
+            <div className="flex items-center justify-between py-3">
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--error)' }}>退出所有会话</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>强制下线所有设备</div>
+                <div className="text-sm font-semibold text-error">退出所有会话</div>
+                <div className="text-xs text-muted mt-0.5">强制下线所有设备</div>
               </div>
               <button className="btn btn-danger btn-sm" onClick={handleLogout}>退出</button>
             </div>

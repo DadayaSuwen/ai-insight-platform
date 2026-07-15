@@ -4,6 +4,7 @@ import { MessageEvent } from "@nestjs/common";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AiService } from "../ai/ai.service";
 import { ChatSessionService } from "./chat-session.service";
+import { LlmStatsCollector } from "../ai/llm/llm-stats.collector";
 import { currentTrace } from "../ai/debug-log";
 
 @Injectable()
@@ -13,6 +14,7 @@ export class ChatService {
   constructor(
     private readonly aiService: AiService,
     private readonly sessionService: ChatSessionService,
+    private readonly llmStatsCollector: LlmStatsCollector,
   ) {}
 
   processMessageStream(
@@ -65,10 +67,15 @@ export class ChatService {
             historyMessages,
             { signal: opts.signal, sessionId, dataSourceId, currentUserId: userId },
           )) {
-            subscriber.next({
-              type: event.type,
-              data: event.data,
-            });
+            // [chat-system-architecture.md §六原则 4] PlannerAgent 内部 yield 的 done
+            // 只承载 tokenUsage 中间快照,不由前端 ChatWindow 渲染 — 由 ChatService
+            // 在外层组装完整 stats 后,在最终 done 事件统一推送,避免双 done 事件污染前端状态。
+            if (event.type !== "done") {
+              subscriber.next({
+                type: event.type,
+                data: event.data,
+              });
+            }
 
             // 用 exhaustive switch 替 if/else if(TS 通过 PlannerStreamEvent
             // union 自动 narrow 每个 case 的 event.data 类型)。
@@ -84,8 +91,19 @@ export class ChatService {
               case "tool_result":
                 assistantToolResults.push(event.data);
                 break;
-              case "error":
               case "done":
+                // [chat-system-architecture.md §六原则 4] PlannerAgent 在 done 时
+                // 把当前聚合 token 快照放在 data.tokenUsage,这里把可能的多次 done
+                // (迭代上限 / 工具错误 / 正常结束) 的快照都收下来,collect 后 consumeAndReset。
+                if (event.data?.tokenUsage) {
+                  this.llmStatsCollector.recordUsage({
+                    input_tokens: event.data.tokenUsage.inputTokens,
+                    output_tokens: event.data.tokenUsage.outputTokens,
+                    total_tokens: event.data.tokenUsage.totalTokens,
+                  });
+                }
+                break;
+              case "error":
               case "thinking":
                 // 不需要收集的状态事件,nothing to do
                 break;
@@ -125,9 +143,24 @@ export class ChatService {
 
           // 7. 成功路径显式发 done 事件,把最新 session 一起回给前端,
           //    前端用 upsertSession 局部更新侧栏,省一次 GET /chat/sessions
+          //
+          // [chat-system-architecture.md §六原则 4] 同时把本轮 LLM 真实 token
+          // 消耗 + 总耗时塞到 stats。前端 ChatWindow 右栏渲染。
+          const tokenStats = this.llmStatsCollector.consumeAndReset();
+          const traceStart = currentTrace()?.startTs;
+          const elapsedMs = traceStart != null ? Date.now() - traceStart : undefined;
+
           subscriber.next({
             type: "done",
-            data: { session: finalSession ?? null },
+            data: {
+              session: finalSession ?? null,
+              stats: {
+                elapsedMs,
+                inputTokens: tokenStats.inputTokens || undefined,
+                outputTokens: tokenStats.outputTokens || undefined,
+                totalTokens: tokenStats.totalTokens || undefined,
+              },
+            },
           });
           subscriber.complete();
         } catch (err: unknown) {
@@ -162,7 +195,10 @@ export class ChatService {
               traceId: currentTrace()?.traceId,
             },
           });
+          // [chat-system-architecture.md §六原则 4] 异常路径也清空 collector,
+          // 防止上一轮残留 token 污染下一轮。
           // session: null 让前端 fallback 到 refreshSessions() 兜底刷新侧栏
+          this.llmStatsCollector.consumeAndReset();
           subscriber.next({ type: "done", data: { session: null } });
           subscriber.complete();
         }

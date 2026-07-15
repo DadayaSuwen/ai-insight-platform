@@ -19,6 +19,7 @@ import { createGenerateInsightTool } from "../tools/generate-insight.tool";
 import { createGetTableSchemaTool } from "../tools/get-table-schema.tool";
 import { InsightAgent } from "./insight.agent";
 import { ToolResultContext } from "../tools/tool-result.context";
+import { LlmStatsCollector } from "../llm/llm-stats.collector";
 import { traceLogger } from "../debug-log";
 import { MetadataCacheService } from "../../datasource/metadata/metadata-cache.service";
 import { serializeForPrompt } from "../../datasource/security/token-budget";
@@ -61,7 +62,13 @@ export interface PlannerToolResultData {
 export type PlannerStreamEvent =
   | { type: "text"; data: { content: string } }
   | { type: "error"; data: { code: string; message: string } }
-  | { type: "done"; data: Record<string, never> }
+  | {
+      type: "done";
+      data: {
+        /** 当前聚合 token 快照,前端 ChatService 透传到 SSE done 事件 */
+        tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+      };
+    }
   | { type: "tool_call"; data: PlannerToolCallData }
   | { type: "tool_result"; data: PlannerToolResultData }
   | { type: "thinking"; data: { content: string } }
@@ -77,6 +84,7 @@ export class PlannerAgent {
     private readonly chartAgent: ChartAgent,
     private readonly insightAgent: InsightAgent,
     private readonly toolResultContext: ToolResultContext,
+    private readonly statsCollector: LlmStatsCollector,
     private readonly metadataCache: MetadataCacheService,
     private readonly ds: DatasourceService,
     private readonly metadataService: MetadataService,
@@ -163,8 +171,8 @@ ${toolDescs}
 - 简单聚合/概览/统计 → query_details (table + groupBy + metrics)
 - Top-N / 明细行 / 利润分析 / 任意维度聚合 → query_details
 - 可视化图表 → gen_chart (与 query_details 同构, 输出行 + ChartIntent)
-- **商业洞察（默认开启）**: **每次**调用 query_details 或 gen_chart 拿到数据后，**必须紧接着调用 generate_insight** 给用户提供数据洞察。这是硬性要求，除非用户明确说"不要分析"、"只要数据"。数据 + 洞察是一体的，不要只给数据不给洞察
-- **Schema 探索**:若 MetadataSnapshot 中某张表只有表名没有完整列,调 get_table_schema (dataSourceId, table) 拿全量字段
+- **商业洞察（按需）**: 当用户需要解读、分析、结论或建议时，在 query_details / gen_chart 拿到数据后调用 generate_insight。若用户只要数据/表格/图表本身，不必强制调用洞察。
+- **Schema 探索**:仅当上方 MetadataSnapshot 中某张表**只有表名、没有完整列**时，才调 get_table_schema (dataSourceId, table) 拿全量字段。**若 MetadataSnapshot 已列出该表的列，禁止再调 get_table_schema。**
 
 【物理名隔离规则 (CRITICAL — Sprint 5.7)】
 - 查询意图 (QueryIntent) 中的 table、groupBy、metrics.column、filters.column **必须使用物理列名**（如 emp_name），绝对不能使用中文名
@@ -187,21 +195,24 @@ ${toolDescs}
 【硬性规则】
 1. **绝对禁止编造数据**:所有数字必须来自 query_details / gen_chart 工具返回。
 2. **禁止 ASCII 图表**:用户提到可视化 → 必须调 gen_chart。
-3. **每次查询必须链式生成洞察**: 调用 query_details 或 gen_chart 拿到数据后，必须紧接着调用 generate_insight。数据+洞察是一体的流程。除非用户明确说"不要分析"，否则这条规则不可跳过。
+3. **洞察按需生成**: 当用户需要分析/解读/结论/建议时，在拿到数据后调用 generate_insight。纯数据/表格/图表查询无需强制洞察。
 4. **不要硬编码 SQL**:不要在 prompt 里写 SELECT / FROM / WHERE 字符串 — 通过 QueryIntent 表达。
-5. 字段名错时 → 收到 IntentValidationError 后,先调 get_table_schema 拿正确字段,再重试。
+5. 字段名错时 → 收到 IntentValidationError 后,先调**一次** get_table_schema 拿正确的物理名，然后用该物理名重试。**同一错误最多重试一次**；一旦调过 get_table_schema 拿到某表字段，直接使用返回的物理名，不要对同一张表重复调用 get_table_schema。
 6. 多轮复用上一次结果:若用户问"按 category 统计,但只要家具类",基于上一轮的 query_details 结果 + 新增 filter 调,而不是重新查询全量。
 7. 回复用 Markdown (##/### 标题, **加粗** 关键数字, - 列表),如麦肯锡商业报告。
 8. **物理名优先 (Sprint 5.7)**：所有工具参数中的列名、表名必须是物理名，不是中文名。中文字段名仅供理解。
+9. **禁止重复调用**：不要用完全相同的参数重复调用同一工具；若已拿到某个结果，直接基于它继续作答。
 
-【工具协同模式示例（洞察是必须的）】
-- 用户问"本月销售额" →
+【工具协同模式示例】
+- 用户问"本月销售额（只要数字）" →
+   query_details(...) → 拿到 rows → 直接用 Markdown 回答（无需洞察）
+- 用户问"分析一下本月销售情况" →
    query_details(...) → 拿到 rows →
-   generate_insight(question="分析本月销售数据", data=上一步的 rows)  ← 不能跳过！
-- "本月订单趋势,画图" →
+   generate_insight(question="分析本月销售数据", data=上一步的 rows)
+- "本月订单趋势,画图并给建议" →
    gen_chart(...) → 拿到 chart + rows →
-   generate_insight(question=..., data=rows)  ← 不能跳过！
-- "查某张表有哪些字段" → get_table_schema(dataSourceId, table=<表名>)（仅 schema 探索无需洞察）
+   generate_insight(question=..., data=rows)
+- "查某张表有哪些字段"（且 MetadataSnapshot 未列出该表列）→ get_table_schema(dataSourceId, table=<表名>)
 `;
   }
 
@@ -244,7 +255,11 @@ ${toolDescs}
       : timeoutController.signal;
 
     try {
-      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 30);
+      const MAX_ITERATIONS = Number(process.env.MAX_ITERATIONS ?? 8);
+      // [Fix] 连续工具报错硬闸:达阈值直接跳出,避免静默烧迭代
+      const MAX_CONSECUTIVE_ERRORS = Number(
+        process.env.MAX_CONSECUTIVE_TOOL_ERRORS ?? 3,
+      );
       const dataSourceId = opts.dataSourceId ?? "";
       // [Sprint 5] 用 session 关联的 userId,不是从历史 dataSourceId 推断
       const currentUserId = opts.currentUserId ?? "anonymous";
@@ -300,6 +315,27 @@ ${toolDescs}
       ];
 
       let iterations = 0;
+      // [Fix] 循环级工具调用幂等缓存:key = toolName + 规范化 args → 复用上次结果,
+      // 根治「相同 args 重复调用工具」死循环。仅本次 invokeStream 生命周期有效。
+      const toolCallCache = new Map<string, Record<string, unknown>>();
+      const cacheKeyOf = (name: string, args: Record<string, unknown>) => {
+        // 稳定序列化:按 key 排序,避免属性顺序影响
+        const stable = (obj: unknown): unknown => {
+          if (Array.isArray(obj)) return obj.map(stable);
+          if (obj && typeof obj === "object") {
+            return Object.keys(obj as Record<string, unknown>)
+              .sort()
+              .reduce((acc, k) => {
+                acc[k] = stable((obj as Record<string, unknown>)[k]);
+                return acc;
+              }, {} as Record<string, unknown>);
+          }
+          return obj;
+        };
+        return `${name}:${JSON.stringify(stable(args))}`;
+      };
+      // [Fix] 连续报错计数:任意工具返回 { error } 累加,成功清零
+      let consecutiveErrors = 0;
 
       while (true) {
         iterations++;
@@ -312,7 +348,7 @@ ${toolDescs}
               message: `已尝试 ${MAX_ITERATIONS} 次,仍无法完成请求,请尝试换一种问法。`,
             },
           };
-          yield { type: "done", data: {} };
+          yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
           return;
         }
 
@@ -334,6 +370,10 @@ ${toolDescs}
           }
           finalMessage = finalMessage ? finalMessage.concat(chunk) : chunk;
         }
+
+        // [chat-system-architecture.md §六原则 4] 把本次 LLM 调用的 usage 累加到 collector
+        // AIMessageChunk.concat() 后,最后一个 chunk 的 usage_metadata 包含整次调用聚合
+        this.statsCollector.recordUsage(finalMessage?.usage_metadata);
 
         if (
           !finalMessage ||
@@ -381,6 +421,32 @@ ${toolDescs}
           const tool = tools.find(t => t.name === toolName);
           let result: Record<string, unknown>;
 
+          // [Fix] 幂等缓存命中:相同 (toolName, args) 直接复用,不再真正执行工具
+          const cacheKey = cacheKeyOf(toolName, toolArgs as Record<string, unknown>);
+          const cached = toolCallCache.get(cacheKey);
+          if (cached) {
+            this.logger.warn(
+              `[Fix] Duplicate tool call detected (${toolName}); reusing cached result`,
+            );
+            const reusedResult = {
+              ...cached,
+              _note:
+                "该调用与之前的一次调用完全相同,已复用上次结果。请基于此结果继续作答,不要重复调用同一工具。",
+            };
+            yield {
+              type: "tool_result",
+              data: { id: toolCallId, name: toolName, result: reusedResult },
+            };
+            messages.push(
+              new ToolMessage({
+                tool_call_id: toolCallId,
+                name: toolName,
+                content: JSON.stringify(reusedResult),
+              }),
+            );
+            continue;
+          }
+
           try {
             if (!tool) {
               result = { error: `Unknown tool: ${toolName}` };
@@ -419,6 +485,16 @@ ${toolDescs}
             };
           }
 
+          // [Fix] 记录成功结果供后续去重复用(报错结果不缓存,允许一次修正重试)
+          const isError =
+            result && typeof result === "object" && "error" in result;
+          if (!isError) {
+            toolCallCache.set(cacheKey, result);
+            consecutiveErrors = 0;
+          } else {
+            consecutiveErrors++;
+          }
+
           if (opts.sessionId && toolName !== "generate_insight") {
             this.toolResultContext.push(
               opts.sessionId,
@@ -440,10 +516,26 @@ ${toolDescs}
               content: JSON.stringify(result),
             }),
           );
+
+          // [Fix] 连续报错硬闸:超阈值直接收尾,避免死循环烧迭代
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            this.logger.warn(
+              `[Fix] ${consecutiveErrors} consecutive tool errors reached; aborting loop`,
+            );
+            yield {
+              type: "error",
+              data: {
+                code: "TOOL_ERROR_LIMIT",
+                message: `工具连续 ${consecutiveErrors} 次执行失败,已停止。请换一种问法或检查数据源。`,
+              },
+            };
+            yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
+            return;
+          }
         }
       }
 
-      yield { type: "done", data: {} };
+      yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         const reason = timeoutController.signal.aborted

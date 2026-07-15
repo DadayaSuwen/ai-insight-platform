@@ -42,7 +42,7 @@ export class AiService {
         type: "error",
         data: { code: "PLANNER_FAILED", message: msg },
       };
-      yield { type: "done", data: {} };
+      yield { type: "done", data: { tokenUsage: undefined } };
     }
   }
 }

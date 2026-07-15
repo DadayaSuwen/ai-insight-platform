@@ -25,6 +25,8 @@ export interface QueryResult {
   rowCount: number;
   truncated: boolean;
   durationMs: number;
+  /** [本次] QueryGateway.executeIntent 透出执行的 SQL,供工具结果展示用 */
+  sql?: string;
 }
 
 export interface HealthCheckResult {

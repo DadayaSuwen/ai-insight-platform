@@ -63,7 +63,7 @@ export default function ConfirmPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+      <div className="p-16 text-center text-muted text-sm">
         加载 Schema 理解中...
       </div>
     );
@@ -71,8 +71,8 @@ export default function ConfirmPage() {
 
   if (error) {
     return (
-      <div style={{ padding: 40, textAlign: 'center' }}>
-        <p style={{ color: 'var(--error)', marginBottom: 16 }}>{error}</p>
+      <div className="p-10 text-center">
+        <p className="text-error mb-4">{error}</p>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId}`)}>
           返回纠错
         </button>
@@ -82,8 +82,8 @@ export default function ConfirmPage() {
 
   if (!understanding) {
     return (
-      <div style={{ padding: 60, textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>未找到 Schema 理解数据</p>
+      <div className="p-16 text-center">
+        <p className="text-muted mb-4">未找到 Schema 理解数据</p>
         <button className="btn btn-primary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId}`)}>
           返回纠错
         </button>
@@ -108,7 +108,7 @@ export default function ConfirmPage() {
         </div>
       </div>
 
-      <div className="grid grid-4" style={{ marginBottom: 24 }}>
+      <div className="grid grid-4 mb-6">
         <StatCard icon={<Database size={16} />} label="业务表" value={`${tables.length}`} sub="已探索完成" />
         <StatCard icon={<Database size={16} />} label="字段总数" value={`${totalFields}`} sub="含维度/指标/时间" accent />
         <StatCard icon={<Link2 size={16} />} label="识别关系" value={`${totalRelations}`} sub="外键 + 推断" />
@@ -117,29 +117,21 @@ export default function ConfirmPage() {
 
       {/* 表关系 */}
       {understanding.relations && understanding.relations.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card mb-4">
           <div className="card-header">
             <div className="card-title">Agent 识别的表关系</div>
             <span className="chip green">{understanding.relations.length} 条关系</span>
           </div>
-          <div className="card-body" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="card-body p-4">
+            <div className="flex flex-col gap-2.5">
               {understanding.relations.map((rel, i) => (
                 <div
                   key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 14px',
-                    background: 'var(--bg-secondary)',
-                    borderRadius: 8,
-                    fontSize: 13,
-                  }}
+                  className="flex items-center gap-3 px-3.5 py-2.5 bg-muted rounded-lg text-sm"
                 >
-                  <code style={{ fontFamily: 'monospace', color: 'var(--green-dark)' }}>{rel.from}</code>
-                  <span style={{ color: 'var(--green)' }}>→</span>
-                  <code style={{ fontFamily: 'monospace', color: 'var(--amber)' }}>{rel.to}</code>
+                  <code className="font-mono-custom text-green">{rel.from}</code>
+                  <span className="text-green">→</span>
+                  <code className="font-mono-custom text-warning">{rel.to}</code>
                   <span className="chip green">{(rel.confidence * 100).toFixed(0)}%</span>
                 </div>
               ))}
@@ -170,8 +162,8 @@ export default function ConfirmPage() {
             {tables.slice(0, 6).map((table) =>
               table.columns.slice(0, 5).map((col) => (
                 <tr key={`${table.name}.${col.name}`}>
-                  <td style={{ fontWeight: 600 }}>{table.name}</td>
-                  <td className="num" style={{ fontFamily: 'monospace' }}>{col.name}</td>
+                  <td className="font-semibold">{table.name}</td>
+                  <td className="num font-mono-custom">{col.name}</td>
                   <td>{col.rawType}</td>
                   <td>{col.chineseName || col.name}</td>
                   <td>
@@ -190,18 +182,16 @@ export default function ConfirmPage() {
       </div>
 
       <div
+        className="mt-6 px-5 py-4 rounded-lg"
         style={{
-          marginTop: 24,
-          padding: '16px 20px',
           background: 'var(--green-lighter)',
           borderLeft: '3px solid var(--green)',
-          borderRadius: 8,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--green-darker)', marginBottom: 6 }}>✓ 准备就绪</div>
-        <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+        <div className="text-sm font-semibold mb-1.5" style={{ color: 'var(--green-darker)' }}>✓ 准备就绪</div>
+        <div className="text-xs leading-relaxed">
           Agent 已完整理解您的数据库结构。点击「确认,生成工作台」后, Agent 会基于敲定的 Schema 自主生成工作台与洞察。
-          <ArrowRight size={12} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: 4 }} />
+          <ArrowRight size={12} className="inline align-middle ml-1" />
         </div>
       </div>
     </>
@@ -210,13 +200,13 @@ export default function ConfirmPage() {
 
 function StatCard({ icon, label, value, sub, accent, warning }: { icon: React.ReactNode; label: string; value: string; sub: string; accent?: boolean; warning?: boolean }) {
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{icon} {label}</div>
-      <div className="num" style={{ fontSize: 22, fontWeight: 700, color: warning ? 'var(--warning)' : 'var(--text-primary)' }}>
+    <div className="card p-4">
+      <div className="text-xs text-muted mb-1.5">{icon} {label}</div>
+      <div className="num text-2xl font-bold" style={{ color: warning ? 'var(--warning)' : 'var(--text-primary)' }}>
         {value}
-        {accent && <span style={{ fontSize: 13, color: 'var(--green-dark)' }}> 个</span>}
+        {accent && <span className="text-sm text-green"> 个</span>}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>
+      <div className="text-xs text-muted mt-1">{sub}</div>
     </div>
   );
 }

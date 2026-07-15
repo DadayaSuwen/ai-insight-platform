@@ -60,15 +60,10 @@ export class ChartErrorBoundary extends Component<
       // GUARD-2b: 友好兜底 UI,严禁白屏
       return (
         <div
-          className="flex flex-col items-center justify-center gap-3 rounded-xl border p-6 text-sm"
-          style={{
-            borderColor: "var(--border)",
-            color: "var(--text-muted)",
-            background: "var(--bg-primary)",
-            minHeight: 200,
-          }}
+          className="flex flex-col items-center justify-center gap-3 rounded-xl border p-6 text-sm border-default text-muted bg-surface"
+          style={{ minHeight: 200 }}
         >
-          <div className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
+          <div className="text-base font-medium text-default">
             {/* [M6-L4] 文案微调: 更明确指出数据问题,引导用户切表格 */}
             当前图表数据异常,渲染失败
           </div>

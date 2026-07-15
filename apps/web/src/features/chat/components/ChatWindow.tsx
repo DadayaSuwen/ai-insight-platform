@@ -9,10 +9,11 @@
  *   中 flex-1: 真实 SSE 对话流
  *   右 280px: 上下文面板 (实时 tool_calls / token / 耗时)
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useDatasourceStore } from '../../../core/store/datasource-store';
+import { getDatasourceSchema, type SchemaUnderstanding } from '../../schema-review/api';
 import { useChatStore } from '../store';
 import { useChatActions } from '../hooks/useChatActions';
 import { useSSEChat } from '../hooks';
@@ -20,14 +21,71 @@ import { isAssistant, type ToolCallData, type ToolResultData } from '../types';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
 
-/* ─── 推荐提问 (静态) ─── */
-const SUGGESTED_QUESTIONS = [
+/* ─── 推荐提问 (兜底) ─── */
+const FALLBACK_SUGGESTIONS = [
   '本月销售额 Top 5 商品是哪些？',
   '各渠道订单分布如何？',
   '近 6 个月销售趋势怎么样？',
   '哪些客户消费最高？',
   '退货率最高的商品是哪些？',
 ];
+
+/**
+ * 根据已确认的 Schema 动态生成推荐提问。
+ * 命中规则按优先级累加，凑满 5 条；不足则用 FALLBACK_SUGGESTIONS 兜底。
+ */
+function generateSuggestions(schema: SchemaUnderstanding | null): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (q: string) => {
+    if (out.length < 5 && !seen.has(q)) {
+      out.push(q);
+      seen.add(q);
+    }
+  };
+  if (!schema || schema.tables.length === 0) return [...FALLBACK_SUGGESTIONS];
+
+  const allCols = schema.tables.flatMap((t) => t.columns);
+  const orderish = schema.tables.find((t) => /订单|order/i.test(t.name));
+  const productish = schema.tables.find((t) => /商品|产品|product|item/i.test(t.name));
+  const customerish = schema.tables.find((t) => /客户|customer|member/i.test(t.name));
+  const refundish = schema.tables.find((t) => /退|refund|return/i.test(t.name));
+  const dateCol = allCols.find((c) =>
+    /date|time|created|at$/i.test(c.name) || /日期|时间/.test(c.chineseName ?? ''));
+  const metricCol = allCols.find((c) =>
+    c.semanticRole === 'metric' || /金额|数量|amt|amount|qty|price|销售额/i.test(c.chineseName ?? c.name));
+  const channelCol = allCols.find((c) =>
+    /渠道|channel|source/i.test(c.name) || /渠道|来源/.test(c.chineseName ?? ''));
+
+  // 规则 1：订单 + metric + date → "本月 Top N" + "近 6 个月趋势"
+  if (orderish && metricCol && dateCol) {
+    push(`本月销售额 Top 5 的${orderish.name}是哪些？`);
+    push(`近 6 个月${metricCol.chineseName ?? metricCol.name}趋势怎么样？`);
+  }
+  // 规则 2：订单 + 渠道 → 渠道分布
+  if (orderish && channelCol) {
+    push(`各${channelCol.chineseName ?? channelCol.name}${orderish.name}分布如何？`);
+  }
+  // 规则 3：客户表 → 客户消费排名
+  if (customerish && orderish && metricCol) {
+    push(`哪些${customerish.name}消费最高？`);
+  }
+  // 规则 4：退货相关 → 退货率
+  if (refundish || allCols.some((c) => /退|退货|refund/i.test(c.chineseName ?? ''))) {
+    push(`退货率最高的${productish?.name ?? '商品'}是哪些？`);
+  }
+  // 规则 5：商品 + metric → 商品排行
+  if (productish && metricCol) {
+    push(`${productish.name}中${metricCol.chineseName ?? metricCol.name}最高的 5 个是哪些？`);
+  }
+
+  // 兜底：用静态池补到 5 条，且不重复
+  for (const fb of FALLBACK_SUGGESTIONS) {
+    if (out.length >= 5) break;
+    push(fb);
+  }
+  return out.slice(0, 5);
+}
 
 export default function ChatWindow() {
   const { datasourceId } = useParams<{ datasourceId: string }>();
@@ -41,6 +99,35 @@ export default function ChatWindow() {
       useChatStore.getState().setSelectedDataSourceId(dsId);
     }
   }, [dsId]);
+
+  // 差距 1+2 — 拉取已确认的 Schema understanding 用于左栏和 header 统计
+  const [schema, setSchema] = useState<SchemaUnderstanding | null>(null);
+  useEffect(() => {
+    if (!dsId || dsId === 'mock') {
+      setSchema(null);
+      return;
+    }
+    let cancelled = false;
+    getDatasourceSchema(dsId)
+      .then((res) => {
+        if (!cancelled) setSchema(res.schemaUnderstanding);
+      })
+      .catch(() => {
+        if (!cancelled) setSchema(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dsId]);
+
+  // 差距 4 — 读后端真实 token + 耗时(chat-system-architecture.md §六原则 4)
+  // 不再客户端估算,所有数据由后端 ChatService 在 done 事件的 stats 字段下发。
+  const [lastStats, setLastStats] = useState<{
+    elapsedMs?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  } | null>(null);
 
   const messages = useChatStore((s) => s.messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -72,7 +159,11 @@ export default function ChatWindow() {
         error: { code: data.code, message: data.message },
       }));
     },
-    onDone: () => {
+    onDone: (data) => {
+      // 后端在最终 done 事件下发 stats(可能 undefined — Anthropic 流式不发 usage)
+      if (data?.stats) {
+        setLastStats(data.stats);
+      }
       useChatStore.getState().updateLastAssistant((msg) => ({
         ...msg,
         isFinal: true,
@@ -98,26 +189,19 @@ export default function ChatWindow() {
   const lastToolCalls: ToolCallData[] = lastAssistant?.toolCalls ?? [];
   const lastToolResults: ToolResultData[] = lastAssistant?.toolResults ?? [];
 
+  // 差距 6 — 根据 schema 动态生成推荐提问;schema 未到则用 FALLBACK
+  const suggestions = useMemo(() => generateSuggestions(schema), [schema]);
+
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100%', overflow: 'hidden' }}>
+    <div className="flex flex-1 h-full overflow-hidden">
       {/* 左栏 - 推荐提问 */}
-      <aside style={{
-        width: 240,
-        flexShrink: 0,
-        borderRight: '1px solid var(--border-light)',
-        background: 'var(--bg-secondary)',
-        padding: 16,
-        overflowY: 'auto',
-      }}>
-        <h3 style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          💡 推荐提问
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {SUGGESTED_QUESTIONS.map((q, i) => (
+      <aside className="w-60 shrink-0 border-r border-light bg-muted p-4 overflow-y-auto">
+        <h3 className="chat-section-heading mt-0">💡 推荐提问</h3>
+        <div className="flex flex-col gap-1.5">
+          {suggestions.map((q, i) => (
             <button
               key={i}
-              className="btn btn-ghost btn-sm"
-              style={{ textAlign: 'left', fontSize: 12, justifyContent: 'flex-start', lineHeight: 1.4 }}
+              className="btn btn-ghost btn-sm text-xs !justify-start text-left"
               onClick={() => handleSend(q)}
               disabled={isLoading}
             >
@@ -125,19 +209,34 @@ export default function ChatWindow() {
             </button>
           ))}
         </div>
+
+        {/* 差距 1 — 可用表概览 */}
+        <div className="mt-4">
+          <h3 className="chat-section-heading">🗂️ 可用表</h3>
+          {schema === null ? (
+            <div className="text-xs text-muted">加载中...</div>
+          ) : schema.tables.length === 0 ? (
+            <div className="text-xs text-muted">暂无表</div>
+          ) : (
+            <ul className="list-none m-0 p-0">
+              {schema.tables.map((t) => (
+                <li key={t.name} className="text-xs mb-1.5">
+                  <div className="text-green font-semibold font-mono">{t.name}</div>
+                  <div className="text-muted pl-2">
+                    {t.columns.length} 字段
+                    {t.rowCount != null && <> · {t.rowCount.toLocaleString()} 行</>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </aside>
 
-      {/* 中间 - 对话主区 */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--bg-primary)' }}>
+      {/* 中间 - 对话主区 (minHeight:0 防止 flex row 子元素随内容撑高,确保内部滚动条生效) */}
+      <main className="flex-1 flex flex-col min-w-0 min-h-[0] bg-surface">
         {/* 顶栏 */}
-        <div style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--border-light)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexShrink: 0,
-        }}>
+        <div className="py-3 px-4 border-b border-light flex items-center gap-2 shrink-0">
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => navigate(`/dashboard/${dsId}`)}
@@ -147,23 +246,23 @@ export default function ChatWindow() {
             返回工作台
           </button>
           <span className="badge badge-success">● Schema 已确认</span>
+          {/* 差距 2 — Schema 统计信息 */}
+          {schema && (
+            <span className="text-xs text-muted">
+              基于 {schema.tables.length} 张表 ·{' '}
+              {schema.tables.reduce((sum, t) => sum + t.columns.length, 0)} 字段 ·{' '}
+              {schema.relations?.length ?? 0} 关系
+            </span>
+          )}
         </div>
 
         {/* 消息列表 */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div className="flex-1 overflow-y-auto py-5 px-6">
           {messages.length === 0 ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: 'var(--text-muted)',
-              gap: 12,
-            }}>
-              <div style={{ fontSize: 40 }}>💬</div>
-              <p style={{ fontSize: 15, fontWeight: 600 }}>基于已确认的 Schema，问任何问题</p>
-              <p style={{ fontSize: 13 }}>Agent 会调用 SQL 查询、生成图表并给出分析建议</p>
+            <div className="flex flex-col items-center justify-center h-full text-muted gap-3">
+              <div className="text-4xl">💬</div>
+              <p className="text-[15px] font-semibold">基于已确认的 Schema，问任何问题</p>
+              <p className="text-sm">Agent 会调用 SQL 查询、生成图表并给出分析建议</p>
             </div>
           ) : (
             messages.map((m) => (
@@ -171,15 +270,7 @@ export default function ChatWindow() {
             ))
           )}
           {error && (
-            <div style={{
-              padding: '10px 14px',
-              margin: '8px 0',
-              background: 'var(--error-light)',
-              borderLeft: '3px solid var(--error)',
-              borderRadius: 6,
-              fontSize: 12,
-              color: 'var(--error)',
-            }}>
+            <div className="py-2.5 px-3.5 my-2 bg-error-light border-l-[3px] border-l-red-500 rounded-md text-xs text-error">
               {error}
             </div>
           )}
@@ -191,60 +282,79 @@ export default function ChatWindow() {
       </main>
 
       {/* 右侧 - 上下文面板 */}
-      <aside style={{
-        width: 280,
-        flexShrink: 0,
-        borderLeft: '1px solid var(--border-light)',
-        background: 'var(--bg-secondary)',
-        padding: 16,
-        overflowY: 'auto',
-        fontSize: 12,
-      }}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            使用工具
-          </h3>
+      <aside className="w-[280px] shrink-0 border-l border-light bg-muted p-4 overflow-y-auto text-xs">
+        <div className="context-section mb-4">
+          <h3>使用工具</h3>
           {lastToolCalls.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>等待工具调用...</div>
+            <div className="text-xs text-muted">等待工具调用...</div>
           ) : (
-            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11 }}>
+            <ul className="m-0 pl-4 text-xs">
               {lastToolCalls.map((tc: ToolCallData, i: number) => (
-                <li key={i} style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
-                  <code style={{ fontFamily: 'monospace', fontSize: 11 }}>{tc.name}</code>
+                <li key={i} className="text-secondary mb-1">
+                  <code className="font-mono text-xs">{tc.name}</code>
                 </li>
               ))}
             </ul>
           )}
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            数据源
-          </h3>
-          <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>{dsId ? dsId.slice(0, 8) : '未选择'}</div>
+        <div className="context-section mb-4">
+          <h3>数据源</h3>
+          <div className="text-xs text-default">{dsId ? dsId.slice(0, 8) : '未选择'}</div>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            本轮工具结果
-          </h3>
+        <div className="context-section mb-4">
+          <h3>本轮工具结果</h3>
           {lastToolResults.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>暂无</div>
+            <div className="text-xs text-muted">暂无</div>
           ) : (
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            <div className="text-xs text-secondary">
               {lastToolResults.length} 个结果
-              <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+              <ul className="mt-1 pl-4">
                 {lastToolResults.map((tr: ToolResultData, i: number) => (
-                  <li key={i} style={{ marginBottom: 2 }}>
-                    <code style={{ fontFamily: 'monospace', fontSize: 10 }}>{tr.name}</code>
+                  <li key={i} className="mb-0.5">
+                    <code className="font-mono text-[10px]">{tr.name}</code>
                     {tr.result?.rowCount !== undefined && (
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{tr.result.rowCount as number} 行</span>
+                      <span className="text-muted ml-1.5">{tr.result.rowCount as number} 行</span>
                     )}
                   </li>
                 ))}
               </ul>
             </div>
           )}
+        </div>
+
+        {/* 差距 4 — Token 消耗 (后端真实 stats) */}
+        <div className="context-section mb-4">
+          <h3>📊 Token 消耗</h3>
+          {lastStats ? (
+            <div className="text-xs text-secondary leading-relaxed">
+              <div className="flex justify-between">
+                <span>输入 tokens</span>
+                <span className="font-mono">{lastStats.inputTokens?.toLocaleString() ?? '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>输出 tokens</span>
+                <span className="font-mono">{lastStats.outputTokens?.toLocaleString() ?? '—'}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-light mt-1">
+                <span className="font-semibold">合计</span>
+                <span className="font-mono text-green font-semibold">
+                  {lastStats.totalTokens?.toLocaleString() ?? '—'}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-muted">—</div>
+          )}
+        </div>
+
+        {/* 差距 4 — 耗时 (后端真实 elapsedMs) */}
+        <div className="context-section">
+          <h3>⏱️ 耗时</h3>
+          <div className="text-xs text-secondary font-mono">
+            {lastStats?.elapsedMs != null ? `${(lastStats.elapsedMs / 1000).toFixed(1)}s` : '—'}
+          </div>
         </div>
       </aside>
     </div>

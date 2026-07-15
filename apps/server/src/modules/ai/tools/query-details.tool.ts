@@ -79,7 +79,11 @@ export function createQueryDetailsTool(
           metrics: intent.metrics.map(m => m.alias),
           metricLabels,
           rows: result.rows,
-          totalRows: result.rowCount,
+          // [本次] 透出 sql + 耗时 + 行数,供前端单卡渲染用
+          // totalRows → rowCount: 与前端 SSE schema (SSEToolResultDataSchema.rowCount) 对齐
+          rowCount: result.rowCount,
+          durationMs: result.durationMs,
+          sql: result.sql,
           fieldMapping,
         };
       } catch (err) {

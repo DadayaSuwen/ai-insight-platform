@@ -50,11 +50,11 @@ export default function UsersPage() {
           <p className="page-subtitle">管理平台用户 · 仅管理员可见</p>
         </div>
         <div className="page-actions">
-          <input className="input" placeholder="搜索用户..." style={{ width: 200 }} />
+          <input className="input w-[200px]" placeholder="搜索用户..." />
         </div>
       </div>
 
-      <div className="grid grid-4" style={{ marginBottom: 24 }}>
+      <div className="grid grid-4 mb-6">
         <StatCard label="用户总数" value={total} />
         <StatCard label="管理员" value={admins} />
         <StatCard label="分析师" value={analysts} />
@@ -63,7 +63,7 @@ export default function UsersPage() {
 
       <div className="card">
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>加载用户列表...</div>
+          <div className="p-10 text-center text-muted text-sm">加载用户列表...</div>
         ) : (
           <table className="table">
             <thead>
@@ -79,20 +79,19 @@ export default function UsersPage() {
               {users.map((u) => (
                 <tr key={u.id}>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div className="user-avatar" style={{ width: 32, height: 32 }}>{u.name?.[0] || '?'}</div>
+                    <div className="flex items-center gap-2.5">
+                      <div className="user-avatar w-8 h-8">{u.name?.[0] || '?'}</div>
                       <div>
-                        <div style={{ fontWeight: 600 }}>{u.name || '未命名'}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>
+                        <div className="font-semibold">{u.name || '未命名'}</div>
+                        <div className="text-xs text-muted">{u.email}</div>
                       </div>
                     </div>
                   </td>
                   <td>
                     <select
-                      className="input"
+                      className="input text-xs px-2 py-1"
                       value={u.role}
                       onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                      style={{ fontSize: 12, padding: '4px 8px' }}
                     >
                       <option value="admin">管理员</option>
                       <option value="analyst">分析师</option>
@@ -104,7 +103,7 @@ export default function UsersPage() {
                       {u.status === 'active' ? '已激活' : '已停用'}
                     </span>
                   </td>
-                  <td style={{ fontSize: 12 }}>{new Date(u.createdAt).toLocaleDateString('zh-CN')}</td>
+                  <td className="text-xs">{new Date(u.createdAt).toLocaleDateString('zh-CN')}</td>
                   <td><button className="btn btn-ghost btn-sm">编辑</button></td>
                 </tr>
               ))}
@@ -118,9 +117,9 @@ export default function UsersPage() {
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-      <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+    <div className="card p-4">
+      <div className="text-xs text-muted mb-1.5">{label}</div>
+      <div className="num text-2xl font-bold">{value}</div>
     </div>
   );
 }

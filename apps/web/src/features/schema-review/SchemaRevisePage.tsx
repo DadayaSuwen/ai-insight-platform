@@ -106,16 +106,16 @@ export default function SchemaRevisePage() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '40vh' }}>
-        <p style={{ color: 'var(--text-muted)' }}>加载 Schema...</p>
+      <div className="flex items-center justify-center" style={{ height: '40vh' }}>
+        <p className="text-muted">加载 Schema...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div style={{ padding: 40, textAlign: 'center' }}>
-        <p style={{ color: 'var(--error)', marginBottom: 16 }}>{error}</p>
+      <div className="p-10 text-center">
+        <p className="text-error mb-4">{error}</p>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate('/datasources')}>返回</button>
       </div>
     );
@@ -128,7 +128,7 @@ export default function SchemaRevisePage() {
           <h1 className="page-title">Schema 修订 · 手动编辑字段</h1>
           <p className="page-subtitle">
             直接修改每个字段的中文名、语义角色和描述
-            {dirtyCount > 0 && <span style={{ color: 'var(--amber)', marginLeft: 8 }}>（{dirtyCount} 个未保存）</span>}
+            {dirtyCount > 0 && <span className="text-warning ml-2">（{dirtyCount} 个未保存）</span>}
           </p>
         </div>
         <div className="page-actions">
@@ -149,28 +149,27 @@ export default function SchemaRevisePage() {
       </div>
 
       {tableGroups.map((tg) => (
-        <div key={tg.name} className="card" style={{ marginBottom: 16 }}>
+        <div key={tg.name} className="card mb-4">
           <div
-            className="card-header"
-            style={{ cursor: 'pointer', userSelect: 'none' }}
+            className="card-header cursor-pointer select-none"
             onClick={() => setExpanded((prev) => ({ ...prev, [tg.name]: !prev[tg.name] }))}
           >
             <div className="card-title">
               {expanded[tg.name] ? '▾' : '▸'} {tg.name}
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>
+              <span className="text-xs text-muted ml-2 font-normal">
                 {tg.cols.length} 个字段
               </span>
             </div>
           </div>
           {expanded[tg.name] && (
-            <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
-              <table className="table" style={{ margin: 0 }}>
+            <div className="card-body p-0 overflow-x-auto">
+              <table className="table m-0">
                 <thead>
                   <tr>
-                    <th style={{ width: 160 }}>物理名</th>
-                    <th style={{ width: 90 }}>类型</th>
-                    <th style={{ width: 160 }}>中文名</th>
-                    <th style={{ width: 100 }}>语义角色</th>
+                    <th className="w-[160px]">物理名</th>
+                    <th className="w-[90px]">类型</th>
+                    <th className="w-[160px]">中文名</th>
+                    <th className="w-[100px]">语义角色</th>
                     <th>描述</th>
                   </tr>
                 </thead>
@@ -180,13 +179,12 @@ export default function SchemaRevisePage() {
                     return (
                       <tr key={c.name} style={c.dirty ? { background: 'var(--warning-light)' } : undefined}>
                         <td>
-                          <code style={{ fontSize: 11 }}>{c.name}</code>
+                          <code className="text-xs">{c.name}</code>
                         </td>
-                        <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.rawType}</td>
+                        <td className="text-xs text-muted">{c.rawType}</td>
                         <td>
                           <input
-                            className="input input-sm"
-                            style={{ width: '100%', fontSize: 12 }}
+                            className="input input-sm w-full text-xs"
                             value={c.chineseName}
                             onChange={(e) => updateCol(idx, 'chineseName', e.target.value)}
                             placeholder={c.name}
@@ -194,8 +192,7 @@ export default function SchemaRevisePage() {
                         </td>
                         <td>
                           <select
-                            className="input input-sm"
-                            style={{ width: '100%', fontSize: 12 }}
+                            className="input input-sm w-full text-xs"
                             value={c.role}
                             onChange={(e) => updateCol(idx, 'role', e.target.value)}
                           >
@@ -206,8 +203,7 @@ export default function SchemaRevisePage() {
                         </td>
                         <td>
                           <input
-                            className="input input-sm"
-                            style={{ width: '100%', fontSize: 12 }}
+                            className="input input-sm w-full text-xs"
                             value={c.description}
                             onChange={(e) => updateCol(idx, 'description', e.target.value)}
                             placeholder="业务含义说明..."
@@ -224,10 +220,10 @@ export default function SchemaRevisePage() {
       ))}
 
       {cols.length === 0 && (
-        <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
-          <div style={{ fontSize: 14 }}>该数据源尚未完成 Schema 探索，请先</div>
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigate(`/explore/${datasourceId}`)}>
+        <div className="card p-12 text-center text-muted">
+          <div className="text-4xl mb-2">📭</div>
+          <div className="text-sm">该数据源尚未完成 Schema 探索，请先</div>
+          <button className="btn btn-primary btn-sm mt-3" onClick={() => navigate(`/explore/${datasourceId}`)}>
             开始探索
           </button>
         </div>

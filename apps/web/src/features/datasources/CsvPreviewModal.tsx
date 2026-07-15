@@ -154,26 +154,21 @@ export default function CsvPreviewModal(props: {
       }}
     >
       <div
-        className="max-h-[85vh] w-[800px] max-w-[92vw] overflow-auto rounded-2xl border p-5"
-        style={{
-          background: 'var(--bg-primary)',
-          borderColor: 'var(--border)',
-        }}
+        className="max-h-[85vh] w-[800px] max-w-[92vw] overflow-auto rounded-2xl border p-5 bg-surface border-default"
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <h3 className="text-base font-semibold text-default">
               预览与纠错
             </h3>
-            <p className="mt-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            <p className="mt-0.5 text-[10px] text-muted">
               {file.name} · {preview.rowCount} 行 · {preview.columns.length} 列
             </p>
           </div>
           <button
             onClick={handleCancel}
             disabled={submitting}
-            className="text-xl disabled:opacity-50"
-            style={{ color: 'var(--text-muted)' }}
+            className="text-xl disabled:opacity-50 text-muted"
             aria-label="关闭"
           >
             ×
@@ -183,8 +178,7 @@ export default function CsvPreviewModal(props: {
         {/* 数据集名 */}
         <div className="mb-3">
           <label
-            className="mb-1 block text-[10px] font-medium"
-            style={{ color: 'var(--text-muted)' }}
+            className="mb-1 block text-[10px] font-medium text-muted"
           >
             数据集名
           </label>
@@ -192,51 +186,40 @@ export default function CsvPreviewModal(props: {
             type="text"
             value={datasetName}
             onChange={e => setDatasetName(e.target.value)}
-            className="w-full rounded-md border px-3 py-1.5 text-xs"
-            style={{
-              background: 'var(--bg-secondary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            className="w-full rounded-md border px-3 py-1.5 text-xs bg-muted border-default text-default"
             placeholder="如:员工考勤"
           />
         </div>
 
         {/* 列编辑表 */}
         <div
-          className="overflow-hidden rounded-xl border"
-          style={{ borderColor: 'var(--border)' }}
+          className="overflow-hidden rounded-xl border border-default"
         >
           <table className="w-full text-xs">
             <thead>
-              <tr style={{ background: 'var(--bg-secondary)' }}>
+              <tr className="bg-muted">
                 <th
-                  className="px-3 py-2 text-left text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="px-3 py-2 text-left text-[10px] text-muted"
                 >
                   原列名
                 </th>
                 <th
-                  className="px-3 py-2 text-left text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="px-3 py-2 text-left text-[10px] text-muted"
                 >
                   新列名(可改)
                 </th>
                 <th
-                  className="px-3 py-2 text-left text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="px-3 py-2 text-left text-[10px] text-muted"
                 >
                   中文别名(AI)
                 </th>
                 <th
-                  className="px-3 py-2 text-left text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="px-3 py-2 text-left text-[10px] text-muted"
                 >
                   类型
                 </th>
                 <th
-                  className="px-3 py-2 text-left text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="px-3 py-2 text-left text-[10px] text-muted"
                 >
                   样本
                 </th>
@@ -248,12 +231,10 @@ export default function CsvPreviewModal(props: {
                 return (
                   <tr
                     key={ov.originalName}
-                    className="border-t"
-                    style={{ borderColor: 'var(--border)' }}
+                    className="border-t border-default"
                   >
                     <td
-                      className="px-3 py-2 font-mono"
-                      style={{ color: 'var(--text-secondary)' }}
+                      className="px-3 py-2 font-mono text-secondary"
                     >
                       {col.originalName}
                     </td>
@@ -262,12 +243,7 @@ export default function CsvPreviewModal(props: {
                         type="text"
                         value={ov.newName}
                         onChange={e => updateOverride(idx, { newName: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-xs"
-                        style={{
-                          background: 'var(--bg-primary)',
-                          borderColor: 'var(--border)',
-                          color: 'var(--text-primary)',
-                        }}
+                        className="w-full rounded border px-2 py-1 text-xs bg-surface border-default text-default"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -276,11 +252,9 @@ export default function CsvPreviewModal(props: {
                         value={ov.alias ?? ''}
                         onChange={e => updateOverride(idx, { alias: e.target.value })}
                         placeholder={aliasesLoading ? 'AI 生成中...' : '手动输入'}
-                        className="w-full rounded border px-2 py-1 text-xs"
+                        className="w-full rounded border px-2 py-1 text-xs border-default text-default"
                         style={{
                           background: ov.alias ? 'var(--bg-hover)' : 'var(--bg-primary)',
-                          borderColor: 'var(--border)',
-                          color: 'var(--text-primary)',
                         }}
                       />
                     </td>
@@ -290,12 +264,7 @@ export default function CsvPreviewModal(props: {
                         onChange={e =>
                           updateOverride(idx, { type: e.target.value as ColumnType })
                         }
-                        className="rounded border px-2 py-1 text-xs"
-                        style={{
-                          background: 'var(--bg-primary)',
-                          borderColor: 'var(--border)',
-                          color: 'var(--text-primary)',
-                        }}
+                        className="rounded border px-2 py-1 text-xs bg-surface border-default text-default"
                       >
                         {TYPE_OPTIONS.map(o => (
                           <option key={o.value} value={o.value}>
@@ -305,8 +274,7 @@ export default function CsvPreviewModal(props: {
                       </select>
                     </td>
                     <td
-                      className="px-3 py-2 font-mono text-[10px]"
-                      style={{ color: 'var(--text-muted)' }}
+                      className="px-3 py-2 font-mono text-[10px] text-muted"
                     >
                       {col.sampleValues.slice(0, 2).join(' / ') || '—'}
                     </td>
@@ -320,28 +288,25 @@ export default function CsvPreviewModal(props: {
         {/* 样本预览(前 3 行) */}
         <div className="mt-3">
           <p
-            className="mb-1 text-[10px] font-medium"
-            style={{ color: 'var(--text-muted)' }}
+            className="mb-1 text-[10px] font-medium text-muted"
           >
             数据样本(前 3 行)
           </p>
           <div
-            className="overflow-auto rounded border"
-            style={{ borderColor: 'var(--border)', maxHeight: 160 }}
+            className="overflow-auto rounded border border-default"
+            style={{ maxHeight: 160 }}
           >
             <table className="w-full text-[10px]">
               <tbody>
                 {preview.previewRows.slice(0, 3).map((row, i) => (
                   <tr
                     key={i}
-                    className="border-b"
-                    style={{ borderColor: 'var(--border)' }}
+                    className="border-b border-default"
                   >
                     {overrides.map(ov => (
                       <td
                         key={ov.originalName}
-                        className="px-2 py-1 font-mono"
-                        style={{ color: 'var(--text-secondary)' }}
+                        className="px-2 py-1 font-mono text-secondary"
                       >
                         {row[ov.originalName] || '—'}
                       </td>
@@ -355,8 +320,7 @@ export default function CsvPreviewModal(props: {
 
         {/* 提示 */}
         <p
-          className="mt-3 text-[10px]"
-          style={{ color: 'var(--text-muted)' }}
+          className="mt-3 text-[10px] text-muted"
         >
           💡 类型为 DECIMAL 时,后端用 TRY_CAST,转换失败的值会变 NULL(不报错);
           列名含中文 / 空格时自动转 safe identifier。
@@ -367,23 +331,15 @@ export default function CsvPreviewModal(props: {
           <button
             onClick={handleCancel}
             disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-xs disabled:opacity-50"
-            style={{
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border)',
-            }}
+            className="rounded-md px-3 py-1.5 text-xs disabled:opacity-50 text-secondary border border-default"
+            style={{ background: 'transparent' }}
           >
             取消
           </button>
           <button
             onClick={handleConfirm}
             disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-            style={{
-              background: 'var(--accent)',
-              color: 'white',
-            }}
+            className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50 bg-accent text-white"
           >
             {submitting ? '注册中...' : '确认注册'}
           </button>
