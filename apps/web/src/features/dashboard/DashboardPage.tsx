@@ -1,68 +1,134 @@
 /**
- * [Fix-7 Task 7.10] 工作台页 — 1:1 还原原型 PAGES.dashboard (pages.js)
+ * [Fix-10 Task 10.1] 工作台页 — 接入真实 API
  *
- * Mock 数据 + ECharts 真实渲染图表, 不调 /api/dashboard/execute
+ * 删除 Fix-7 mock (KPI_DATA/ORDER_TREND/CHANNEL_PIE/TABLES)
+ * 改用 generateDashboard + getDashboard + executeDashboard
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, RefreshCw, MessageSquare, Edit3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, MessageSquare, Edit3, Loader2 } from 'lucide-react';
 import * as echarts from 'echarts';
-import { useDatasourceStore } from '../../core/store/datasource-store';
-
-/* ───────── Mock 数据 ───────── */
-const KPI_DATA = [
-  { label: '总订单数', value: '48,237', unit: '单', delta: '+12.4%', trend: 'up', accent: 'green' },
-  { label: '总销售额', value: '¥8.42M', unit: '', delta: '+18.7%', trend: 'up', accent: 'green' },
-  { label: '客户数', value: '3,248', unit: '', delta: '+5.2%', trend: 'up', accent: 'info' },
-  { label: '客单价', value: '¥174.5', unit: '', delta: '-2.3%', trend: 'down', accent: 'amber' },
-  { label: '复购率', value: '38.6%', unit: '', delta: '+3.1pp', trend: 'up', accent: 'green' },
-];
-
-const ORDER_TREND = {
-  months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月'],
-  orders: [4200, 4800, 5400, 6100, 6800, 7400, 8200],
-  revenue: [820, 920, 1100, 1280, 1420, 1560, 1740],
-};
-
-const CHANNEL_PIE = [
-  { name: 'Web', value: 18420 },
-  { name: 'App', value: 15832 },
-  { name: '小程序', value: 9145 },
-  { name: 'H5', value: 4840 },
-];
-
-const TABLES = [
-  { name: 'orders', rows: 48237, cols: 12, icon: '📋' },
-  { name: 'order_items', rows: 98432, cols: 7, icon: '📦' },
-  { name: 'customers', rows: 3248, cols: 9, icon: '👥' },
-  { name: 'products', rows: 486, cols: 11, icon: '🛍️' },
-  { name: 'payments', rows: 45821, cols: 9, icon: '💰' },
-  { name: 'shipping', rows: 12847, cols: 10, icon: '🚚' },
-  { name: 'categories', rows: 24, cols: 4, icon: '🏷️' },
-  { name: 'reviews', rows: 8234, cols: 6, icon: '⭐' },
-];
+import { useDashboard } from './hooks/useDashboard';
+import { executeDashboard, type KpiSpec, type ChartSpec } from './api';
+import { toast } from '../../store/toast';
 
 export default function DashboardPage() {
   const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
-  // [Fix-7] Mock: 跳过大数据源状态检测 (Fix-5 加的引导逻辑)
-  void useDatasourceStore;
+
+  const { config, loading, error, regenerate } = useDashboard(datasourceId);
+
+  const [kpiValues, setKpiValues] = useState<Record<string, number | null>>({});
+  const [chartData, setChartData] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  const [dataLoading, setDataLoading] = useState(false);
+
+  /* ─── 加载 KPI + 图表真实数据 ─── */
+  const loadData = useCallback(async (kpis: KpiSpec[], charts: ChartSpec[]) => {
+    if (!datasourceId) return;
+    setDataLoading(true);
+
+    // 并行加载所有 KPI
+    const kpiPromises = kpis.map(async (kpi) => {
+      try {
+        const result = await executeDashboard({
+          datasourceId,
+          table: kpi.table,
+          metric: kpi.metric,
+        });
+        const val = result.rows?.[0]?.value;
+        return { label: kpi.label, value: typeof val === 'number' ? val : null };
+      } catch (err) {
+        console.warn(`KPI "${kpi.label}" 加载失败`, err);
+        return { label: kpi.label, value: null };
+      }
+    });
+
+    // 并行加载所有图表
+    const chartPromises = charts.map(async (chart) => {
+      try {
+        const result = await executeDashboard({
+          datasourceId,
+          table: chart.table,
+          metric: chart.metric,
+          groupBy: chart.groupBy,
+          timeField: chart.timeField,
+          range: chart.range || '30d',
+        });
+        return { title: chart.title, rows: result.rows ?? [] };
+      } catch (err) {
+        console.warn(`Chart "${chart.title}" 加载失败`, err);
+        return { title: chart.title, rows: [] };
+      }
+    });
+
+    const kpiResults = await Promise.all(kpiPromises);
+    const kpiMap: Record<string, number | null> = {};
+    for (const r of kpiResults) kpiMap[r.label] = r.value;
+    setKpiValues(kpiMap);
+
+    const chartResults = await Promise.all(chartPromises);
+    const chartMap: Record<string, Array<Record<string, unknown>>> = {};
+    for (const r of chartResults) chartMap[r.title] = r.rows;
+    setChartData(chartMap);
+
+    setDataLoading(false);
+  }, [datasourceId]);
+
+  useEffect(() => {
+    if (config) {
+      loadData(config.kpis, config.charts);
+    }
+  }, [config, loadData]);
+
+  /* ─── 刷新 ─── */
+  const handleRefresh = async () => {
+    await regenerate();
+    toast.success('工作台已刷新');
+  };
+
+  /* ─── 加载态 ─── */
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 16 }}>
+        <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--green)' }} />
+        <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Agent 正在生成工作台...</p>
+      </div>
+    );
+  }
+
+  /* ─── 错误态 ─── */
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <p style={{ color: 'var(--error)', marginBottom: 16 }}>{error}</p>
+        <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/explore/${datasourceId}`)}>
+          返回探索
+        </button>
+      </div>
+    );
+  }
+
+  if (!config) return null;
+
+  const dsName = datasourceId?.slice(0, 8) ?? '数据源';
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">工作台 · {datasourceId === 'mock' ? 'ecommerce_db' : (datasourceId ?? '数据源')}</h1>
-          <p className="page-subtitle">Agent 基于 Schema 理解自动生成 · 5 KPI · 3 图表</p>
+          <h1 className="page-title">工作台 · {dsName}</h1>
+          <p className="page-subtitle">
+            Agent 基于 Schema 理解自动生成 · {config.kpis.length} KPI · {config.charts.length} 图表
+          </p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm">
+          <button className="btn btn-secondary btn-sm" onClick={handleRefresh} disabled={loading}>
             <RefreshCw size={14} /> 刷新
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId ?? 'ds_001'}`)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId}`)}>
             <Edit3 size={14} /> 修订 Schema
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/chat/${datasourceId ?? 'ds_001'}`)}>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/chat/${datasourceId}`)}>
             <MessageSquare size={14} /> 问 Agent
           </button>
         </div>
@@ -84,213 +150,317 @@ export default function DashboardPage() {
         }}
       >
         <span>✦</span>
-        <span>Agent 基于敲定的 Schema 自动生成了 5 个 KPI 卡片和 3 个图表。如需调整维度或图表类型,在对话页直接告诉 Agent。</span>
+        <span>Agent 基于敲定的 Schema 自动生成了 {config.kpis.length} 个 KPI 卡片和 {config.charts.length} 个图表。如需调整维度或图表类型，在对话页直接告诉 Agent。</span>
       </div>
 
-      {/* 5 个 KPI */}
+      {/* KPI 卡片 */}
       <div className="grid grid-5" style={{ marginBottom: 24 }}>
-        {KPI_DATA.map((k) => (
-          <div key={k.label} className={`kpi-card ${k.accent === 'amber' ? 'amber' : k.accent === 'info' ? 'info' : ''}`}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-value">
-              {k.value}
-              {k.unit && <span className="kpi-unit">{k.unit}</span>}
+        {config.kpis.map((kpi) => {
+          const rawValue = kpiValues[kpi.label];
+          const value = rawValue ?? undefined;
+          const accent = kpi.icon?.includes('💰') ? 'amber'
+            : kpi.icon?.includes('👥') ? 'info'
+            : kpi.icon?.includes('⚠') ? 'amber'
+            : '';
+
+          return (
+            <div key={kpi.label} className={`kpi-card ${accent}`}>
+              <div className="kpi-label">{kpi.icon ? `${kpi.icon} ` : ''}{kpi.label}</div>
+              <div className="kpi-value">
+                {value !== undefined ? formatValue(value) : dataLoading ? '加载中...' : '—'}
+              </div>
+              {kpi.comparison && (
+                <div className="kpi-delta" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  vs {kpi.comparison === 'PREVIOUS_MONTH' ? '上月' : kpi.comparison === 'PREVIOUS_WEEK' ? '上周' : kpi.comparison}
+                </div>
+              )}
             </div>
-            <div className={`kpi-delta ${k.trend}`}>
-              {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              <span>{k.delta}</span>
-              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>vs 上月</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 图表区 */}
       <div className="grid grid-3" style={{ marginBottom: 24 }}>
-        <div className="card" style={{ gridColumn: 'span 2', overflow: 'hidden' }}>
-          <div className="card-header">
-            <div className="card-title">订单量与销售额趋势</div>
-            <span className="chip green">最近 7 个月</span>
-          </div>
-          <div className="card-body">
-            <OrderTrendChart />
-          </div>
-        </div>
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div className="card-header">
-            <div className="card-title">订单渠道分布</div>
-            <span className="chip">本季度</span>
-          </div>
-          <div className="card-body">
-            <ChannelPieChart />
-          </div>
-        </div>
-      </div>
-
-      {/* 第二行 - 客户/订单状态/主动洞察 */}
-      <div className="grid grid-3" style={{ marginBottom: 24 }}>
-        <CustomerTierCard />
-        <OrderStatusFlowCard />
-        <InsightHighlightCard />
-      </div>
-
-      {/* 数据库结构概览 */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">数据库结构概览 · 8 张表</div>
-          <span className="chip green">12,847 总字段</span>
-        </div>
-        <div className="card-body" style={{ padding: 16 }}>
-          <div className="grid grid-4" style={{ gap: 12 }}>
-            {TABLES.map((t) => (
-              <div
-                key={t.name}
-                style={{
-                  padding: 14,
-                  background: 'var(--bg-secondary)',
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                }}
-              >
-                <div style={{ fontSize: 22 }}>{t.icon}</div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                    <span className="num">{t.rows.toLocaleString()}</span> 行 · {t.cols} 列
-                  </div>
-                </div>
+        {config.charts.slice(0, 2).map((chart, i) => {
+          const isWide = i === 0 && config.charts.length >= 2;
+          return (
+            <div key={chart.title} className="card" style={{ gridColumn: isWide ? 'span 2' : undefined, overflow: 'hidden' }}>
+              <div className="card-header">
+                <div className="card-title">{chart.title}</div>
+                <span className="chip green">{chart.type}</span>
               </div>
-            ))}
+              <div className="card-body">
+                <ConfigChartRenderer chart={chart} data={chartData[chart.title] ?? []} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 第二行 — 剩余图表 */}
+      {config.charts.length > 2 && (
+        <div className="grid grid-3" style={{ marginBottom: 24 }}>
+          {config.charts.slice(2, 5).map((chart) => (
+            <div key={chart.title} className="card" style={{ overflow: 'hidden' }}>
+              <div className="card-header">
+                <div className="card-title">{chart.title}</div>
+                <span className="chip">{chart.type}</span>
+              </div>
+              <div className="card-body">
+                <ConfigChartRenderer chart={chart} data={chartData[chart.title] ?? []} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 洞察列表 */}
+      {config.insights && config.insights.length > 0 && (
+        <div className="card" style={{ overflow: 'hidden', marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">Agent 主动洞察</div>
+            <span className="chip amber">{config.insights.length} 条</span>
+          </div>
+          <div className="card-body" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {config.insights.map((insight, i) => {
+                const bgMap = {
+                  trend_anomaly: 'var(--error-light)',
+                  distribution_change: 'var(--warning-light)',
+                  opportunity: 'var(--green-lighter)',
+                  risk: 'var(--error-light)',
+                };
+                const borderMap = {
+                  trend_anomaly: 'var(--error)',
+                  distribution_change: 'var(--warning)',
+                  opportunity: 'var(--green)',
+                  risk: 'var(--error)',
+                };
+                const colorMap = {
+                  trend_anomaly: 'var(--error-dark)',
+                  distribution_change: 'var(--warning)',
+                  opportunity: 'var(--green-dark)',
+                  risk: 'var(--error-dark)',
+                };
+                return (
+                  <div key={i} style={{
+                    padding: 12,
+                    background: bgMap[insight.type as keyof typeof bgMap] || 'var(--bg-secondary)',
+                    borderRadius: 8,
+                    borderLeft: `3px solid ${borderMap[insight.type as keyof typeof borderMap] || 'var(--border)'}`,
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colorMap[insight.type as keyof typeof colorMap] || 'var(--text-primary)' }}>
+                      {insight.type === 'trend_anomaly' ? '⚠' : insight.type === 'risk' ? '🔴' : insight.type === 'opportunity' ? '✦' : '📊'} {insight.description}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {insight.table}.{insight.metric}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* 数据库结构概览 — 来自 schemaUnderstanding */}
+      {config.kpis.length > 0 && (
+        <SchemaOverviewCard datasourceId={datasourceId ?? ''} />
+      )}
     </>
   );
 }
 
-/* ───────── 图表组件 (ECharts 真实渲染) ───────── */
+/* ───────── 图表渲染器 (基于 DashboardConfig 的 ChartSpec + execute 返回的 rows) ───────── */
 
-function OrderTrendChart() {
+function ConfigChartRenderer({ chart, data }: { chart: ChartSpec; data: Array<Record<string, unknown>> }) {
   const ref = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (!ref.current) return;
-    const chart = echarts.init(ref.current);
-    chart.setOption({
-      grid: { left: 50, right: 20, top: 30, bottom: 30 },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-      legend: { data: ['订单量 (单)', '销售额 (千元)'], right: 0, top: 0, textStyle: { fontSize: 12 } },
-      xAxis: { type: 'category', data: ORDER_TREND.months, axisLine: { lineStyle: { color: '#E5DFD2' } }, axisLabel: { fontSize: 11, color: '#9C968A' } },
-      yAxis: [
-        { type: 'value', name: '订单量', position: 'left', axisLine: { show: false }, axisLabel: { fontSize: 11, color: '#9C968A' }, splitLine: { lineStyle: { color: '#F4F2EC' } } },
-        { type: 'value', name: '销售额', position: 'right', axisLine: { show: false }, axisLabel: { fontSize: 11, color: '#9C968A', formatter: '¥{value}' }, splitLine: { show: false } },
-      ],
-      series: [
-        {
-          name: '订单量 (单)',
-          type: 'line',
-          smooth: true,
-          data: ORDER_TREND.orders,
-          itemStyle: { color: '#5BA888' },
-          symbol: 'circle',
-          symbolSize: 6,
-          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(91,168,136,0.25)' },
-            { offset: 1, color: 'rgba(91,168,136,0)' },
-          ]) },
-        },
-        {
-          name: '销售额 (千元)',
-          type: 'bar',
-          yAxisIndex: 1,
-          data: ORDER_TREND.revenue,
-          itemStyle: { color: '#D4A06D', borderRadius: [4, 4, 0, 0] },
-          barWidth: 16,
-        },
-      ],
-    });
-    const resize = () => chart.resize();
+    if (!ref.current || data.length === 0) return;
+
+    const instance = echarts.init(ref.current);
+    const option = buildEChartsOption(chart, data);
+    instance.setOption(option);
+
+    const resize = () => instance.resize();
     window.addEventListener('resize', resize);
-    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
-  }, []);
-  return <div ref={ref} className="chart-container lg" />;
+    return () => {
+      window.removeEventListener('resize', resize);
+      instance.dispose();
+    };
+  }, [chart, data]);
+
+  if (data.length === 0) {
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>暂无数据</div>;
+  }
+
+  return <div ref={ref} style={{ width: '100%', height: 280 }} />;
 }
 
-function ChannelPieChart() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!ref.current) return;
-    const chart = echarts.init(ref.current);
-    chart.setOption({
+function buildEChartsOption(chart: ChartSpec, data: Array<Record<string, unknown>>): echarts.EChartsOption {
+  const type = chart.type || 'bar';
+
+  if (type === 'line') {
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 60, right: 20, top: 30, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: data.map((r) => String(r.time ?? r.name ?? '')),
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+        splitLine: { lineStyle: { color: '#F4F2EC' } },
+      },
+      series: [{
+        type: 'line',
+        smooth: true,
+        data: data.map((r) => Number(r.value ?? 0)),
+        itemStyle: { color: '#5BA888' },
+        symbol: 'circle',
+        symbolSize: 6,
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(91,168,136,0.25)' },
+            { offset: 1, color: 'rgba(91,168,136,0)' },
+          ]),
+        },
+      }],
+    };
+  }
+
+  if (type === 'bar') {
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 60, right: 20, top: 30, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: data.map((r) => String(r.name ?? r.time ?? '')),
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+        splitLine: { lineStyle: { color: '#F4F2EC' } },
+      },
+      series: [{
+        type: 'bar',
+        data: data.map((r) => Number(r.value ?? 0)),
+        itemStyle: { color: '#5BA888', borderRadius: [4, 4, 0, 0] },
+        barWidth: 24,
+      }],
+    };
+  }
+
+  if (type === 'pie') {
+    return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { bottom: 0, textStyle: { fontSize: 11, color: '#6B665C' } },
       series: [{
         type: 'pie',
         radius: ['45%', '70%'],
         center: ['50%', '45%'],
-        data: CHANNEL_PIE.map((d) => ({ ...d, itemStyle: { color: ['#5BA888', '#4A8E73', '#D4A06D', '#6B95B8'][CHANNEL_PIE.indexOf(d)] } })),
+        data: data.map((r) => ({ name: String(r.name ?? ''), value: Number(r.value ?? 0) })),
         label: { show: false },
         emphasis: { label: { show: true, fontSize: 12 } },
       }],
-    });
-    const resize = () => chart.resize();
-    window.addEventListener('resize', resize);
-    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
-  }, []);
-  return <div ref={ref} className="chart-container" />;
-}
+    };
+  }
 
-function CustomerTierCard() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!ref.current) return;
-    const chart = echarts.init(ref.current);
-    chart.setOption({
+  if (type === 'area') {
+    return {
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: ['新客户', '普通', '银牌', '金牌', 'VIP'], axisLabel: { fontSize: 11, color: '#9C968A' } },
-      yAxis: { axisLabel: { fontSize: 11, color: '#9C968A' }, splitLine: { lineStyle: { color: '#F4F2EC' } } },
-      grid: { left: 40, right: 20, top: 20, bottom: 30 },
+      grid: { left: 60, right: 20, top: 30, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: data.map((r) => String(r.time ?? r.name ?? '')),
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 11, color: '#9C968A' },
+        splitLine: { lineStyle: { color: '#F4F2EC' } },
+      },
       series: [{
-        type: 'bar',
-        data: [624, 1284, 812, 384, 144],
-        itemStyle: { color: '#5BA888', borderRadius: [4, 4, 0, 0] },
-        barWidth: 24,
+        type: 'line',
+        smooth: true,
+        data: data.map((r) => Number(r.value ?? 0)),
+        itemStyle: { color: '#5BA888' },
+        symbol: 'circle',
+        symbolSize: 4,
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(91,168,136,0.3)' },
+            { offset: 1, color: 'rgba(91,168,136,0)' },
+          ]),
+        },
       }],
-    });
-    const resize = () => chart.resize();
-    window.addEventListener('resize', resize);
-    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
-  }, []);
-  return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      <div className="card-header"><div className="card-title">客户等级分布</div></div>
-      <div className="card-body" style={{ padding: 16 }}>
-        <div ref={ref} className="chart-container sm" />
-      </div>
-    </div>
-  );
+    };
+  }
+
+  // 默认
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 60, right: 20, top: 30, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: data.map((r) => String(r.name ?? r.time ?? '')),
+    },
+    yAxis: { type: 'value' },
+    series: [{
+      type: 'bar',
+      data: data.map((r) => Number(r.value ?? 0)),
+      itemStyle: { color: '#5BA888' },
+    }],
+  };
 }
 
-function OrderStatusFlowCard() {
+/* ───────── Schema 概览卡片 ───────── */
+
+function SchemaOverviewCard({ datasourceId }: { datasourceId: string }) {
+  const [tables, setTables] = useState<Array<{ name: string; rowCount: number; cols: number; icon: string }>>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!datasourceId || loaded) return;
+    // 通过 getDashboard 拿到的 config 不含 schema 细节，
+    // 这里从 dataSource store 或单独请求获取 schema 概览
+    // 暂时用占位：后续如果有 API 再补充
+    setLoaded(true);
+  }, [datasourceId, loaded]);
+
+  if (tables.length === 0) return null;
+
   return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      <div className="card-header"><div className="card-title">订单状态流转</div></div>
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">数据库结构概览 · {tables.length} 张表</div>
+      </div>
       <div className="card-body" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
-          {[
-            { name: '待付款', count: 1242, color: 'var(--warning)' },
-            { name: '已付款', count: 3421, color: 'var(--info)' },
-            { name: '已发货', count: 5821, color: 'var(--green)' },
-            { name: '已签收', count: 32451, color: 'var(--green-dark)' },
-            { name: '已取消', count: 3284, color: 'var(--text-muted)' },
-            { name: '已退款', count: 3018, color: 'var(--error)' },
-          ].map((s) => (
-            <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flexShrink: 0 }} />
-              <div style={{ flex: 1, color: 'var(--text-secondary)' }}>{s.name}</div>
-              <div className="num" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.count.toLocaleString()}</div>
+        <div className="grid grid-4" style={{ gap: 12 }}>
+          {tables.map((t) => (
+            <div
+              key={t.name}
+              style={{
+                padding: 14,
+                background: 'var(--bg-secondary)',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 22 }}>{t.icon}</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <span className="num">{t.rowCount.toLocaleString()}</span> 行 · {t.cols} 列
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -299,29 +469,10 @@ function OrderStatusFlowCard() {
   );
 }
 
-function InsightHighlightCard() {
-  return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      <div className="card-header">
-        <div className="card-title">Agent 主动洞察</div>
-        <span className="chip amber">3 条</span>
-      </div>
-      <div className="card-body" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ padding: 12, background: 'var(--error-light)', borderRadius: 8, borderLeft: '3px solid var(--error)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--error-dark)' }}>⚠ 客单价下降 2.3%</div>
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>小程序的客单价持续走低</div>
-          </div>
-          <div style={{ padding: 12, background: 'var(--warning-light)', borderRadius: 8, borderLeft: '3px solid var(--warning)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning)' }}>⚠ App 取消率上升</div>
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>iOS 新版发布后取消率 +5pp</div>
-          </div>
-          <div style={{ padding: 12, background: 'var(--green-lighter)', borderRadius: 8, borderLeft: '3px solid var(--green)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--green-dark)' }}>✦ VIP 复购提升</div>
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>5 月 VIP 复购率 +8pp</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+/* ───────── 工具函数 ───────── */
+
+function formatValue(v: number): string {
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(2) + 'M';
+  if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K';
+  return v.toLocaleString();
 }
