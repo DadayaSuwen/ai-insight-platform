@@ -36,7 +36,7 @@ import { QueryGatewayService } from "../../datasource/query-gateway/query-gatewa
  *      id 读 MetadataSnapshot → serializeForPrompt(snapshot) → 拼到 prompt
  *   3. 完全删除硬编码的 region/category/month ... 中文 销售数据 schema 描述
  *   4. invokeStream opts 接受 dataSourceId (必填,前端 ChatHeader 注入)
- *   5. 删除 refreshSchema()(不再读整库 information_schema)
+ *   5. 删除原 refreshSchema 兼容老调用 (不再读整库 information_schema)
  *   6. 工具列表增加 get_table_schema (Sprint 2 新增)
  *   6. 工具列表保持 query_details / gen_chart / generate_insight / get_table_schema
  *      但 factory 改成走 QueryGateway(Sprint 2 重写)
@@ -211,14 +211,7 @@ ${toolDescs}
 `;
   }
 
-  /**
-   * [Sprint 2] 兼容老调用 — refreshSchema() 现在是 no-op,
-   * metadata 是按需从 cache 读取,不再整库扫描。
-   * 保留 API 防止 ai.service.ts 编译失败(Sprint 2 也已不再调它)。
-   */
-  async refreshSchema(): Promise<void> {
-    return;
-  }
+  // [Fix-4 Task 4.4] 原 refreshSchema 兼容老调用已删除 — 全代码库零引用, Sprint 2 起 no-op
 
   private extractContent(content: AIMessage["content"]): string {
     if (typeof content === "string") return content;
@@ -234,11 +227,6 @@ ${toolDescs}
         .join("");
     }
     return "";
-  }
-
-  private extractReasoning(chunk: AIMessageChunk): string {
-    const v = (chunk as any).additional_kwargs?.reasoning_content;
-    return typeof v === "string" ? v : "";
   }
 
   async *invokeStream(

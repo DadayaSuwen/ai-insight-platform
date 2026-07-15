@@ -1,23 +1,18 @@
 /**
- * [Sprint 1 / V3 架构师铁律 #3] SQL 安全护栏
+ * [Sprint 1 / V3 架构师铁律 #3] SQL 安全护栏 — AST 版
  * --------------------------------------------------------------
  * 所有 QueryGateway 发出的 SQL 必经此护栏后再到 executor。
  *
- * 防御内容:
- * 1. 黑名单关键字 (case-insensitive, word boundary):
- *    INSERT / UPDATE / DELETE / DROP / MERGE / CREATE / ALTER /
- *    TRUNCATE / GRANT / REVOKE / VACUUM / REINDEX
- * 2. 多语句拒绝: 检测 `;` 后跟非空白字符 (允许末尾 `;` + 空白)
- * 3. SQL 注释拒绝: 拒绝包含 `--` 单行注释 (绕过黑名单常用技巧)
- * 4. 强制包裹 LIMIT 1000: 缺失 LIMIT 子句时追加
+ * [Fix-3 Task 3.5] 用 node-sql-parser 替代原正则黑名单:
+ *   - 正则黑名单可被 WITH/CTE/CALL/DO/COPY/UNION/注释等绕过
+ *   - AST 解析后白名单只允许 SELECT,递归检查子查询不含修改操作
+ *   - 强制包裹 LIMIT 1000
  *
- * 权衡说明:
- *   这是正则,不是 AST。对抗 LLM 生成的、由 MetadataService builder
- *   拼接的 SQL 是足够的。若有人手敲 SQL,更稳靠 DB 用户权限
- *   (`ai_insight_ro` SELECT-only,运维侧保障)。
- *
- * [Sprint 3 扩展] DuckDB 走同一接口,通过方言 adapter 维持语义。
+ * 函数签名保持向后兼容 (guardSql(sql, opts) → SqlGuardResult),
+ * 4 个调用方 (pg/mysql/duckdb executor + query-gateway) 零修改。
  */
+import { Parser } from "node-sql-parser";
+
 export interface SqlGuardResult {
   /** 经过:已强制包裹 LIMIT 的 SQL; 不通过: 原始输入(供 debug 日志) */
   sql: string;
@@ -29,64 +24,8 @@ export interface SqlGuardResult {
   reason?: string;
 }
 
-/**
- * 黑名单关键字:word-boundary 锚定,大小写不敏感,允许在词前有
- * 点/空格/括号/换行等。`DROP` 不会匹配 `droptable` 这种自定义标识符,
- * 但会匹配 `"; DROP TABLE x; --"`。
- */
-const FORBIDDEN_KEYWORDS = [
-  "INSERT",
-  "UPDATE",
-  "DELETE",
-  "MERGE",
-  "DROP",
-  "CREATE",
-  "ALTER",
-  "TRUNCATE",
-  "GRANT",
-  "REVOKE",
-  "VACUUM",
-  "REINDEX",
-];
-
-function buildForbiddenRegex(): RegExp {
-  const alt = FORBIDDEN_KEYWORDS.join("|");
-  return new RegExp(`\\b(${alt})\\b`, "i");
-}
-
-/**
- * 检测 `;` 后跟非空白字符 — 多语句攻击特征。
- * 允许末尾一个 `;` 后跟空白/换行(常见 SELECT ...; 写法)。
- */
-const MULTI_STMT_REGEX = /;[^;\s]*\S/;
-
-/** SQL 单行注释 (Postgres/MySQL/SQLite 通用) */
-const SQL_COMMENT_REGEX = /--/;
-
-/** 已显式包含 LIMIT/FETCH FIRST 等价物 */
-const HAS_LIMIT_REGEX = /\bLIMIT\b|\bFETCH\s+FIRST\b/i;
-
-const FORBIDDEN_RE = buildForbiddenRegex();
-
 /** 默认最大返回行数 — 与计划文档一致 */
 export const DEFAULT_MAX_ROWS = 1000;
-
-/**
- * 把缺 LIMIT 的查询强制包裹 LIMIT 1000。
- *
- * 简化策略: 直接在 SQL 末尾 (去尾部 `;`) 追加 `LIMIT N`。
- * 不处理子查询嵌套 (因为 builder 已结构化、无 SQL injection)。
- */
-function forceLimit(
-  sql: string,
-  maxRows: number,
-): { sql: string; modified: boolean } {
-  if (HAS_LIMIT_REGEX.test(sql)) {
-    return { sql, modified: false };
-  }
-  const trimmed = sql.replace(/;\s*$/, "").trimEnd();
-  return { sql: `${trimmed} LIMIT ${maxRows}`, modified: true };
-}
 
 export interface SqlGuardOptions {
   /** 强制包裹 LIMIT 的上限,默认 1000 */
@@ -95,11 +34,45 @@ export interface SqlGuardOptions {
   skipLimit?: boolean;
 }
 
+const parser = new Parser();
+
+/**
+ * 递归检查 AST 节点不含修改型操作
+ */
+function ensureReadOnly(node: unknown, depth = 0): void {
+  if (depth > 50) {
+    // 防止栈溢出 (恶意构造极深 AST)
+    throw new Error("AST depth exceeds 50");
+  }
+  if (!node || typeof node !== "object") return;
+
+  const n = node as { type?: string; [k: string]: unknown };
+
+  // 任何非 select 的顶层 type 都拒绝
+  if (n.type && n.type !== "select") {
+    throw new Error(`disallowed statement type: ${n.type}`);
+  }
+
+  // 递归遍历子节点
+  for (const key of Object.keys(n)) {
+    if (key === "parent" || key === "loc") continue;
+    const v = (n as Record<string, unknown>)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) ensureReadOnly(item, depth + 1);
+    } else if (v && typeof v === "object") {
+      ensureReadOnly(v, depth + 1);
+    }
+  }
+}
+
+/** 已显式包含 LIMIT/FETCH FIRST 等价物 */
+const HAS_LIMIT_REGEX = /\bLIMIT\b|\bFETCH\s+FIRST\b/i;
+
 /**
  * 主入口。
  *
  * 用法:
- *   const result = guardSql("SELECT * FROM x; DROP TABLE y; --");
+ *   const result = guardSql("SELECT * FROM x");
  *   if (result.rejected) throw new Error(result.reason);
  *   executor.executeRaw(result.sql);
  */
@@ -116,33 +89,41 @@ export function guardSql(
     };
   }
 
-  // 1. 黑名单
-  if (FORBIDDEN_RE.test(rawSql)) {
+  // 1. AST 解析 + 白名单校验
+  let ast: unknown;
+  try {
+    ast = parser.astify(rawSql, { database: "postgresql" });
+  } catch (err) {
     return {
       sql: rawSql,
       modified: false,
       rejected: true,
-      reason: `Forbidden keyword detected. Disallowed: ${FORBIDDEN_KEYWORDS.join(", ")}`,
+      reason: `SQL 语法错误: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  // 2. 多语句
-  if (MULTI_STMT_REGEX.test(rawSql)) {
+  // 2. 处理多语句
+  const statements = Array.isArray(ast) ? ast : [ast];
+  if (statements.length > 1) {
     return {
       sql: rawSql,
       modified: false,
       rejected: true,
-      reason: "Multi-statement SQL rejected (semicolon followed by content)",
+      reason: "Multi-statement SQL rejected",
     };
   }
 
-  // 3. 注释绕过
-  if (SQL_COMMENT_REGEX.test(rawSql)) {
+  // 3. 递归检查每个语句只读
+  try {
+    for (const stmt of statements) {
+      ensureReadOnly(stmt);
+    }
+  } catch (err) {
     return {
       sql: rawSql,
       modified: false,
       rejected: true,
-      reason: "SQL line comments (--) rejected to prevent blacklist bypass",
+      reason: err instanceof Error ? err.message : String(err),
     };
   }
 
@@ -151,5 +132,13 @@ export function guardSql(
     return { sql: rawSql, modified: false, rejected: false };
   }
   const maxRows = opts.maxRows ?? DEFAULT_MAX_ROWS;
-  return { ...forceLimit(rawSql, maxRows), rejected: false };
+  if (HAS_LIMIT_REGEX.test(rawSql)) {
+    return { sql: rawSql, modified: false, rejected: false };
+  }
+  const trimmed = rawSql.replace(/;\s*$/, "").trimEnd();
+  return {
+    sql: `${trimmed} LIMIT ${maxRows}`,
+    modified: true,
+    rejected: false,
+  };
 }

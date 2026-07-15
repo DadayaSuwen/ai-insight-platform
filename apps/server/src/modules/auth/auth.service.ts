@@ -71,27 +71,31 @@ export class AuthService {
       if (!opts.inviteCode) {
         throw new ConflictException("需要邀请码才能注册");
       }
-      const invite = await this.db.db
-        .selectFrom("InviteCode")
-        .selectAll()
+
+      // [Fix-3 Task 3.6] 原子使用计数: 条件 where usedCount < maxUses 一次 UPDATE
+      // 防止并发场景下超发 (旧实现 read-modify-write 窗口期)
+      const updated = await this.db.db
+        .updateTable("InviteCode")
+        .set((eb) => ({ usedCount: eb("usedCount", "+", 1) }))
         .where("code", "=", opts.inviteCode.trim())
+        .where("usedCount", "<", (eb) => eb.ref("maxUses"))
+        .returning(["id", "code", "usedCount", "maxUses", "expiresAt"])
         .executeTakeFirst();
 
-      if (!invite) {
-        throw new ConflictException("邀请码无效");
-      }
-      if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
-        throw new ConflictException("邀请码已过期");
-      }
-      if (invite.usedCount >= invite.maxUses) {
+      if (!updated) {
+        // 0 行更新 → 邀请码不存在 / 已用满
+        // 二次查询拿错误原因 (用户友好)
+        const existing = await this.db.db
+          .selectFrom("InviteCode")
+          .selectAll()
+          .where("code", "=", opts.inviteCode.trim())
+          .executeTakeFirst();
+        if (!existing) throw new ConflictException("邀请码无效");
+        if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
+          throw new ConflictException("邀请码已过期");
+        }
         throw new ConflictException("邀请码已达使用上限");
       }
-      // 更新使用计数
-      await this.db.db
-        .updateTable("InviteCode")
-        .set({ usedCount: invite.usedCount + 1 })
-        .where("id", "=", invite.id)
-        .execute();
     }
 
     const created = await this.db.db

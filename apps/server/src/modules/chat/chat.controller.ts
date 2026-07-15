@@ -12,6 +12,9 @@ import { ChatService } from "./chat.service";
 import { runWithTrace, traceLogger } from "../ai/debug-log";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
 
 /**
  * [Sprint 2+5] SSE chat controller — 多租户
@@ -20,13 +23,16 @@ import { CurrentUser } from "../auth/auth.decorators";
  *
  * [Sprint 5] @UseGuards(JwtAuthGuard) — 把 currentUser 透传到 ChatService
  * 保证 SessionService.getSessionById(sessionId, userId) 越权 → NotFound。
+ *
+ * [Fix-3 Task 3.1] @UseGuards(JwtAuthGuard, PermissionsGuard) + @Permissions(CHAT_QUERY)
  */
 @Controller("chat")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Sse("stream")
+  @Permissions(PERMISSIONS.CHAT_QUERY)
   stream(
     @Query("message") message: string,
     @Query("sessionId") sessionId: string,

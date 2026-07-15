@@ -217,14 +217,8 @@ export const ECHART_SERIES_TYPES = [
   'custom',
   // 时序
   'themeRiver',
-  // echarts-gl 扩展 (M4 引入)
-  'bar3D',
-  'scatter3D',
-  'surface3D',
-  'map3D',
-  'lines3D',
-  'line3D',
-  'points3D',
+  // [Fix-4 Task 4.3] 3D 系列暂不支持
+  // chart.helper.ts 抛 ChartAssembleError, 已从 enum 删除
   // 扩展插件 (M4 引入)
   'liquidFill',
   'wordCloud',
@@ -323,7 +317,7 @@ export type SSEToolCallData = z.infer<typeof SSEToolCallDataSchema>;
  * 但 TS 类型系统能正确推断 series/xAxis/yAxis 等字段 (供 M3 chartAgent 复用)。
  *
  * 新增字段:
- * - chartType:  LLM 选择的图表系列 (line/bar/.../bar3D/liquidFill/...),前端可选显示
+ * - chartType:  LLM 选择的图表系列 (line/bar/.../liquidFill/...),前端可选显示
  * - chartSource: 'agent' (LLM 生成) | 'fallback' (ChartHelper 模板),前端用于 UI 标签 (M5)
  */
 /**

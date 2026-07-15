@@ -13,9 +13,12 @@ import { z } from "zod";
 import { ReviewService } from "./review.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
 
 /**
- * [Sprint 6] Schema 纠错对话端点
+ * [Sprint 6 + Fix-3 Task 3.1] Schema 纠错对话端点
  *
  * POST /api/schema/review/start         → 开始纠错
  * GET  /api/schema/review/chat          → SSE 流式纠错对话 (query: reviewId + message)
@@ -31,11 +34,12 @@ const FinalizeSchema = z.object({
 });
 
 @Controller("api/schema/review")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ReviewController {
   constructor(private readonly reviewService: ReviewService) {}
 
   @Post("start")
+  @Permissions(PERMISSIONS.SCHEMA_REVIEW)
   async start(@Body() body: unknown, @CurrentUser() user: { sub: string }) {
     const parsed = StartSchema.parse(body);
     const result = await this.reviewService.startReview(
@@ -57,9 +61,11 @@ export class ReviewController {
    *   done          — {remaining, allConfirmed}
    */
   @Sse("chat")
+  @Permissions(PERMISSIONS.SCHEMA_REVIEW)
   chat(
     @Query("reviewId") reviewId: string,
     @Query("message") message: string,
+    @CurrentUser() user: { sub: string },
   ): Observable<{ type: string; data: unknown }> {
     if (!reviewId || !message) {
       throw new BadRequestException("reviewId and message are required");
@@ -77,6 +83,7 @@ export class ReviewController {
           const processed = await this.reviewService.processAnswer(
             reviewId,
             message,
+            user.sub,
           );
 
           if (processed.updated) {
@@ -129,9 +136,10 @@ export class ReviewController {
   }
 
   @Post("finalize")
-  async finalize(@Body() body: unknown) {
+  @Permissions(PERMISSIONS.SCHEMA_REVIEW)
+  async finalize(@Body() body: unknown, @CurrentUser() user: { sub: string }) {
     const parsed = FinalizeSchema.parse(body);
-    const result = await this.reviewService.finalizeReview(parsed.reviewId);
+    const result = await this.reviewService.finalizeReview(parsed.reviewId, user.sub);
     return { success: true, data: result };
   }
 }

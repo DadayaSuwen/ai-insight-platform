@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 import { LlmService } from "../llm/llm.service";
-import { METRIC_LABELS, type MetricKey } from "../tools/metric-labels";
+// [Fix-4 Task 4.5] 原 metric-labels 导入未使用, 已删除 import
 import type { EChartSeriesType } from "@workspace/types";
 import { traceLogger } from "../debug-log";
 import { type ChartIntent } from "../tools/schemas";
@@ -33,7 +33,7 @@ export interface ChartAgentContext {
   groupBy?: string;
   /** groupBy 中文标签 (用于 title) */
   groupLabel?: string;
-  /** SQL 已计算的指标列表 — [Sprint 2] 改为 string[],不再限 MetricKey enum */
+  /** SQL 已计算的指标列表 — [Sprint 2] 改为 string[],不再限固定 enum */
   metrics?: string[];
   metricLabels?: Record<string, string>;
   /** [GUARD-1a] 数据是否被截断 (rows > 100 时) */
@@ -62,7 +62,7 @@ const CHART_INTENT_PROMPT = `你是图表选型助手。根据用户问题 + 已
 1. 仅返回 JSON 对象,无 markdown fence、无 prose、无解释
 2. chartType 必须是 30 个 ECharts series 枚举值之一 (line / bar / pie / scatter / area / map / heatmap / treemap / sankey / funnel / gauge / radar / parallel / sunburst / boxplot / candlestick / graph / tree / themeRiver / pictorialBar / bar3D / scatter3D / surface3D / map3D / line3D / points3D / lines3D / liquidFill / wordCloud / custom)
 3. xField: x 轴字段名 (默认 "name")
-4. yField: y 轴字段名,必填,数值字段 (sales / quantity / profit / discount / orderCount)
+4. yField: y 轴字段名,必填,数值字段（从当前数据源的 metric 类型字段中选择）
 5. groupBy: 用户语义上的分组维度,可省略
 6. metrics: 多指标时填入,可省略
 7. **严禁** 输出 series / xAxis / yAxis / tooltip / legend / 任何 ECharts 配置字段 — 装配由代码完成

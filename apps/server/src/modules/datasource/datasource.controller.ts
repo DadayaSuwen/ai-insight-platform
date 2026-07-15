@@ -23,6 +23,10 @@ import { QueryCacheService } from "./query-gateway/cache.service";
 import { CsvImportService } from "./upload/csv-import.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
+import { Throttle } from "@nestjs/throttler";
 
 /**
  * [Sprint 1+4+5 / V3] DataSource REST 端点 — 多租户
@@ -57,7 +61,7 @@ const TestConnectionSchema = z.object({
 });
 
 @Controller("api/datasources")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class DatasourceController {
   constructor(
     private readonly ds: DatasourceService,
@@ -85,6 +89,7 @@ export class DatasourceController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   async register(
     @Body() body: unknown,
     @CurrentUser() user: { sub: string },
@@ -109,6 +114,7 @@ export class DatasourceController {
    */
   @Post("test")
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async testConnection(@Body() body: unknown) {
     const parsed = TestConnectionSchema.parse(body);
     const cfg: ConnectionConfig =
@@ -159,6 +165,7 @@ export class DatasourceController {
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   async remove(
     @Param("id") id: string,
     @CurrentUser() user: { sub: string },
@@ -190,6 +197,7 @@ export class DatasourceController {
 
   /** Re-introspect:clear cache + restart executor (仅 PG/MySQL, CSV 跳过) */
   @Post(":id/refresh")
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   async refresh(@Param("id") id: string, @CurrentUser() user: { sub: string }) {
     const item = await this.ds.getByIdForUser(id, user.sub);
     if (!item) {

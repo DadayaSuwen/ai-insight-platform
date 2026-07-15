@@ -33,6 +33,12 @@ export interface DashboardConfig {
   insights: InsightSpec[];
 }
 
+export interface ExecuteResult {
+  rows: Array<Record<string, number | string>>;
+  sql?: string;
+  error?: string;
+}
+
 export async function generateDashboard(datasourceId: string): Promise<DashboardConfig> {
   const res = await axiosInstance.post<{ success: boolean; data: DashboardConfig }>(
     '/api/dashboard/generate',
@@ -44,6 +50,25 @@ export async function generateDashboard(datasourceId: string): Promise<Dashboard
 export async function getDashboard(datasourceId: string): Promise<DashboardConfig> {
   const res = await axiosInstance.get<{ success: boolean; data: DashboardConfig }>(
     `/api/dashboard/${datasourceId}`,
+  );
+  return res.data.data;
+}
+
+/**
+ * [Fix-2 Task 2.1] 执行 kpi/chart 的安全 SQL, 拿到真实数据行供 ECharts 渲染
+ */
+export async function executeDashboard(params: {
+  datasourceId: string;
+  table: string;
+  metric: string;
+  groupBy?: string;
+  timeField?: string;
+  range?: string;
+  limit?: number;
+}): Promise<ExecuteResult> {
+  const res = await axiosInstance.post<{ success: boolean; data: ExecuteResult }>(
+    '/api/dashboard/execute',
+    params,
   );
   return res.data.data;
 }

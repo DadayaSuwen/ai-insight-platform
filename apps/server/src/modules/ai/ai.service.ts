@@ -31,7 +31,7 @@ export class AiService {
     this.logger.log(`[stream] Processing message: ${message}`);
 
     try {
-      // [Sprint 2] 不再调 refreshSchema() (读整库 information_schema,慢且与多数据源无关),
+      // [Sprint 2] 不再调原 refreshSchema 兼容老调用 (读整库 information_schema,慢且与多数据源无关),
       // 改为 PlannerAgent.buildSystemPrompt(dataSourceId) 按需读 MetadataCache。
       yield* this.plannerAgent.invokeStream(message, historyMessages, opts);
     } catch (error: unknown) {

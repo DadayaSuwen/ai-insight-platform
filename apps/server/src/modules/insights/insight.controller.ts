@@ -14,6 +14,7 @@ import { CurrentUser } from "../auth/auth.decorators";
 import { PermissionsGuard } from "../rbac/permissions.guard";
 import { Permissions } from "../rbac/permissions.decorator";
 import { PERMISSIONS } from "../rbac/permissions";
+import { DatasourceService } from "../datasource/datasource.service";
 import { InsightSchedulerService } from "./insight-scheduler.service";
 
 /**
@@ -41,6 +42,7 @@ export class InsightController {
   constructor(
     private readonly db: DatabaseService,
     private readonly scheduler: InsightSchedulerService,
+    private readonly datasourceService: DatasourceService,
   ) {}
 
   @Get()
@@ -52,13 +54,32 @@ export class InsightController {
     const parsed = ListQuerySchema.parse(q);
     const cutoff = this.computeCutoff(parsed.range);
 
+    // [Fix-1 Task 1.8] ownership 过滤：list 必须按 user 拥有的数据源过滤
+    // 不能让任意用户看到别人的 insights
+    const ownedIds = await this.db.db
+      .selectFrom("DataSource")
+      .select("id")
+      .where("userId", "=", user.sub)
+      .execute();
+    const ownedIdSet = new Set(ownedIds.map((d) => d.id));
+
     let query = this.db.db
       .selectFrom("Insight")
       .selectAll()
       .orderBy("detectedAt", "desc");
 
     if (parsed.datasourceId) {
+      // 如果指定了 datasourceId, 必须先校验归属
+      const ds = await this.datasourceService.getByIdForUser(
+        parsed.datasourceId,
+        user.sub,
+      );
+      if (!ds) throw new NotFoundException("DataSource not found");
       query = query.where("datasourceId", "=", parsed.datasourceId);
+    } else {
+      // 否则只列 user 拥有的数据源产生的 insights
+      if (ownedIdSet.size === 0) return { success: true, data: [] };
+      query = query.where("datasourceId", "in", Array.from(ownedIdSet));
     }
     if (cutoff) {
       query = query.where("detectedAt", ">=", cutoff);
@@ -77,11 +98,27 @@ export class InsightController {
       .executeTakeFirst();
 
     if (!item) throw new NotFoundException("Insight not found");
+    // [Fix-1 Task 1.8] 校验归属
+    await this.datasourceService.getByIdForUser(
+      item.datasourceId as string,
+      user.sub,
+    );
     return { success: true, data: item };
   }
 
   @Post(":id/dismiss")
   async dismiss(@Param("id") id: string, @CurrentUser() user: { sub: string }) {
+    // [Fix-1 Task 1.8] 先查 insight 拿到 datasourceId, 再校验归属
+    const item = await this.db.db
+      .selectFrom("Insight")
+      .select(["datasourceId"])
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!item) throw new NotFoundException("Insight not found");
+    await this.datasourceService.getByIdForUser(
+      item.datasourceId as string,
+      user.sub,
+    );
     await this.db.db
       .updateTable("Insight")
       .set({ status: "handled", handledAt: new Date() })
@@ -92,6 +129,17 @@ export class InsightController {
 
   @Post(":id/shield")
   async shield(@Param("id") id: string, @CurrentUser() user: { sub: string }) {
+    // [Fix-1 Task 1.8] ownership 校验
+    const item = await this.db.db
+      .selectFrom("Insight")
+      .select(["datasourceId"])
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!item) throw new NotFoundException("Insight not found");
+    await this.datasourceService.getByIdForUser(
+      item.datasourceId as string,
+      user.sub,
+    );
     // 简化: shield 把 severity 标记为 low (实际生产应维护屏蔽表)
     await this.db.db
       .updateTable("Insight")

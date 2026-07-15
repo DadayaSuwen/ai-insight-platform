@@ -10,9 +10,12 @@ import { Observable } from "rxjs";
 import { ExploreService } from "./explore.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
 
 /**
- * [Sprint 6] Schema 探索 SSE 端点
+ * [Sprint 6 + Fix-3 Task 3.1] Schema 探索 SSE 端点
  *
  * GET /api/schema/explore?datasourceId=xxx
  *
@@ -23,14 +26,15 @@ import { CurrentUser } from "../auth/auth.decorators";
  *   event: done
  *   data: {"reviewNeeded":true,"pendingFields":4}
  *
- * 复用 JwtAuthGuard, 校验数据源所有权在 ExploreService 内部完成。
+ * 复用 JwtAuthGuard + PermissionsGuard, 校验数据源所有权在 ExploreService 内部完成。
  */
 @Controller("api/schema")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ExploreController {
   constructor(private readonly exploreService: ExploreService) {}
 
   @Sse("explore")
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   explore(
     @Query("datasourceId") datasourceId: string,
     @CurrentUser() user: { sub: string },

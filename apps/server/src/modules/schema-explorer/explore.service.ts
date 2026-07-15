@@ -137,13 +137,14 @@ export class ExploreService {
 
       for (const table of snapshot.tables) {
         for (const col of table.columns) {
-          // 检查是否有 LLM 语义推断结果 (SemanticInferenceService 在 MetadataService.get 中调用)
-          const hasInference = col.chineseName && col.chineseName !== col.name;
-          const isAutoConfirmed = hasInference && col.semanticRole !== "identifier";
+          // 论文创新点 #1：基于 LLM 置信度门控判定是否需要用户确认
+          // 替代原来的 "chineseName !== name" 布尔启发式, 调 SemanticInferenceService.computeConfidence
+          const confidence = this.semanticInference.computeConfidence(col);
+          const isAutoConfirmed = confidence >= SemanticInferenceService.CONFIDENCE_THRESHOLD;
 
           if (!isAutoConfirmed) {
             pendingFields++;
-            lowConfFields.push(`${table.name}.${col.name}`);
+            lowConfFields.push(`${table.name}.${col.name} (置信度 ${confidence.toFixed(2)})`);
           }
         }
       }

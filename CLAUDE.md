@@ -518,3 +518,11 @@ apps/web/src/
 - 多租户鉴权(User/JWT/row-level ownership)
 
 如需新增能力(如新图表类型、新地图资源、新 LLM provider),参考 `docs/development/` 下的开发日志风格,新增 commit 时使用 `feat/fix/refactor/style` 前缀。
+
+---
+
+## 已知限制
+
+- 暂不支持 DeepSeek-R1 / o1 / Qwen3 等思考模型的 reasoning_content 透传（thinking 相关代码已在 Fix-4 清理，见 `docs/implementation/fix-4-cleanup-tests.md` Task 4.1）
+- 3D 图表（bar3D / scatter3D / surface3D / line3D / points3D / lines3D）暂不支持，统一抛 `ChartAssembleError`（Fix-4 Task 4.3）
+- 项目仓库无根 `eslint.config.*` / `.eslintrc.*` — `pnpm lint` 在 apps/server 找不到配置会报错（仓库基线现状，不影响 build）

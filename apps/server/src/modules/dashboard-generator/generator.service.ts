@@ -95,12 +95,41 @@ export class DashboardGeneratorService {
         `Dashboard generated for ${datasourceId}: ${config.kpis.length} KPIs, ${config.charts.length} charts, ${config.insights.length} insights`,
       );
 
+      // 论文创新点 #3：持久化生成的 dashboard 配置到 DataSource.schemaUnderstanding.dashboard
+      // 简化版：先读 schemaUnderstanding，合并 dashboard 子键，再写回
+      const persistedUnderstanding =
+        ((await this.ds.getByIdForUser(datasourceId, userId))
+          ?.schemaUnderstanding as Record<string, unknown> | null) ??
+        {};
+      persistedUnderstanding.dashboard = config;
+      await this.db.db
+        .updateTable("DataSource")
+        .set({
+          schemaUnderstanding: persistedUnderstanding as unknown as Record<string, unknown>,
+        })
+        .where("id", "=", datasourceId)
+        .execute();
+
       return config;
     } catch (err) {
       this.logger.warn(
         `Dashboard generation failed for ${datasourceId}, using fallback: ${(err as Error).message}`,
       );
-      return this.fallbackConfig(understanding);
+      const fallback = this.fallbackConfig(understanding);
+      // fallback 也持久化, 保证 getConfig 至少能返回一份基础配置
+      const persistedUnderstanding =
+        ((await this.ds.getByIdForUser(datasourceId, userId))
+          ?.schemaUnderstanding as Record<string, unknown> | null) ??
+        {};
+      persistedUnderstanding.dashboard = fallback;
+      await this.db.db
+        .updateTable("DataSource")
+        .set({
+          schemaUnderstanding: persistedUnderstanding as unknown as Record<string, unknown>,
+        })
+        .where("id", "=", datasourceId)
+        .execute();
+      return fallback;
     }
   }
 

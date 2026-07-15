@@ -61,8 +61,9 @@ export class MetadataService {
     const inferred = inferSemantics(raw);
 
     // [Sprint 5.7+] 读取用户确认的中文别名 (注册时保存,优先级最高)
+    // [Fix-1 Task 1.4] 兼容旧格式(纯字符串 chineseName) + 新格式({chineseName, role, description})
     const config = record.connectionConfig as Record<string, unknown>;
-    const columnAliases = (config?.columnAliases as Record<string, string>) ?? {};
+    const columnAliases = (config?.columnAliases as Record<string, unknown>) ?? {};
 
     // [Sprint 5.7] LLM 语义推断 (在规则推断之后,覆盖 role + 补充 chineseName/description)
     for (const table of inferred.tables) {
@@ -84,11 +85,33 @@ export class MetadataService {
     }
 
     // [Sprint 5.7+] 用户确认的中文别名覆盖 LLM 推断 (最高优先级)
+    // [Fix-1 Task 1.4] 兼容旧格式(纯字符串 chineseName) + 新格式({chineseName, role, description})
     if (Object.keys(columnAliases).length > 0) {
       for (const table of inferred.tables) {
         for (const col of table.columns) {
-          if (columnAliases[col.name]) {
-            col.chineseName = columnAliases[col.name];
+          const alias = columnAliases[col.name];
+          if (alias == null) continue;
+          if (typeof alias === "string") {
+            // 旧格式：纯字符串 chineseName
+            col.chineseName = alias;
+          } else if (typeof alias === "object") {
+            // 新格式：{ chineseName, role, description }
+            const obj = alias as {
+              chineseName?: string;
+              role?: string;
+              description?: string;
+            };
+            if (obj.chineseName) col.chineseName = obj.chineseName;
+            // role 是字面量联合类型, 收窄到 4 个允许值
+            if (
+              obj.role === "dimension" ||
+              obj.role === "measure" ||
+              obj.role === "time" ||
+              obj.role === "identifier"
+            ) {
+              col.semanticRole = obj.role;
+            }
+            if (obj.description) col.description = obj.description;
           }
         }
       }

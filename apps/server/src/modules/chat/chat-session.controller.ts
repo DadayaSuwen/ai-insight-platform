@@ -11,18 +11,23 @@ import {
 import { ChatSessionService } from "./chat-session.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
 
 /**
- * [Sprint 2+5] V3 — chat session controller + 多租户
+ * [Sprint 2+5 + Fix-3 Task 3.1] V3 — chat session controller + 多租户
  *
- * 所有端点 @UseGuards(JwtAuthGuard),session 强归属 currentUser。
+ * 所有端点 @UseGuards(JwtAuthGuard, PermissionsGuard) + @Permissions(CHAT_QUERY)
+ * GET/list 类端点 只需认证,不需要 @Permissions
  */
 @Controller("chat/sessions")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ChatSessionController {
   constructor(private readonly sessionService: ChatSessionService) {}
 
   @Post()
+  @Permissions(PERMISSIONS.CHAT_QUERY)
   async createSession(
     @CurrentUser() user: { sub: string },
     @Body("title") title?: string,
@@ -62,6 +67,7 @@ export class ChatSessionController {
   }
 
   @Delete(":id")
+  @Permissions(PERMISSIONS.CHAT_QUERY)
   async deleteSession(
     @Param("id") id: string,
     @CurrentUser() user: { sub: string },

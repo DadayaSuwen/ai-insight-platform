@@ -140,21 +140,15 @@ export class ChartHelper {
       case "pictorialBar":
         return this.assemblePictorialBar(intent, rows, ctx, fieldMapping);
 
-      // 3D 系列
-      case "bar3D":
-        return this.assembleBar3D(intent, rows, ctx, fieldMapping);
-      case "scatter3D":
-        return this.assembleScatter3D(intent, rows, ctx, fieldMapping);
-      case "surface3D":
-        return this.assembleSurface3D(intent, rows, ctx, fieldMapping);
-      case "line3D":
-        return this.assembleLine3D(intent, rows, ctx, fieldMapping);
-      case "points3D":
-        return this.assemblePoints3D(intent, rows, ctx, fieldMapping);
-      case "lines3D":
-        return this.assembleLines3D(intent, rows, ctx, fieldMapping);
+      // [Fix-4 Task 4.3] 3D 系列 (bar3D/scatter3D/surface3D/line3D/points3D/lines3D) 暂不支持
+      // ChartIntent.chartType 类型已不含 3D, 此处无需 case
+      // 若 LLM 强行返回 3D, 由 default: 抛 ChartAssembleError
 
-      // 地理 (map3D 降级 bar)
+      // 地理 (map3D 降级 bar) — map3D 不在 ECHART_SERIES_TYPES, 仅兜底
+      // 若 intent.chartType === "map3D" (向后兼容旧 LLM 输出), 走降级
+      // 编译时 TypeScript 会把 case "map3D" 标 unreachable (因为联合类型不含)
+      // 用 @ts-expect-error 标记
+      // @ts-expect-error - map3D 已从 ECHART_SERIES_TYPES 删除, 保留兜底降级
       case "map3D":
         this.logger.warn(
           "[M13-V2] map3D 暂不支持 GeoJSON,降级为 bar (rewriteMap3DToBar 也兜底)",
@@ -202,7 +196,7 @@ export class ChartHelper {
     const metrics = (intent.metrics && intent.metrics.length > 0
       ? intent.metrics
       : [intent.yField]) as MetricKey[];
-    const needMultiY = this.needsMultipleYAxis(metrics);
+    const needMultiY = this.needsMultipleYAxis(metrics, fieldMapping);
     const xData = rows.map((r) => String(r[intent.xField] ?? ""));
     const series = metrics.map((m, i) => ({
       name: this.resolveLabel(m, fieldMapping),
@@ -659,23 +653,19 @@ export class ChartHelper {
   // 3D 系列 — 数据形态特殊, 多数情况抛 ChartAssembleError
   // ============================================================
 
+  /**
+   * [Fix-4 Task 4.3] 3D 坐标提取 — 暂不支持 3D 图表
+   * @throws ChartAssembleError 始终抛错
+   */
   private require3DCoordinates(
-    rows: Array<Record<string, number | string>>,
+    _rows: Array<Record<string, number | string>>,
     chartType: string,
   ): void {
-    if (rows.length === 0) return;
-    const first = rows[0];
-    const hasXYZ =
-      Object.prototype.hasOwnProperty.call(first, "x") &&
-      Object.prototype.hasOwnProperty.call(first, "y") &&
-      Object.prototype.hasOwnProperty.call(first, "z");
-    if (!hasXYZ) {
-      throw new ChartAssembleError(
-        `${chartType} 需要 x/y/z 三维坐标数据,当前数据为二维聚合行,建议改用 bar 或 query_details 预聚合`,
-        chartType,
-        "data-shape",
-      );
-    }
+    throw new ChartAssembleError(
+      "3D 图表（bar3D/scatter3D/surface3D/line3D/points3D/lines3D）暂不支持，请使用 2D 图表类型",
+      chartType,
+      "unsupported",
+    );
   }
 
   private assembleBar3D(
@@ -929,12 +919,28 @@ export class ChartHelper {
   // 工具方法
   // ============================================================
 
-  /** 异量纲判断: 同量纲共享, 异量纲分 Y 轴 */
-  private needsMultipleYAxis(metrics: MetricKey[]): boolean {
+  /**
+   * 异量纲判断: 同量纲共享, 异量纲分 Y 轴
+   * [Fix-4 Task 4.2] 通用启发式 — 从 fieldMapping 中文标签提取单位
+   * (元/件/%/次等), 不同单位才启用双轴
+   * 旧实现硬编码特定业务字段触发, 已废弃
+   */
+  private needsMultipleYAxis(
+    metrics: MetricKey[],
+    fieldMapping?: Record<string, string>,
+  ): boolean {
     if (metrics.length <= 1) return false;
-    const hasPercent = metrics.includes("discount");
-    const hasCurrency = metrics.some((m) => m === "sales" || m === "profit");
-    return hasPercent && hasCurrency;
+    if (!fieldMapping) return metrics.length > 2; // 无映射信息时, >2 个指标才双轴
+
+    // 从中文标签提取单位
+    const units = new Set(
+      metrics.map((m) => {
+        const label = fieldMapping[m] ?? "";
+        const unitMatch = label.match(/[元件%次张条个笔]+$/);
+        return unitMatch ? unitMatch[0] : "unknown";
+      }),
+    );
+    return units.size > 1;
   }
 
   private maxOf(rows: Array<Record<string, number | string>>, key: string): number {

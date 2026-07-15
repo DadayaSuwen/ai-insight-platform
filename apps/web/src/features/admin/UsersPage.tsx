@@ -1,24 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Copy, CheckCircle2 } from 'lucide-react';
+import { adminApi, type User, type InviteCode } from './api';
+import { toast } from '../../store/toast';
 
-interface User {
-  id: string;
-  email: string;
-  name?: string;
-  role: 'admin' | 'analyst' | 'viewer';
-  status: 'active' | 'disabled';
-  lastLogin?: string;
-}
-
-const DEMO_USERS: User[] = [
-  { id: '1', email: 'li.weiming@example.com', name: '李伟明', role: 'admin', status: 'active', lastLogin: '2 分钟前' },
-  { id: '2', email: 'chen.jun@example.com', name: '陈军', role: 'analyst', status: 'active', lastLogin: '1 小时前' },
-  { id: '3', email: 'wang.fang@example.com', name: '王芳', role: 'analyst', status: 'active', lastLogin: '3 小时前' },
-  { id: '4', email: 'zhang.tao@example.com', name: '张涛', role: 'analyst', status: 'active', lastLogin: '昨天' },
-  { id: '5', email: 'zhou.ming@example.com', name: '周明', role: 'viewer', status: 'disabled', lastLogin: '7 月 10 日' },
-];
-
-const ROLE_LABELS = { admin: '管理员', analyst: '分析师', viewer: '查看者' } as const;
+const ROLE_LABELS: Record<string, string> = { admin: '管理员', analyst: '分析师', viewer: '查看者' };
 const ROLE_BADGE: Record<string, string> = {
   admin: 'badge-success',
   analyst: 'badge-info',
@@ -26,16 +11,51 @@ const ROLE_BADGE: Record<string, string> = {
 };
 
 /**
- * [Sprint 6] 用户管理页 — 对照 prototype 美化
+ * [Sprint 6 + Fix-2 Task 2.6] 用户管理页 — 接真实 /api/users
  */
 export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [showInvite, setShowInvite] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = DEMO_USERS.filter(u =>
+  useEffect(() => {
+    let cancelled = false;
+    adminApi.listUsers()
+      .then((data) => {
+        if (cancelled) return;
+        setUsers(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError((err as Error).message);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleChangeRole = async (userId: string, role: string) => {
+    try {
+      await adminApi.updateUserRole(userId, role);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: role as User['role'] } : u)));
+      toast.success('角色已更新');
+    } catch (err) {
+      toast.error(`更新失败: ${(err as Error).message}`);
+    }
+  };
+
+  const filtered = users.filter((u) =>
     u.email.toLowerCase().includes(search.toLowerCase()) ||
-    (u.name ?? '').includes(search)
+    (u.name ?? '').toLowerCase().includes(search.toLowerCase()),
   );
+
+  const adminCount = users.filter((u) => u.role === 'admin').length;
+  const analystCount = users.filter((u) => u.role === 'analyst').length;
+  const viewerCount = users.filter((u) => u.role === 'viewer').length;
 
   return (
     <>
@@ -61,60 +81,84 @@ export default function UsersPage() {
       {showInvite && <InviteCodeBox onClose={() => setShowInvite(false)} />}
 
       <div className="grid grid-4" style={{ marginBottom: 24 }}>
-        <CardStat label="用户总数" value={DEMO_USERS.length} />
-        <CardStat label="管理员" value={DEMO_USERS.filter(u => u.role === 'admin').length} />
-        <CardStat label="分析师" value={DEMO_USERS.filter(u => u.role === 'analyst').length} />
-        <CardStat label="查看者" value={DEMO_USERS.filter(u => u.role === 'viewer').length} />
+        <CardStat label="用户总数" value={users.length} />
+        <CardStat label="管理员" value={adminCount} />
+        <CardStat label="分析师" value={analystCount} />
+        <CardStat label="查看者" value={viewerCount} />
       </div>
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr><th>用户</th><th>角色</th><th>数据源权限</th><th>最近登录</th><th>状态</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            {filtered.map((user) => (
-              <tr key={user.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div
-                      style={{
-                        width: 32, height: 32, borderRadius: '50%',
-                        background: 'linear-gradient(135deg, var(--green), var(--amber))',
-                        color: 'white',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 13, fontWeight: 600,
-                      }}
-                    >
-                      {user.name?.[0] ?? user.email[0].toUpperCase()}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{user.name ?? user.email}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <span className={`badge ${ROLE_BADGE[user.role]}`}>
-                    {ROLE_LABELS[user.role]}
-                  </span>
-                </td>
-                <td>
-                  <span className="chip">{user.role === 'admin' ? '全部数据源' : 'ecommerce_db'}</span>
-                </td>
-                <td className="num" style={{ fontSize: 12 }}>{user.lastLogin}</td>
-                <td>
-                  {user.status === 'active' ? (
-                    <span className="status-dot">已激活</span>
-                  ) : (
-                    <span className="status-dot muted">已停用</span>
-                  )}
-                </td>
-                <td><button className="btn btn-ghost btn-sm">编辑</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {error ? (
+          <div style={{ padding: 16, color: 'var(--error)', fontSize: 13 }}>
+            加载失败: {error}
+          </div>
+        ) : loading ? (
+          <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>加载用户中...</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>用户</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 12 }}>
+                    {search ? '无匹配用户' : '暂无用户'}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((user) => (
+                  <tr key={user.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div
+                          style={{
+                            width: 32, height: 32, borderRadius: '50%',
+                            background: 'linear-gradient(135deg, var(--green), var(--amber))',
+                            color: 'white',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 13, fontWeight: 600,
+                          }}
+                        >
+                          {(user.name ?? user.email)[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{user.name ?? user.email}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <select
+                        value={user.role}
+                        className={`input ${ROLE_BADGE[user.role] ?? ''}`}
+                        onChange={(e) => handleChangeRole(user.id, e.target.value)}
+                        style={{ width: 110, padding: '4px 8px' }}
+                      >
+                        <option value="admin">管理员</option>
+                        <option value="analyst">分析师</option>
+                        <option value="viewer">查看者</option>
+                      </select>
+                    </td>
+                    <td>
+                      {user.status === 'active' ? (
+                        <span className="status-dot">已激活</span>
+                      ) : (
+                        <span className="status-dot muted">已停用</span>
+                      )}
+                    </td>
+                    <td className="num" style={{ fontSize: 12 }}>
+                      {new Date(user.createdAt).toLocaleDateString('zh-CN')}
+                    </td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm">详情</button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );
@@ -129,12 +173,31 @@ function CardStat({ label, value }: { label: string; value: number }) {
   );
 }
 
+/**
+ * [Fix-2 Task 2.6] InviteCodeBox — 调 /api/invite-codes 真实生成
+ */
 function InviteCodeBox({ onClose }: { onClose: () => void }) {
-  const [code] = useState('AIIN-' + Math.random().toString(36).slice(2, 8).toUpperCase());
+  const [invite, setInvite] = useState<InviteCode | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const code = await adminApi.generateInviteCode(10, 7);
+      setInvite(code);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+    if (!invite) return;
+    navigator.clipboard.writeText(invite.code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -151,17 +214,35 @@ function InviteCodeBox({ onClose }: { onClose: () => void }) {
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>🎟 邀请码已生成</div>
-          <div className="num" style={{ marginTop: 4, fontSize: 18, fontWeight: 700, color: 'var(--green-dark)' }}>{code}</div>
-          <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-muted)' }}>
-            有效期 7 天 · 最多使用 10 次
-          </div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>🎟 邀请码</div>
+          {error ? (
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--error)' }}>生成失败: {error}</div>
+          ) : invite ? (
+            <>
+              <div className="num" style={{ marginTop: 4, fontSize: 18, fontWeight: 700, color: 'var(--green-dark)' }}>
+                {invite.code}
+              </div>
+              <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-muted)' }}>
+                有效期至 {invite.expiresAt ? new Date(invite.expiresAt).toLocaleDateString('zh-CN') : '永久'} ·
+                最多使用 {invite.maxUses} 次
+              </div>
+            </>
+          ) : (
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+              点击「生成邀请码」创建新码
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={handleCopy}>
-            {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
-            {copied ? '已复制' : '复制'}
+          <button className="btn btn-primary btn-sm" onClick={handleGenerate} disabled={loading}>
+            {loading ? '生成中...' : invite ? '重新生成' : '生成邀请码'}
           </button>
+          {invite && (
+            <button className="btn btn-secondary btn-sm" onClick={handleCopy}>
+              {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+              {copied ? '已复制' : '复制'}
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={onClose}>关闭</button>
         </div>
       </div>

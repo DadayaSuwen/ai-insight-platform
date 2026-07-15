@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ChatModule } from './modules/chat/chat.module';
 import { DatabaseModule } from './modules/database/database.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -22,6 +24,13 @@ import { UsersModule } from './modules/users/users.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // [Fix-3 Task 3.4] 全局限流 — 默认每分钟 30 次
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 30,
+      },
+    ]),
     ChatModule,
     DatabaseModule,
     AiModule,
@@ -41,6 +50,13 @@ import { UsersModule } from './modules/users/users.module';
     InsightModule,
     // [Sprint 6] 用户管理 + 邀请码
     UsersModule,
+  ],
+  providers: [
+    // [Fix-3 Task 3.4] 全局 ThrottlerGuard — 兜底所有路由
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import * as cron from "node-cron";
 import { DatabaseService } from "../database/database.service";
 import { InsightAgent } from "../ai/agents/insight.agent";
+import { DatasourceService } from "../datasource/datasource.service";
+import { ExecutorFactory } from "../datasource/executors/executor.factory";
 import {
   detectZScoreAnomaly,
   detectChangeRate,
@@ -41,6 +43,8 @@ export class InsightSchedulerService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly insightAgent: InsightAgent,
+    private readonly datasourceService: DatasourceService,
+    private readonly executorFactory: ExecutorFactory,
   ) {}
 
   onModuleInit() {
@@ -127,9 +131,33 @@ export class InsightSchedulerService implements OnModuleInit {
         if (trend) log.results.push(trend);
       }
 
-      // 3. LLM 语义分析 (生成洞察摘要)
+      // 3. 论文创新点 #4：LLM 语义分析 —— 用 InsightAgent 生成结构化洞察
+      // 替代原来的 "直接存统计结果" —— 让 LLM 给业务可读的摘要 + 建议
       for (const result of log.results.slice(0, 3)) {
-        await this.persistInsight(datasourceId, result);
+        try {
+          const llmInsight = await this.insightAgent.generate({
+            question: `${result.title} 异常检测 (类型: ${result.type}, 严重度: ${result.severity})`,
+            data: {
+              anomaly: result,
+              evidence: result.evidence,
+            },
+            focus: "anomaly",
+          });
+
+          // 合并 LLM 输出与统计检测结果 (LLM 优先, 缺失字段降级到统计)
+          await this.persistInsight(datasourceId, {
+            ...result,
+            title: llmInsight.summary || result.title,
+            description:
+              llmInsight.insights?.[0]?.detail || result.description,
+            suggestion: llmInsight.recommendation || result.suggestion,
+          });
+        } catch (err) {
+          this.logger.warn(
+            `LLM 洞察生成失败，降级用统计结果: ${(err as Error).message}`,
+          );
+          await this.persistInsight(datasourceId, result);
+        }
       }
 
       // 4. 写巡检日志
@@ -147,8 +175,8 @@ export class InsightSchedulerService implements OnModuleInit {
   }
 
   private async fetchSampleMetrics(datasourceId: string): Promise<Array<{ name: string; values: number[] }>> {
-    // [Sprint 6] 简化: 从 schemaUnderstanding 提取 metrics 字段
-    // 生产环境应从数据源直接查询时序聚合
+    // [Fix-1 Task 1.7] 论文创新点 #4：从数据源拉取真实时序数据用于异常检测
+    // 替代原来的硬编码假数据, 通过 ExecutorFactory 创建 executor, 对 dashboard.kpis 中的 metric 跑时序聚合
     const ds = await this.db.db
       .selectFrom("DataSource")
       .selectAll()
@@ -158,15 +186,80 @@ export class InsightSchedulerService implements OnModuleInit {
     if (!ds) return [];
 
     const understanding = ds.schemaUnderstanding as Record<string, unknown> | null;
-    if (!understanding) return [];
+    if (!understanding?.dashboard) return [];
 
-    const dashboard = (understanding as { dashboard?: { kpis?: Array<{ metric: string }> } }).dashboard;
-    const kpis = dashboard?.kpis ?? [];
+    const dashboard = understanding.dashboard as {
+      kpis?: Array<{ table?: string; metric?: string; label?: string }>;
+    };
+    const kpis = dashboard.kpis ?? [];
+    if (kpis.length === 0) return [];
 
-    return kpis.slice(0, 3).map((kpi, i) => ({
-      name: kpi.metric,
-      values: [100, 110, 105, 108, 115, 90, 75 + i * 10],
-    }));
+    const config = this.datasourceService.decryptConfigForExecutor(
+      ds.connectionConfig as unknown as Parameters<ExecutorFactory["create"]>[1],
+    );
+    const executor = this.executorFactory.create(datasourceId, config);
+
+    const series: Array<{ name: string; values: number[] }> = [];
+    for (const kpi of kpis.slice(0, 5)) {
+      if (!kpi.table || !kpi.metric) continue;
+      try {
+        // 查询最近 30 天的时序聚合
+        const timeField = this.findTimeField(understanding, kpi.table);
+        if (!timeField) continue;
+
+        // 仅允许安全的 metric 表达式: 数字列名 / SUM(x) / COUNT(*) / AVG(x) / 简单列名
+        // 拒绝任何非白名单字符, 防止 SQL 注入
+        const safeMetric = /^[A-Za-z_][A-Za-z0-9_]*$/.test(kpi.metric)
+          ? `SUM("${kpi.metric}")`
+          : /^(SUM|COUNT|AVG|MIN|MAX)\(.+\)$/i.test(kpi.metric)
+            ? kpi.metric
+            : null;
+        if (!safeMetric) {
+          this.logger.warn(
+            `跳过不安全 metric 表达式: ${kpi.metric}`,
+          );
+          continue;
+        }
+
+        const sql = `SELECT date_trunc('day', "${timeField}") as time, ${safeMetric} as value
+                     FROM "${kpi.table}"
+                     WHERE "${timeField}" >= NOW() - INTERVAL '30 days'
+                     GROUP BY time
+                     ORDER BY time`;
+
+        const result = await executor.executeRaw(sql);
+        series.push({
+          name: kpi.label ?? kpi.metric,
+          values: result.rows.map((r) => Number(r.value) || 0),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `查询 ${kpi.table}.${kpi.metric} 失败: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    try {
+      await executor.dispose();
+    } catch {
+      // dispose 失败不影响主流程
+    }
+    return series;
+  }
+
+  /**
+   * [Fix-1 Task 1.7] 从 schema understanding 中找到指定表的时间字段
+   */
+  private findTimeField(
+    understanding: Record<string, unknown>,
+    tableName: string,
+  ): string | null {
+    const tables = (understanding.tables as Array<Record<string, unknown>>) ?? [];
+    const table = tables.find((t) => t.name === tableName);
+    if (!table) return null;
+    const fields = (table.columns as Array<Record<string, unknown>>) ?? [];
+    const timeField = fields.find((f) => f.semanticRole === "time");
+    return (timeField?.name as string | undefined) ?? null;
   }
 
   private async persistInsight(

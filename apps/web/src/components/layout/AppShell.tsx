@@ -14,12 +14,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { TOKEN_KEY } from '../../core/api/AxiosInstance';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 
 const BREADCRUMB_MAP: Record<string, string> = {
   onboarding: '欢迎',
-  'datasource-list': '数据源',
-  'datasource-new': '新建数据源',
-  'datasource-csv': '上传 CSV',
   explore: '探索中',
   'schema-review': 'Schema 确认',
   confirm: '敲定 Schema',
@@ -28,7 +26,7 @@ const BREADCRUMB_MAP: Record<string, string> = {
   insights: '主动洞察',
   schema: 'Schema 修订',
   history: '探索历史',
-  'llm-config': '模型配置',
+  settings: '设置',
   users: '用户管理',
   roles: '角色权限',
   profile: '个人设置',
@@ -63,17 +61,16 @@ export default function AppShell({ children }: AppShellProps) {
   const currentRoute = location.pathname.split('/').filter(Boolean)[0] ?? '';
   const currentBreadcrumb = BREADCRUMB_MAP[currentRoute] ?? currentRoute;
 
-  // 当前数据源 (mock — 应来自全局 store)
-  const [datasource, setDatasource] = useState<{ name: string; type: string; tables: number } | null>(() => {
-    try {
-      const raw = localStorage.getItem('aiip.current.datasource.v1');
-      if (raw) return JSON.parse(raw);
-    } catch { /* ignore */ }
-    return null;
-  });
+  // [Fix-2 Task 2.4] 改用全局 datasource store
+  const currentDsId = useDatasourceStore((s) => s.currentDatasourceId);
+  const currentDsName = useDatasourceStore((s) => s.currentDatasourceName);
+  const setCurrent = useDatasourceStore((s) => s.setCurrent);
+  const hasDS = currentDsId !== null;
+  const datasource = currentDsId && currentDsName
+    ? { id: currentDsId, name: currentDsName }
+    : null;
 
   const isAdmin = user.role === 'admin';
-  const hasDS = datasource !== null;
 
   const handleLogout = () => {
     localStorage.removeItem(TOKEN_KEY);
@@ -96,14 +93,14 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        {/* 数据源切换器 */}
-        <div className="datasource-switcher" onClick={() => navigate('/datasource-list')}>
+        {/* 数据源切换器 — [Fix-2 Task 2.4] 死链修复: 跳到 /settings?tab=datasources */}
+        <div className="datasource-switcher" onClick={() => navigate('/settings?tab=datasources')}>
           <div className="datasource-name">
             <span>{datasource?.name ?? '未配置'}</span>
             <ChevronDown size={14} />
           </div>
           <div className="datasource-meta">
-            {datasource ? `${datasource.type} · ${datasource.tables} 张表` : '点击配置数据源'}
+            {datasource ? `ID: ${datasource.id}` : '点击配置数据源'}
           </div>
         </div>
 
@@ -115,7 +112,7 @@ export default function AppShell({ children }: AppShellProps) {
               label="工作台"
               active={currentRoute === 'dashboard'}
               disabled={!hasDS}
-              onClick={() => navigate('/dashboard/default')}
+              onClick={() => currentDsId && navigate(`/dashboard/${currentDsId}`)}
             />
             <NavItem
               icon={<MessageSquare size={16} />}
@@ -130,7 +127,7 @@ export default function AppShell({ children }: AppShellProps) {
               active={currentRoute === 'insights'}
               badge={hasDS ? '3' : undefined}
               disabled={!hasDS}
-              onClick={() => navigate('/insights/default')}
+              onClick={() => currentDsId && navigate(`/insights/${currentDsId}`)}
             />
           </NavSection>
 
@@ -138,15 +135,15 @@ export default function AppShell({ children }: AppShellProps) {
             <NavItem
               icon={<Database size={16} />}
               label="数据源管理"
-              active={currentRoute === 'datasource-list'}
-              onClick={() => navigate('/datasource-list')}
+              active={currentRoute === 'settings' && new URLSearchParams(location.search).get('tab') === 'datasources'}
+              onClick={() => navigate('/settings?tab=datasources')}
             />
             <NavItem
               icon={<Edit3 size={16} />}
               label="Schema 修订"
               active={currentRoute === 'schema-review' || currentRoute === 'confirm'}
               disabled={!hasDS}
-              onClick={() => navigate('/schema-review/default')}
+              onClick={() => currentDsId && navigate(`/schema-review/${currentDsId}`)}
             />
             <NavItem
               icon={<History size={16} />}
@@ -162,8 +159,8 @@ export default function AppShell({ children }: AppShellProps) {
               <NavItem
                 icon={<Settings size={16} />}
                 label="模型配置"
-                active={currentRoute === 'llm-config' || currentRoute === 'settings'}
-                onClick={() => navigate('/llm-config')}
+                active={currentRoute === 'settings' && new URLSearchParams(location.search).get('tab') === 'llm'}
+                onClick={() => navigate('/settings?tab=llm')}
               />
               <NavItem
                 icon={<Users size={16} />}

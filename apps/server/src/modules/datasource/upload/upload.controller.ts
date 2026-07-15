@@ -24,6 +24,9 @@ import { UploadService } from "./upload.service";
 import { SemanticInferenceService } from "../metadata/semantic-inference.service";
 import { JwtAuthGuard } from "../../auth/auth.guard";
 import { CurrentUser } from "../../auth/auth.decorators";
+import { PermissionsGuard } from "../../rbac/permissions.guard";
+import { Permissions } from "../../rbac/permissions.decorator";
+import { PERMISSIONS } from "../../rbac/permissions";
 
 /**
  * [Sprint 5.6] CSV 上传 — 流式 PG 入库 (2 步端点)
@@ -86,7 +89,7 @@ const RegisterBodySchema = z.object({
 });
 
 @Controller("api/datasources/upload")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class UploadController {
   constructor(
     private readonly uploadService: UploadService,
@@ -98,6 +101,7 @@ export class UploadController {
    */
   @Post("preview")
   @HttpCode(HttpStatus.CREATED)
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   @UseInterceptors(
     FileInterceptor("file", {
       storage,
@@ -141,6 +145,7 @@ export class UploadController {
    */
   @Post("preview/aliases")
   @HttpCode(HttpStatus.OK)
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   async previewAliases(
     @Body() body: { columns: Array<{ name: string; samples: string[] }> },
   ) {
@@ -156,6 +161,7 @@ export class UploadController {
    */
   @Post("register")
   @HttpCode(HttpStatus.CREATED)
+  @Permissions(PERMISSIONS.CONNECT_DATASOURCE)
   async register(@Body() body: unknown, @CurrentUser() user: { sub: string }) {
     const parsed = RegisterBodySchema.parse(body);
     const overrides = parsed.columnOverrides.map(c => ({

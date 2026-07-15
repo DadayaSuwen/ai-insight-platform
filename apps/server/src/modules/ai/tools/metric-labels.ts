@@ -1,20 +1,22 @@
 // ============================================================
-// 指标标签映射 (与数据源无关的通用指标名称)
+// 指标标签映射 — 空 Record, 通用兜底
 // ------------------------------------------------------------
-// 从已删除的 dimensions.ts 中提取。
-// dimensions.ts 在 Sprint 5.5 被删除，因为其中包含硬编码的
-// Superstore SQL builder (SalesOrder/Customer/Product join 链)。
-// METRIC_LABELS 和 MetricKey 是通用的指标名 ↔ 中文标签映射，
-// 用于 chart.helper.ts 和 chart.agent.ts 的图表标题/轴标签，
-// 与具体数据源无关。
+// [Fix-4 Task 4.2] 此处不再硬编码任何业务字段名 (Sprint 5.5 已删除 Superstore)。
+// 指标中文标签应由 fieldMapping (从 MetadataSnapshot.columnAliases) 动态提供。
+// 此文件仅保留类型定义和空 Record, 供 chart.helper 兜底引用。
 // ============================================================
 
-export type MetricKey = "sales" | "quantity" | "profit" | "discount" | "orderCount";
+/** 指标 key — 改为 string 类型, 不再硬编码枚举 */
+export type MetricKey = string;
 
+/** 空表 — 所有标签由 fieldMapping 动态提供 */
 export const METRIC_LABELS: Record<MetricKey, string> = {
-  sales: "销售额",
-  quantity: "销量",
-  profit: "利润",
-  discount: "平均折扣率",
-  orderCount: "订单数",
+  // 兜底表为空, 后续接入时通过 fieldMapping 注入
 };
+
+/**
+ * 获取指标标签 (兜底: 找不到则返回原始 key)
+ */
+export function getMetricLabel(key: string): string {
+  return METRIC_LABELS[key] || key;
+}

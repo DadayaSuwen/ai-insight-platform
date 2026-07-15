@@ -24,6 +24,7 @@ import AppShell from './components/layout/AppShell';
 import { useChatStore } from './features/chat/store';
 import { ToastContainer } from './components/ToastContainer';
 import { TOKEN_KEY } from './core/api/AxiosInstance';
+import { useDatasourceStore } from './core/store/datasource-store';
 
 function App() {
   const theme = useChatStore((s) => s.theme);
@@ -50,7 +51,7 @@ function App() {
         <Route path="/admin/roles" element={<Shell><RolesPage /></Shell>} />
         <Route path="/profile" element={<Shell><ProfilePage /></Shell>} />
         <Route path="/history" element={<Shell><HistoryPage /></Shell>} />
-        <Route path="/" element={<Shell><ChatWindow /></Shell>} />
+        <Route path="/" element={<Shell><HomeRedirect /></Shell>} />
         <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -59,6 +60,20 @@ function App() {
     </BrowserRouter>
   );
 }
+
+/**
+ * [Fix-2 Task 2.5] 根路径重定向:
+ *   - store 有 datasourceId → 跳到 /dashboard/:id
+ *   - 否则 → 跳到 /onboarding (它会再检查 API, 有则继续跳 dashboard, 无则展示引导)
+ */
+function HomeRedirect() {
+  const dsId = useDatasourceStore((s) => s.currentDatasourceId);
+  if (dsId) return <Navigate to={`/dashboard/${dsId}`} replace />;
+  return <Navigate to="/onboarding" replace />;
+}
+
+/** 静默使用 ChatWindow (HomeRedirect 替代根路径直接渲染聊天, 避免无数据源时空白) */
+void ChatWindow;
 
 /**
  * [Sprint 6] Shell 包装 — RequireAuth + AppShell

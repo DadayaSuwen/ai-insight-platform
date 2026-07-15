@@ -1,11 +1,55 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Database, FileUp, ArrowRight, Shield } from 'lucide-react';
+import axiosInstance from '../../core/api/AxiosInstance';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 
 /**
- * [Sprint 6] 首次引导页 — 直接使用 prototype 的 .onboarding-page 视觉
+ * [Sprint 6 + Fix-2 Task 2.5] 首次引导页 — 启动时调 /api/datasources 探测
+ *
+ * 真实化要点:
+ *   - useEffect 调 /api/datasources 拉已注册数据源
+ *   - 有数据源 → 自动 setCurrent + 跳到 /dashboard/:id (不再无限渲染欢迎卡)
+ *   - 无数据源 → 展示引导卡
  */
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    axiosInstance
+      .get<{ success: boolean; data: Array<{ id: string; name: string; exploreStatus: string }> }>(
+        '/api/datasources',
+      )
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.data.data ?? [];
+        if (list.length > 0) {
+          // 已有数据源: 选第一个, 写入 store 并跳转到工作台
+          const first = list[0];
+          useDatasourceStore.getState().setCurrent(first.id, first.name);
+          navigate(`/dashboard/${first.id}`, { replace: true });
+          return;
+        }
+        setChecking(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  if (checking) {
+    return (
+      <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+        检查数据源状态中...
+      </div>
+    );
+  }
 
   return (
     <div className="onboarding-page">
@@ -21,7 +65,7 @@ export default function OnboardingPage() {
         </p>
 
         <div className="mode-grid">
-          <div className="mode-card" onClick={() => navigate('/settings')}>
+          <div className="mode-card" onClick={() => navigate('/settings?tab=datasources')}>
             <div className="mode-card-icon">
               <Database size={24} />
             </div>
@@ -34,7 +78,7 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          <div className="mode-card amber" onClick={() => navigate('/settings')}>
+          <div className="mode-card amber" onClick={() => navigate('/settings?tab=datasources')}>
             <div className="mode-card-icon">
               <FileUp size={24} />
             </div>

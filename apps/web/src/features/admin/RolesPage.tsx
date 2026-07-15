@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from '../../store/toast';
 
 const PERMISSIONS = [
   { id: 'dashboard:view', label: '查看工作台' },
@@ -25,10 +26,14 @@ const ROLE_PERMS: Record<string, Record<string, boolean>> = {
 };
 
 /**
- * [Sprint 6] 角色权限页 — 对照 prototype
+ * [Sprint 6 + Fix-2 Task 2.6] 角色权限页 — 保存按钮 toast 反馈
+ *
+ * 注: 后端无角色权限修改端点 (Sprint 5.5 RbacModule 仅枚举权限常量),
+ * 留作后续 sprint. 当前保存仅前端状态 + 提示, 实际生产可加 /api/roles 端点
  */
 export default function RolesPage() {
   const [perms, setPerms] = useState(ROLE_PERMS);
+  const [dirty, setDirty] = useState(false);
 
   const toggle = (role: string, permId: string) => {
     if (role === 'admin') return;
@@ -36,6 +41,13 @@ export default function RolesPage() {
       ...prev,
       [role]: { ...prev[role], [permId]: !prev[role][permId] },
     }));
+    setDirty(true);
+  };
+
+  const handleSave = () => {
+    // [Fix-2 Task 2.6] 暂存前端状态 (后端无端点), 提示用户已保存
+    setDirty(false);
+    toast.success('权限配置已保存 (前端, 后端 RbacModule 端点待后续 Sprint 接入)');
   };
 
   return (
@@ -43,10 +55,12 @@ export default function RolesPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">角色权限</h1>
-          <p className="page-subtitle">3 个预置角色 · 11 项权限点矩阵 · 仅管理员可见</p>
+          <p className="page-subtitle">3 个预置角色 · {PERMISSIONS.length} 项权限点矩阵 · 仅管理员可见</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-primary btn-sm">+ 创建自定义角色</button>
+          <button className="btn btn-primary btn-sm" onClick={() => toast.info('自定义角色功能开发中')}>
+            + 创建自定义角色
+          </button>
         </div>
       </div>
 
@@ -59,7 +73,9 @@ export default function RolesPage() {
       <div className="card">
         <div className="card-header">
           <div className="card-title">权限点矩阵</div>
-          <button className="btn btn-ghost btn-sm">导出配置</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => toast.info('配置导出功能开发中')}>
+            导出配置
+          </button>
         </div>
         <table className="perm-matrix" style={{ width: '100%' }}>
           <thead>
@@ -98,8 +114,10 @@ export default function RolesPage() {
           className="card-footer"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
         >
-          <span>修改权限后会立即生效，影响所有该角色用户</span>
-          <button className="btn btn-primary btn-sm">保存权限配置</button>
+          <span>{dirty ? '有未保存的修改' : '修改权限后会立即生效，影响所有该角色用户'}</span>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!dirty}>
+            保存权限配置
+          </button>
         </div>
       </div>
     </>

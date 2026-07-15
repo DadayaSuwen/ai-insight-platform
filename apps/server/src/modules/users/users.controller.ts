@@ -117,7 +117,8 @@ export class UsersController {
     @CurrentUser() user: { sub: string },
   ) {
     const parsed = InviteCodeCreateSchema.parse(body);
-    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+    // [Fix-3 Task 3.6] 邀请码 16 字节 = 32 hex 字符 = 128 bit 熵, 防止爆破
+    const code = crypto.randomBytes(16).toString("hex").toUpperCase();
 
     const expiresAt = parsed.expiresInDays
       ? new Date(Date.now() + parsed.expiresInDays * 24 * 60 * 60 * 1000)

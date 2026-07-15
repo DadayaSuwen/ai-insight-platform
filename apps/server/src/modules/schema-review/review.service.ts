@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, ForbiddenException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import { MetadataService } from "../datasource/metadata/metadata.service";
 import { SemanticInferenceService } from "../datasource/metadata/semantic-inference.service";
@@ -276,21 +276,18 @@ export class ReviewService {
 
   /**
    * 处理用户回答 — LLM 解析 → 更新字段理解
+   *
+   * [Fix-1 Task 1.2] 增加 userId 参数 + 归属校验, 防止越权
    */
   async processAnswer(
     reviewId: string,
     answer: string,
+    userId: string,
   ): Promise<{
     updated: { table: string; field: string; chineseName: string; role: string } | null;
     remaining: number;
   }> {
-    const review = await this.db.db
-      .selectFrom("SchemaReview")
-      .selectAll()
-      .where("id", "=", reviewId)
-      .executeTakeFirst();
-
-    if (!review) throw new Error("Review not found");
+    const review = await this.getReviewOwnedByUser(reviewId, userId);
 
     // 保存用户消息
     const messages = (review.messages as unknown as ReviewMessage[]) ?? [];
@@ -335,8 +332,13 @@ export class ReviewService {
       );
       if (dsRecord) {
         const config = (dsRecord.connectionConfig as Record<string, unknown>) ?? {};
-        const aliases = (config.columnAliases as Record<string, string>) ?? {};
-        aliases[parsed.fieldName] = parsed.chineseName;
+        const aliases = (config.columnAliases as Record<string, unknown>) ?? {};
+        // 论文创新点 #2：持久化用户对字段语义的完整纠正（不只 chineseName）
+        aliases[parsed.fieldName] = {
+          chineseName: parsed.chineseName,
+          role: parsed.role,             // 用户纠正的语义角色
+          description: parsed.description, // 用户补充的描述
+        };
         config.columnAliases = aliases;
 
         await this.db.db
@@ -363,7 +365,7 @@ export class ReviewService {
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+          messages: messages as unknown as Record<string, unknown>,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: remaining,
         })
@@ -394,7 +396,7 @@ export class ReviewService {
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+          messages: messages as unknown as Record<string, unknown>,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: Math.max(0, (review.pendingFields as number) - 1),
         })
@@ -410,17 +412,13 @@ export class ReviewService {
 
   /**
    * 敲定 — 持久化 schemaUnderstanding 到 DataSource
+   *
+   * [Fix-1 Task 1.2] 增加 userId 参数 + 归属校验, 防止越权
    */
-  async finalizeReview(reviewId: string): Promise<{
+  async finalizeReview(reviewId: string, userId: string): Promise<{
     schemaUnderstanding: Record<string, unknown>;
   }> {
-    const review = await this.db.db
-      .selectFrom("SchemaReview")
-      .selectAll()
-      .where("id", "=", reviewId)
-      .executeTakeFirst();
-
-    if (!review) throw new Error("Review not found");
+    const review = await this.getReviewOwnedByUser(reviewId, userId);
 
     const snapshot = await this.meta.get(review.datasourceId as string);
 
@@ -493,5 +491,25 @@ export class ReviewService {
       }
     }
     return count;
+  }
+
+  /**
+   * [Fix-1 Task 1.2] 校验 review 归属：review 必须属于该用户 + 关联的 datasource 也属于该用户
+   * 越权 → 抛 NotFound(不泄露存在性, 与 DatasourceService.getByIdForUser 行为一致)
+   */
+  private async getReviewOwnedByUser(reviewId: string, userId: string) {
+    const review = await this.db.db
+      .selectFrom("SchemaReview")
+      .selectAll()
+      .where("id", "=", reviewId)
+      .executeTakeFirst();
+
+    if (!review) throw new NotFoundException("Review not found");
+
+    // 通过 datasource 校验归属 — 越权时 getByIdForUser 返回 null → 抛 NotFound
+    const ds = await this.ds.getByIdForUser(review.datasourceId as string, userId);
+    if (!ds) throw new NotFoundException("Review not found");
+
+    return review;
   }
 }

@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
+import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./auth.guard";
 import { CurrentUser } from "./auth.decorators";
@@ -37,6 +38,7 @@ export class AuthController {
 
   @Post("register")
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   async register(@Body() body: unknown) {
     const parsed = EmailPasswordSchema.safeParse(body);
     if (!parsed.success) {
@@ -55,6 +57,7 @@ export class AuthController {
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() body: unknown) {
     const parsed = EmailPasswordSchema.safeParse(body);
     if (!parsed.success) {
