@@ -1,24 +1,21 @@
 /**
- * [Fix-7 Task 7.14] 探索历史页 — 1:1 还原原型 PAGES.history (pages.js L1136-1149)
+ * [Fix-11 Task 11.4] 探索历史页 — 接入真实 API
  *
- * Mock 4 行历史记录 (硬编码, 不调 API)
+ * 删除 Fix-7 mock (MOCK 数组)
+ * 用 listDataSources 构建历史记录
  */
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { listDataSources, type DataSourceListItem } from '../datasources/api';
+
 interface HistoryRow {
   time: string;
-  type: '首次接入' | '连接测试' | 'Schema 修订';
+  event: string;
   badge: 'success' | 'warning' | 'normal';
   ds: string;
   detail: string;
-  status: string;
-  action: '查看' | '—';
+  dsId: string;
 }
-
-const MOCK: HistoryRow[] = [
-  { time: '2026-07-14 14:32', type: '首次接入', badge: 'success', ds: 'ecommerce_db', detail: '发现 8 张表 · 67 字段 · 用户确认 4 字段', status: '完成', action: '查看' },
-  { time: '2026-07-14 14:30', type: '连接测试', badge: 'normal', ds: 'ecommerce_db', detail: 'postgresql://192.168.1.100:5432 · 延迟 18ms', status: '成功', action: '—' },
-  { time: '2026-07-12 10:15', type: 'Schema 修订', badge: 'warning', ds: 'test_db (已删除)', detail: '用户修正 2 个字段含义', status: '完成', action: '查看' },
-  { time: '2026-07-10 09:48', type: '首次接入', badge: 'success', ds: 'test_db (已删除)', detail: '发现 3 张表 · 18 字段', status: '完成', action: '查看' },
-];
 
 function TypeBadge({ type, badge }: { type: string; badge: 'success' | 'warning' | 'normal' }) {
   if (badge === 'success') return <span className="badge badge-success">{type}</span>;
@@ -27,6 +24,27 @@ function TypeBadge({ type, badge }: { type: string; badge: 'success' | 'warning'
 }
 
 export default function HistoryPage() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listDataSources()
+      .then((list: DataSourceListItem[]) => {
+        const history: HistoryRow[] = list.map((ds) => ({
+          time: new Date(ds.createdAt).toLocaleString('zh-CN'),
+          event: '数据源接入',
+          badge: 'success' as const,
+          ds: ds.name,
+          detail: `类型: ${ds.type} · 状态: ${ds.status}`,
+          dsId: ds.id,
+        }));
+        setRows(history);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
   return (
     <>
       <div className="page-header">
@@ -37,30 +55,40 @@ export default function HistoryPage() {
       </div>
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>事件</th>
-              <th>数据源</th>
-              <th>详情</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK.map((r, i) => (
-              <tr key={i}>
-                <td className="num" style={{ fontSize: 12 }}>{r.time}</td>
-                <td><TypeBadge type={r.type} badge={r.badge} /></td>
-                <td>{r.ds}</td>
-                <td>{r.detail}</td>
-                <td><span className="status-dot">{r.status}</span></td>
-                <td>{r.action === '查看' ? <button className="btn btn-ghost btn-sm">查看</button> : '—'}</td>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>加载历史记录...</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+            <div style={{ fontSize: 14, marginBottom: 4 }}>暂无探索历史</div>
+            <div style={{ fontSize: 12 }}>连接数据源后，探索记录会显示在这里</div>
+          </div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>事件</th>
+                <th>数据源</th>
+                <th>详情</th>
+                <th>操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className="num" style={{ fontSize: 12 }}>{r.time}</td>
+                  <td><TypeBadge type={r.event} badge={r.badge} /></td>
+                  <td>{r.ds}</td>
+                  <td>{r.detail}</td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/dashboard/${r.dsId}`)}>查看</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );

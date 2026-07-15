@@ -1,33 +1,46 @@
 /**
- * [Fix-7 Task 7.16] 用户管理页 — 1:1 还原原型 PAGES.users (pages.js L1303-1366)
+ * [Fix-11 Task 11.2] 用户管理页 — 接入真实 API
  *
- * 5 mock 用户 + 4 统计卡
+ * 删除 Fix-7 mock (MOCK 数组)
+ * 改用 adminApi.listUsers / updateUserRole
  */
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatarBg: string;
-  role: '管理员' | '分析师' | '查看者';
-  roleBadge: 'success' | 'info' | 'warning';
-  dsScope: string;
-  lastLogin: string;
-  status: '已激活' | '已停用';
-}
-
-const MOCK: User[] = [
-  { id: 'u1', name: '李伟明', email: 'li.weiming@example.com', avatarBg: '',                       role: '管理员', roleBadge: 'success', dsScope: '全部数据源',                lastLogin: '2 分钟前',  status: '已激活' },
-  { id: 'u2', name: '陈军',   email: 'chen.jun@example.com',   avatarBg: 'linear-gradient(135deg, var(--info), #4A7BA3)', role: '分析师', roleBadge: 'info',    dsScope: 'ecommerce_db',                lastLogin: '1 小时前',  status: '已激活' },
-  { id: 'u3', name: '王芳',   email: 'wang.fang@example.com',  avatarBg: 'linear-gradient(135deg, var(--amber), var(--orange))', role: '分析师', roleBadge: 'info', dsScope: 'ecommerce_db',         lastLogin: '3 小时前',  status: '已激活' },
-  { id: 'u4', name: '张涛',   email: 'zhang.tao@example.com',  avatarBg: 'linear-gradient(135deg, var(--green), var(--green-dark))', role: '分析师', roleBadge: 'info', dsScope: 'ecommerce_db',     lastLogin: '昨天',      status: '已激活' },
-  { id: 'u5', name: '周明',   email: 'zhou.ming@example.com',  avatarBg: 'linear-gradient(135deg, var(--text-muted), var(--text-secondary))', role: '查看者', roleBadge: 'warning', dsScope: 'ecommerce_db (只读)', lastLogin: '7 月 10 日', status: '已停用' },
-];
+import { useEffect, useState } from 'react';
+import { adminApi, type User } from './api';
+import { toast } from '../../store/toast';
 
 export default function UsersPage() {
-  const total = MOCK.length;
-  const admins = MOCK.filter((u) => u.role === '管理员').length;
-  const analysts = MOCK.filter((u) => u.role === '分析师').length;
-  const viewers = MOCK.filter((u) => u.role === '查看者').length;
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.listUsers()
+      .then((data) => {
+        setUsers(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        toast.error(`加载失败: ${(err as Error).message}`);
+        setLoading(false);
+      });
+  }, []);
+
+  const handleRoleChange = async (userId: string, role: string) => {
+    try {
+      await adminApi.updateUserRole(userId, role);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: role as User['role'] } : u)));
+      toast.success('角色已更新');
+    } catch (err) {
+      toast.error(`更新失败: ${(err as Error).message}`);
+    }
+  };
+
+  const roleLabel: Record<string, string> = { admin: '管理员', analyst: '分析师', viewer: '查看者' };
+  const roleBadge: Record<string, string> = { admin: 'success', analyst: 'info', viewer: 'warning' };
+
+  const total = users.length;
+  const admins = users.filter((u) => u.role === 'admin').length;
+  const analysts = users.filter((u) => u.role === 'analyst').length;
+  const viewers = users.filter((u) => u.role === 'viewer').length;
 
   return (
     <>
@@ -38,10 +51,6 @@ export default function UsersPage() {
         </div>
         <div className="page-actions">
           <input className="input" placeholder="搜索用户..." style={{ width: 200 }} />
-          <button className="btn btn-primary btn-sm">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-            添加用户
-          </button>
         </div>
       </div>
 
@@ -53,38 +62,55 @@ export default function UsersPage() {
       </div>
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>用户</th>
-              <th>角色</th>
-              <th>数据源权限</th>
-              <th>最近登录</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK.map((u) => (
-              <tr key={u.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div className="user-avatar" style={{ width: 32, height: 32, background: u.avatarBg || undefined }}>{u.name[0]}</div>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{u.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span className={`badge badge-${u.roleBadge}`}>{u.role}</span></td>
-                <td><span className="chip">{u.dsScope}</span></td>
-                <td className="num" style={{ fontSize: 12 }}>{u.lastLogin}</td>
-                <td><span className={`status-dot${u.status === '已停用' ? ' muted' : ''}`}>{u.status}</span></td>
-                <td><button className="btn btn-ghost btn-sm">编辑</button></td>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>加载用户列表...</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>用户</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>注册时间</th>
+                <th>操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div className="user-avatar" style={{ width: 32, height: 32 }}>{u.name?.[0] || '?'}</div>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{u.name || '未命名'}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <select
+                      className="input"
+                      value={u.role}
+                      onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                      style={{ fontSize: 12, padding: '4px 8px' }}
+                    >
+                      <option value="admin">管理员</option>
+                      <option value="analyst">分析师</option>
+                      <option value="viewer">查看者</option>
+                    </select>
+                  </td>
+                  <td>
+                    <span className={`badge ${u.status === 'active' ? 'badge-success' : 'badge-error'}`}>
+                      {u.status === 'active' ? '已激活' : '已停用'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 12 }}>{new Date(u.createdAt).toLocaleDateString('zh-CN')}</td>
+                  <td><button className="btn btn-ghost btn-sm">编辑</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );

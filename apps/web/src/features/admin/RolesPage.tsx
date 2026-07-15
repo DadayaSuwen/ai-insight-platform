@@ -1,8 +1,11 @@
 /**
  * [Fix-7 Task 7.17] 角色权限页 — 1:1 还原原型 PAGES.roles (pages.js L1373-1438)
  *
+ * [Fix-11 Task 11.3] "保存权限配置"按钮改为 toast 提示（系统预设不可修改）
+ *
  * 3 个角色卡片 + 权限点矩阵, mock 数据
  */
+import { toast } from '../../store/toast';
 const ROLES = [
   {
     key: 'admin', title: '管理员', badge: 'success', count: 1,
@@ -45,6 +48,10 @@ function isChipGreen(name: string) {
 }
 
 export default function RolesPage() {
+  const handleSave = () => {
+    toast.info('系统角色的权限为预设配置，不可修改');
+  };
+
   return (
     <>
       <div className="page-header">
@@ -111,7 +118,7 @@ export default function RolesPage() {
           </tbody>
         </table>
         <div className="card-footer">
-          <button className="btn btn-primary btn-sm">保存权限配置</button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave}>保存权限配置</button>
           <span style={{ marginLeft: 12 }}>
             修改权限后会立即生效,影响所有该角色用户
           </span>
