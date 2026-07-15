@@ -1,257 +1,166 @@
-import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { AlertTriangle, Lightbulb, Clock, ChevronDown, ChevronRight, ShieldOff, CheckCircle2 } from 'lucide-react';
-import { insightsApi, type Insight } from './api';
-
 /**
- * [Sprint 6 + Fix-2 Task 2.2] 主动洞察页 — 接真实 /api/insights
+ * [Fix-7 Task 7.12] 主动洞察页 — 1:1 还原原型 PAGES.insights (pages.js L988-1080)
+ *
+ * Mock: 3 条硬编码洞察 + 巡检状态卡, 不调 /api/insights
  */
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+interface Insight {
+  id: string;
+  icon: string;
+  emoji: string;
+  title: string;
+  severity: '高' | '中' | '低';
+  confidence: number;
+  type: 'risk' | 'anomaly' | 'opportunity';
+  desc: string;
+  steps?: string[];
+  advice: string;
+  tables: string[];
+  bg: string;
+  accent: string;
+}
+
+const INSIGHTS: Insight[] = [
+  {
+    id: 'i1',
+    icon: '🔴',
+    emoji: '🔴',
+    title: '客单价连续 2 月下降',
+    severity: '高',
+    confidence: 92,
+    type: 'risk',
+    desc: 'Agent 在分析 <code>orders.total_amt</code> 时序数据时发现:客单价从 2026-05 的 ¥184.2 持续下降至 2026-07 的 ¥174.5,下降 5.2%。进一步关联 <code>customers.level</code> 发现,下降主因是 <strong>L1 新客户占比从 38% 上升至 52%</strong>。',
+    steps: [
+      '1. 检测 total_amt 时序异常 → 发现连续下降',
+      '2. 假设 1:季节性? → 对比去年同期,排除',
+      '3. 假设 2:品类结构变化? → 各品类占比稳定,排除',
+      '4. 假设 3:客户结构变化? → 关联 customers.level,命中!',
+      '5. 验证:L1 占比上升 14pp,符合降幅',
+    ],
+    advice: '<strong>Agent 建议:</strong> 1) 排查 5-6 月是否有大规模拉新活动;2) 评估 L1 → L2 转化路径;3) 监控 8 月客单价是否企稳。',
+    tables: ['orders', 'customers'],
+    bg: 'var(--error-light)',
+    accent: 'var(--error)',
+  },
+  {
+    id: 'i2',
+    icon: '⚠️',
+    emoji: '⚠️',
+    title: 'app 渠道取消率异常上升',
+    severity: '中',
+    confidence: 87,
+    type: 'anomaly',
+    desc: 'Agent 在分析 <code>orders</code> 表 <code>status=\'cancelled\'</code> 分布时发现:app 渠道本月取消率 6.8%,远高于历史均值 3.2%(2.3σ 异常)。其他渠道正常。',
+    advice: '<strong>Agent 建议:</strong> 1) 核查 app 7.10 版本下单流程日志;2) 临时给「机械键盘 RGB」加风险提示;3) 联系取消订单客户了解原因。',
+    tables: ['orders'],
+    bg: 'var(--warning-light)',
+    accent: 'var(--warning)',
+  },
+  {
+    id: 'i3',
+    icon: '💡',
+    emoji: '💡',
+    title: 'VIP 客户复购率显著提升',
+    severity: '低',
+    confidence: 95,
+    type: 'opportunity',
+    desc: 'Agent 在分析 <code>customers.level IN (4,5)</code> 客户复购行为时发现:7 月 VIP 客户复购率达 38%,较上月 32% 提升 6 个百分点。可能与 6 月底推出的「会员专享日」活动相关。',
+    advice: '<strong>Agent 建议:</strong> 1) 复盘活动 ROI;2) 提取复购 VIP 偏好品类;3) 考虑下沉到 L3 做 A/B 测试。',
+    tables: ['orders', 'customers'],
+    bg: 'var(--green-lighter)',
+    accent: 'var(--green-dark)',
+  },
+];
+
 export default function InsightsPage() {
-  const { datasourceId } = useParams<{ datasourceId: string }>();
-  const [range, setRange] = useState<'today' | 'week' | 'month' | 'all'>('all');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [insights, setInsights] = useState<Insight[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!datasourceId) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    insightsApi.list(datasourceId, range)
-      .then((data) => {
-        if (cancelled) return;
-        setInsights(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError((err as Error).message);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [datasourceId, range]);
-
-  const handleDismiss = (id: string) => {
-    insightsApi.dismiss(id).then(() => {
-      setInsights((prev) => prev.map((it) => (it.id === id ? { ...it, status: 'handled' } : it)));
-    });
-  };
-
-  const handleShield = (id: string) => {
-    insightsApi.shield(id).then(() => {
-      setInsights((prev) =>
-        prev.map((it) => (it.id === id ? { ...it, severity: 'low' as const } : it)),
-      );
-    });
-  };
-
-  const todayInsights = insights.filter((it) => {
-    if (range === 'all') return true;
-    const detected = new Date(it.detectedAt).getTime();
-    const now = Date.now();
-    if (range === 'today') return detected >= new Date(new Date().setHours(0, 0, 0, 0)).getTime();
-    if (range === 'week') return detected >= now - 7 * 24 * 3600 * 1000;
-    if (range === 'month') return detected >= now - 30 * 24 * 3600 * 1000;
-    return true;
-  });
+  const navigate = useNavigate();
+  const [range, setRange] = useState('today');
 
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-title">主动洞察 · Agent 自主发现</h1>
-          <p className="page-subtitle">
-            Agent 每日定时巡检 · {loading ? '加载中...' : `共 ${todayInsights.length} 条${rangeLabel(range)}洞察`}
-          </p>
+          <p className="page-subtitle">Agent 每日定时巡检 · 共 {INSIGHTS.length} 条今日洞察</p>
         </div>
         <div className="page-actions">
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as 'today' | 'week' | 'month' | 'all')}
-            className="input"
-            style={{ width: 120 }}
-          >
+          <select className="input" value={range} onChange={(e) => setRange(e.target.value)} style={{ width: 110 }}>
             <option value="today">今日</option>
             <option value="week">本周</option>
             <option value="month">本月</option>
-            <option value="all">全部</option>
           </select>
           <button className="btn btn-secondary btn-sm">
-            <Clock size={14} /> 配置巡检
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="19" cy="12" r="3" /><circle cx="5" cy="12" r="3" /></svg>
+            配置巡检
           </button>
         </div>
       </div>
 
-      {/* 巡检状态 */}
+      {/* 巡检状态卡 */}
       <div className="card" style={{ marginBottom: 16, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div
-            style={{
-              width: 36, height: 36, borderRadius: '50%',
-              background: 'var(--green-lighter)', color: 'var(--green-dark)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Clock size={18} />
+          <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--green-lighter)', color: 'var(--green-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
           </div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>
-              {loading ? '加载中...' : error ? '加载失败' : `共 ${todayInsights.length} 条洞察`}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              {error ? error : '由 InsightSchedulerService (cron 0 8 * * *) 每日 8:00 触发'}
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>今日巡检已完成</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>14:00 触发 · 耗时 47s · 检查 12 项指标</div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <span className="badge badge-error">
-            {todayInsights.filter((i) => i.type === 'risk').length} 风险
-          </span>
-          <span className="badge badge-warning">
-            {todayInsights.filter((i) => i.type === 'anomaly').length} 异常
-          </span>
-          <span className="badge badge-success">
-            {todayInsights.filter((i) => i.type === 'opportunity').length} 机会
-          </span>
+          <span className="badge badge-error">1 风险</span>
+          <span className="badge badge-warning">1 异常</span>
+          <span className="badge badge-success">1 机会</span>
         </div>
       </div>
 
       {/* 洞察卡片列表 */}
-      {loading ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24, textAlign: 'center' }}>
-          加载洞察中...
-        </div>
-      ) : todayInsights.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24, textAlign: 'center' }}>
-          当前范围内没有洞察。可以等待每日 8:00 巡检,或点击右上角"配置巡检"手动触发。
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {todayInsights.map((ins) => (
-            <InsightCard
-              key={ins.id}
-              insight={ins}
-              expanded={expandedId === ins.id}
-              onToggle={() => setExpandedId(expandedId === ins.id ? null : ins.id)}
-              onDismiss={() => handleDismiss(ins.id)}
-              onShield={() => handleShield(ins.id)}
-            />
-          ))}
-        </div>
-      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {INSIGHTS.map((ins) => (
+          <div key={ins.id} className="card">
+            <div className="card-header" style={{ background: ins.bg }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>{ins.icon}</span>
+                <div>
+                  <div className="card-title" style={{ color: ins.accent }}>{ins.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {ins.type === 'risk' ? '风险' : ins.type === 'anomaly' ? '异常' : '机会'}
+                    {' · '}严重度 {ins.severity} {' · '}置信度 {ins.confidence}%
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-ghost btn-sm">标记已处理</button>
+                <button className="btn btn-ghost btn-sm">屏蔽此类</button>
+              </div>
+            </div>
+            <div className="card-body">
+              <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.7, margin: '0 0 12px' }} dangerouslySetInnerHTML={{ __html: ins.desc }} />
+
+              {ins.steps && (
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>🔍 Agent 探索过程</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7, fontFamily: '"SF Mono", Menlo, monospace' }}>
+                    {ins.steps.map((s, i) => <div key={i}>{s}</div>)}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ background: ins.bg, borderLeft: `3px solid ${ins.accent}`, borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
+                <span dangerouslySetInnerHTML={{ __html: ins.advice }} />
+              </div>
+            </div>
+            <div className="card-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>发现时间:2026-07-14 14:00 · 涉及表:{ins.tables.join(', ')}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate('/chat/mock')}>
+                深入对话分析 →
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </>
   );
 }
-
-function rangeLabel(r: 'today' | 'week' | 'month' | 'all'): string {
-  if (r === 'today') return '今日';
-  if (r === 'week') return '本周';
-  if (r === 'month') return '本月';
-  return '';
-}
-
-function InsightCard({
-  insight,
-  expanded,
-  onToggle,
-  onDismiss,
-  onShield,
-}: {
-  insight: Insight;
-  expanded: boolean;
-  onToggle: () => void;
-  onDismiss: () => void;
-  onShield: () => void;
-}) {
-  const typeConfig: Record<string, { icon: string; color: string; bg: string; label: string }> = {
-    risk: { icon: '🔴', color: 'var(--error)', bg: 'var(--error-light)', label: '风险' },
-    anomaly: { icon: '⚠️', color: 'var(--warning)', bg: 'var(--warning-light)', label: '异常' },
-    opportunity: { icon: '💡', color: 'var(--green-dark)', bg: 'var(--green-lighter)', label: '机会' },
-  };
-  const cfg = typeConfig[insight.type] ?? { icon: 'ℹ️', color: 'var(--text-secondary)', bg: 'var(--bg-secondary)', label: insight.type };
-
-  return (
-    <div className="card">
-      <div
-        className="card-header"
-        style={{ background: cfg.bg, borderBottom: '1px solid var(--border-light)' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 18 }}>{cfg.icon}</span>
-          <div>
-            <div className="card-title" style={{ color: cfg.color }}>{insight.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-              {cfg.label} · 严重度 {insight.severity}
-              {insight.status === 'handled' && ' · 已处理'}
-            </div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn btn-ghost btn-sm" onClick={onDismiss} disabled={insight.status === 'handled'}>
-            <CheckCircle2 size={12} /> 标记已处理
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={onShield}>
-            <ShieldOff size={12} /> 屏蔽此类
-          </button>
-        </div>
-      </div>
-
-      <div className="card-body">
-        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>{insight.description}</p>
-
-        <button
-          onClick={onToggle}
-          style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent)' }}
-        >
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {expanded ? '收起' : '展开'} 异常检测证据
-        </button>
-        {expanded && (
-          <div
-            style={{
-              marginTop: 8,
-              background: 'var(--bg-secondary)', borderRadius: 8,
-              padding: 12, fontFamily: '"SF Mono", Menlo, monospace',
-              fontSize: 11, lineHeight: 1.7, color: 'var(--text-secondary)',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {JSON.stringify(insight.evidence, null, 2)}
-          </div>
-        )}
-
-        {insight.suggestion && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: '10px 14px',
-              background: 'var(--green-lighter)',
-              borderLeft: '3px solid var(--green)',
-              borderRadius: 6,
-              fontSize: 12,
-            }}
-          >
-            <strong style={{ color: 'var(--green-darker)' }}>💡 Agent 建议：</strong>
-            <span> {insight.suggestion}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="card-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span>发现时间: {new Date(insight.detectedAt).toLocaleString('zh-CN')}</span>
-        <button className="btn btn-ghost btn-sm">深入对话分析 →</button>
-      </div>
-    </div>
-  );
-}
-
-// 静默使用未直接 import 的 icon, 避免 unused import
-void AlertTriangle;
-void Lightbulb;

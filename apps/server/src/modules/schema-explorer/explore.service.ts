@@ -62,7 +62,11 @@ export class ExploreService {
     dataSourceId: string,
     userId: string,
   ): AsyncGenerator<
-    { type: "step"; data: ExploreStepEvent } | { type: "done"; data: ExploreDoneEvent } | { type: "error"; data: { message: string } }
+    | { type: "step"; data: ExploreStepEvent }
+    | { type: "done"; data: ExploreDoneEvent }
+    | { type: "error"; data: { message: string } }
+    // [Fix-6 Task 6.1] 细粒度 progress 事件 — 前端用 time-line 渲染
+    | { type: "progress"; data: { step: number; type: string; data: Record<string, unknown>; timestamp: string } }
   > {
     const startedAt = Date.now();
     let totalFields = 0;
@@ -111,6 +115,16 @@ export class ExploreService {
       const tables = snapshot.tables;
       totalFields = tables.reduce((sum, t) => sum + t.columns.length, 0);
 
+      // [Fix-6 Task 6.1] 逐表推送 progress 事件, 前端可滚出每张表
+      for (const table of tables) {
+        yield this.sseEvent(2, "table_discovered", {
+          name: table.name,
+          rowCount: table.rowCount ?? 0,
+          columnCount: table.columns.length,
+          size: 0,
+        });
+      }
+
       const tableSummary = tables
         .map((t) => `${t.name} (${t.columns.length} 列)`)
         .join(", ");
@@ -146,6 +160,18 @@ export class ExploreService {
             pendingFields++;
             lowConfFields.push(`${table.name}.${col.name} (置信度 ${confidence.toFixed(2)})`);
           }
+
+          // [Fix-6 Task 6.1] 逐字段推送 progress 事件 (前端逐行渲染)
+          yield this.sseEvent(3, "field_analyzed", {
+            table: table.name,
+            field: col.name,
+            type: col.rawType,
+            inferredMeaning: col.chineseName || col.name,
+            role: col.semanticRole || "unknown",
+            confidence: parseFloat(confidence.toFixed(2)),
+            needsConfirmation: !isAutoConfirmed,
+            status: isAutoConfirmed ? "confirmed" : "pending",
+          });
         }
       }
 
@@ -170,6 +196,19 @@ export class ExploreService {
         name: t.name,
         columns: t.columns.map((c) => c.name),
       })));
+
+      // [Fix-6 Task 6.1] 逐关系推送 progress 事件 (前端逐条显示)
+      for (const rel of relations) {
+        // rel.from = "table.field" → 拆 fromTable / fromField
+        const [fromTable, fromField] = rel.from.split(".");
+        yield this.sseEvent(4, "relation_inferred", {
+          fromTable: fromTable ?? rel.from,
+          fromField: fromField ?? "",
+          toTable: rel.to,
+          toField: "id",
+          confidence: rel.confidence,
+        });
+      }
 
       yield this.stepEvent(
         4,
@@ -234,6 +273,20 @@ export class ExploreService {
     return {
       type: "step",
       data: { step, name, status, detail, elapsedMs },
+    };
+  }
+
+  /**
+   * [Fix-6 Task 6.1] 细粒度 sseEvent 进度事件 — 前端用 time-line 渲染
+   */
+  private sseEvent(
+    step: number,
+    type: "table_discovered" | "field_analyzed" | "relation_inferred",
+    data: Record<string, unknown>,
+  ): { type: "progress"; data: { step: number; type: string; data: Record<string, unknown>; timestamp: string } } {
+    return {
+      type: "progress",
+      data: { step, type, data, timestamp: new Date().toISOString() },
     };
   }
 

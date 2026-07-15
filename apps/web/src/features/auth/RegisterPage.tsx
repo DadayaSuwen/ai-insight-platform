@@ -1,167 +1,123 @@
+/**
+ * [Fix-7 Task 7.2] 注册页 — 1:1 还原原型 index.html #auth-register
+ */
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { registerApi, AUTH_USER_KEY, TOKEN_KEY } from './api';
 import { toast } from '../../store/toast';
 
-/**
- * [Sprint 5] 注册页
- */
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const [inviteCode, setInviteCode] = useState('AIINSIGHT');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirm) {
-      toast.error('两次密码不一致');
-      return;
-    }
-    if (password.length < 6) {
-      toast.error('密码至少 6 位');
+  const handleSubmit = async () => {
+    if (!inviteCode.trim() || !email.trim() || password.length < 8) {
+      toast.error('请填写完整信息, 密码至少 8 位');
       return;
     }
     setSubmitting(true);
     try {
-      const { token, user } = await registerApi({
-        email: email.trim(),
-        password,
-      });
-      localStorage.setItem(TOKEN_KEY, token);
-      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-      toast.success(`欢迎, ${user.email}`);
+      const res = await registerApi({ email: email.trim(), password });
+      localStorage.setItem(TOKEN_KEY, res.token);
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify({ ...res.user, name: name || res.user.email }));
+      toast.success(`欢迎, ${res.user.email}`);
       navigate('/');
     } catch (err) {
       const msg =
         (err as { response?: { data?: { error?: { message?: string } } } })
           ?.response?.data?.error?.message ??
-        (err instanceof Error ? err.message : String(err));
-      toast.error(`注册失败: ${msg}`);
+        (err as Error).message ??
+        '注册失败';
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div
-      className="flex min-h-screen items-center justify-center p-4"
-      style={{ background: 'var(--bg-primary)' }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-2xl border p-6"
-        style={{
-          background: 'var(--bg-secondary)',
-          borderColor: 'var(--border)',
-        }}
-      >
-        <h1
-          className="mb-1 text-xl font-semibold"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          注册
-        </h1>
-        <p
-          className="mb-4 text-xs"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          创建账户以启用多租户隔离
-        </p>
+    <div id="auth-register" className="auth-page">
+      <div className="auth-left">
+        <div className="auth-brand">
+          <div className="auth-brand-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M3 12h4l3-9 4 18 3-9h4" /></svg>
+          </div>
+          <div>
+            <div className="auth-brand-name">AI Insight</div>
+            <div className="auth-brand-sub">创建你的账号</div>
+          </div>
+        </div>
 
-        <div className="mb-3">
-          <label
-            className="mb-1 block text-[10px] font-medium"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            邮箱
-          </label>
+        <h1 className="auth-title">
+          注册账号，<br />
+          <span className="accent">3 分钟</span>开启你的 AI 数据分析
+        </h1>
+        <p className="auth-subtitle">
+          注册后你可以连接自己的数据库或上传 CSV, Agent 会自主探索并生成工作台。
+          第一个注册的用户自动成为管理员。
+        </p>
+      </div>
+
+      <div className="auth-right">
+        <h2 className="auth-form-title">创建账号</h2>
+        <p className="auth-form-sub">需要邀请码才能注册</p>
+
+        <div className="auth-field">
+          <label className="auth-label">邀请码</label>
           <input
+            className="auth-input"
+            type="text"
+            placeholder="8 位邀请码"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+          />
+        </div>
+        <div className="auth-field">
+          <label className="auth-label">姓名</label>
+          <input
+            className="auth-input"
+            type="text"
+            placeholder="你的姓名"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="auth-field">
+          <label className="auth-label">邮箱</label>
+          <input
+            className="auth-input"
             type="email"
+            placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full rounded-md border px-3 py-2 text-sm"
-            style={{
-              background: 'var(--bg-primary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
-            autoFocus
           />
         </div>
-
-        <div className="mb-3">
-          <label
-            className="mb-1 block text-[10px] font-medium"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            密码 (≥ 6 位)
-          </label>
+        <div className="auth-field">
+          <label className="auth-label">密码</label>
           <input
+            className="auth-input"
             type="password"
+            placeholder="至少 8 位,含大小写字母和数字"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-            style={{
-              background: 'var(--bg-primary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
           />
         </div>
 
-        <div className="mb-4">
-          <label
-            className="mb-1 block text-[10px] font-medium"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            确认密码
-          </label>
-          <input
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            required
-            minLength={6}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-            style={{
-              background: 'var(--bg-primary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
-          />
+        <div style={{ marginBottom: 16, padding: '10px 12px', background: 'var(--info-light)', borderRadius: 8, fontSize: 11, color: 'var(--info)', lineHeight: 1.6 }}>
+          💡 <strong>角色说明：</strong>首个用户自动成为<strong>管理员</strong>(可管理数据源、用户、模型配置);后续用户默认为<strong>分析师</strong>(可连接数据源、对话分析);管理员可创建<strong>查看者</strong>角色(只读)。
         </div>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md py-2 text-sm font-medium disabled:opacity-50"
-          style={{
-            background: 'var(--accent)',
-            color: 'white',
-          }}
-        >
-          {submitting ? '注册中...' : '注册'}
+        <button className="auth-btn" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? '注册中...' : '注册并登录 →'}
         </button>
 
-        <p
-          className="mt-3 text-center text-xs"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          已有账户?{' '}
-          <Link
-            to="/login"
-            className="underline"
-            style={{ color: 'var(--accent)' }}
-          >
-            登录
-          </Link>
-        </p>
-      </form>
+        <div className="auth-switch">
+          已有账号？<a onClick={() => navigate('/login')}>返回登录</a>
+        </div>
+      </div>
     </div>
   );
 }

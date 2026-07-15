@@ -1,60 +1,37 @@
+/**
+ * [Fix-7 Task 7.3] 首次引导页 — 1:1 还原原型 PAGES.onboarding (pages.js L12-57)
+ *
+ * Mock: 不调 /api/datasources, 永远显示引导卡 (UI 还原第一)
+ * 点击「连接数据库」 → navigate('/datasources/new')
+ * 点击「上传 CSV」 → navigate('/datasources/csv')
+ */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Database, FileUp, ArrowRight, Shield } from 'lucide-react';
-import axiosInstance from '../../core/api/AxiosInstance';
-import { useDatasourceStore } from '../../core/store/datasource-store';
 
-/**
- * [Sprint 6 + Fix-2 Task 2.5] 首次引导页 — 启动时调 /api/datasources 探测
- *
- * 真实化要点:
- *   - useEffect 调 /api/datasources 拉已注册数据源
- *   - 有数据源 → 自动 setCurrent + 跳到 /dashboard/:id (不再无限渲染欢迎卡)
- *   - 无数据源 → 展示引导卡
- */
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
+  const [userName, setUserName] = useState('用户');
 
   useEffect(() => {
-    let cancelled = false;
-    axiosInstance
-      .get<{ success: boolean; data: Array<{ id: string; name: string; exploreStatus: string }> }>(
-        '/api/datasources',
-      )
-      .then((res) => {
-        if (cancelled) return;
-        const list = res.data.data ?? [];
-        if (list.length > 0) {
-          // [Fix-5 Task 5.5] 优先选已 finalized 数据源; 否则按状态智能跳转避免死循环
-          const finalized = list.find((d) => d.exploreStatus === 'finalized');
-          const target = finalized || list[0];
-          useDatasourceStore.getState().setCurrent(target.id, target.name);
-          if (target.exploreStatus === 'finalized') {
-            // 已敲定 → dashboard
-            navigate(`/dashboard/${target.id}`, { replace: true });
-          } else {
-            // 未敲定 (pending / exploring) → explore 继续探索,
-            // 避免直接跳 dashboard 报错又回到 onboarding 形成死循环
-            navigate(`/explore/${target.id}`, { replace: true });
-          }
-          return;
-        }
-        setChecking(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate]);
+    // [Fix-7] Mock: 永远显示引导 (跳过 API 探测)
+    try {
+      const raw = localStorage.getItem('aiip.auth.user.v1');
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.name) setUserName(u.name);
+        else if (u.email) setUserName(u.email.split('@')[0]);
+      }
+    } catch {
+      /* ignore */
+    }
+    setChecking(false);
+  }, []);
 
   if (checking) {
     return (
       <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-        检查数据源状态中...
+        准备引导页...
       </div>
     );
   }
@@ -63,9 +40,10 @@ export default function OnboardingPage() {
     <div className="onboarding-page">
       <div className="onboarding-card">
         <div className="onboarding-logo">
-          <Sparkles size={40} strokeWidth={2.2} />
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4" /></svg>
         </div>
-        <h1 className="onboarding-title">欢迎，{useUserName()}</h1>
+
+        <h1 className="onboarding-title">欢迎，{userName}</h1>
         <p className="onboarding-subtitle">
           你还没有配置任何数据源。<br />
           Agent 需要连接你的数据才能开始自主探索与分析。<br />
@@ -73,44 +51,26 @@ export default function OnboardingPage() {
         </p>
 
         <div className="mode-grid">
-          <div className="mode-card" onClick={() => navigate('/settings?tab=datasources')}>
+          <div className="mode-card" onClick={() => navigate('/datasources/new')}>
             <div className="mode-card-icon">
-              <Database size={24} />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>
             </div>
             <div className="mode-card-title">连接数据库</div>
-            <div className="mode-card-desc">
-              PostgreSQL / MySQL / SQLite<br />Agent 会自主探索 Schema
-            </div>
-            <div className="mode-card-arrow">
-              开始连接 <ArrowRight size={14} />
-            </div>
+            <div className="mode-card-desc">PostgreSQL / MySQL / SQLite<br />Agent 会自主探索 Schema</div>
+            <div className="mode-card-arrow">开始连接 →</div>
           </div>
 
-          <div className="mode-card amber" onClick={() => navigate('/settings?tab=datasources')}>
+          <div className="mode-card amber" onClick={() => navigate('/datasources/csv')}>
             <div className="mode-card-icon">
-              <FileUp size={24} />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
             </div>
             <div className="mode-card-title">上传 CSV 文件</div>
-            <div className="mode-card-desc">
-              支持单个或多个 CSV<br />自动推断字段类型
-            </div>
-            <div className="mode-card-arrow" style={{ color: 'var(--warning)' }}>
-              上传文件 <ArrowRight size={14} />
-            </div>
+            <div className="mode-card-desc">支持单个或多个 CSV<br />自动推断字段类型</div>
+            <div className="mode-card-arrow">上传文件 →</div>
           </div>
         </div>
 
-        <div
-          style={{
-            padding: '14px 16px',
-            background: 'var(--info-light)',
-            borderRadius: 8,
-            fontSize: 12,
-            color: 'var(--info)',
-            textAlign: 'left',
-            lineHeight: 1.6,
-          }}
-        >
+        <div style={{ padding: '14px 16px', background: 'var(--info-light)', borderRadius: 8, fontSize: 12, color: 'var(--info)', textAlign: 'left', lineHeight: 1.6 }}>
           💡 <strong>首次使用建议：</strong>
           <br />• 如果你有数据库，先用「连接数据库」体验完整流程
           <br />• 如果只想快速试用，上传任意 CSV 即可（如销售记录、成绩单）
@@ -118,22 +78,9 @@ export default function OnboardingPage() {
         </div>
 
         <div style={{ marginTop: 20, fontSize: 11, color: 'var(--text-muted)' }}>
-          🔒 <Shield size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
-          所有数据只读访问 · 不会修改你的任何数据 · 连接信息加密存储
+          🔒 所有数据只读访问 · 不会修改你的任何数据 · 连接信息加密存储
         </div>
       </div>
     </div>
   );
-}
-
-function useUserName(): string {
-  try {
-    const raw = localStorage.getItem('aiip.auth.user.v1');
-    if (raw) {
-      const u = JSON.parse(raw);
-      if (u.name) return u.name;
-      if (u.email) return u.email.split('@')[0];
-    }
-  } catch { /* ignore */ }
-  return '用户';
 }

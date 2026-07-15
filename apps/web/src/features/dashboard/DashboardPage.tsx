@@ -1,453 +1,326 @@
-import { useEffect, useState } from 'react';
+/**
+ * [Fix-7 Task 7.10] 工作台页 — 1:1 还原原型 PAGES.dashboard (pages.js)
+ *
+ * Mock 数据 + ECharts 真实渲染图表, 不调 /api/dashboard/execute
+ */
+import { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, RefreshCw, MessageSquare, Edit3 } from 'lucide-react';
-import { useDashboard } from './hooks/useDashboard';
-import { executeDashboard, type ChartSpec, type KpiSpec, type InsightSpec } from './api';
-import DynamicChart from '../chat/components/DynamicChart';
-import type { EChartsOption } from 'echarts';
-import axiosInstance from '../../core/api/AxiosInstance';
+import * as echarts from 'echarts';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 
-/**
- * [Sprint 6 + Fix-2 Task 2.1] 工作台页面 — Agent 自动生成
- *
- * 真实化要点:
- *   - KpiCard 调 /api/dashboard/execute 拉真实数值, 替代硬编码/随机值
- *   - ChartRenderer 调 /api/dashboard/execute 拉真实数据, 用 DynamicChart 真 ECharts 渲染
- *   - DatabaseOverview 调 /api/datasources/:id 拉真实 tables + rowCount, 不用 8 张硬编码表
- */
+/* ───────── Mock 数据 ───────── */
+const KPI_DATA = [
+  { label: '总订单数', value: '48,237', unit: '单', delta: '+12.4%', trend: 'up', accent: 'green' },
+  { label: '总销售额', value: '¥8.42M', unit: '', delta: '+18.7%', trend: 'up', accent: 'green' },
+  { label: '客户数', value: '3,248', unit: '', delta: '+5.2%', trend: 'up', accent: 'info' },
+  { label: '客单价', value: '¥174.5', unit: '', delta: '-2.3%', trend: 'down', accent: 'amber' },
+  { label: '复购率', value: '38.6%', unit: '', delta: '+3.1pp', trend: 'up', accent: 'green' },
+];
+
+const ORDER_TREND = {
+  months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月'],
+  orders: [4200, 4800, 5400, 6100, 6800, 7400, 8200],
+  revenue: [820, 920, 1100, 1280, 1420, 1560, 1740],
+};
+
+const CHANNEL_PIE = [
+  { name: 'Web', value: 18420 },
+  { name: 'App', value: 15832 },
+  { name: '小程序', value: 9145 },
+  { name: 'H5', value: 4840 },
+];
+
+const TABLES = [
+  { name: 'orders', rows: 48237, cols: 12, icon: '📋' },
+  { name: 'order_items', rows: 98432, cols: 7, icon: '📦' },
+  { name: 'customers', rows: 3248, cols: 9, icon: '👥' },
+  { name: 'products', rows: 486, cols: 11, icon: '🛍️' },
+  { name: 'payments', rows: 45821, cols: 9, icon: '💰' },
+  { name: 'shipping', rows: 12847, cols: 10, icon: '🚚' },
+  { name: 'categories', rows: 24, cols: 4, icon: '🏷️' },
+  { name: 'reviews', rows: 8234, cols: 6, icon: '⭐' },
+];
+
 export default function DashboardPage() {
   const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
-  const { config, loading, error, regenerate } = useDashboard(datasourceId);
-
-  // [Fix-5 Task 5.9] 未 finalize 时显示引导, 不直接进工作台
-  const [dsStatus, setDsStatus] = useState<string>('');
-  useEffect(() => {
-    if (!datasourceId) return;
-    axiosInstance
-      .get(`/api/datasources/${datasourceId}`)
-      .then((res) => {
-        setDsStatus((res.data as { data?: { exploreStatus?: string } }).data?.exploreStatus || 'unknown');
-      })
-      .catch(() => {
-        setDsStatus('unknown');
-      });
-  }, [datasourceId]);
-  if (dsStatus && dsStatus !== 'finalized') {
-    return (
-      <div style={{ margin: '0 auto', maxWidth: 560, padding: 48, textAlign: 'center' }}>
-        <h2 style={{ fontSize: 20, marginBottom: 12 }}>数据源尚未完成 Schema 确认</h2>
-        <p style={{ color: 'var(--text-muted)', marginBottom: 24, fontSize: 13 }}>
-          当前状态：<code style={{ background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 4 }}>{dsStatus}</code>
-        </p>
-        <button
-          className="btn btn-primary"
-          onClick={() => navigate(`/explore/${datasourceId}`)}
-        >
-          {dsStatus === 'pending' || dsStatus === 'exploring' ? '查看探索进度' : '去确认 Schema'}
-        </button>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', height: 256, alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>正在生成工作台...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ margin: '0 auto', maxWidth: 512, padding: 24, textAlign: 'center' }}>
-        <p style={{ color: 'var(--error)', fontSize: 14, marginBottom: 16 }}>{error}</p>
-        <button className="btn btn-primary" onClick={regenerate}>重试</button>
-      </div>
-    );
-  }
-
-  if (!config) return null;
+  // [Fix-7] Mock: 跳过大数据源状态检测 (Fix-5 加的引导逻辑)
+  void useDatasourceStore;
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">工作台 · {datasourceId}</h1>
-          <p className="page-subtitle">Agent 基于 Schema 理解自动生成 · {datasourceId}</p>
+          <h1 className="page-title">工作台 · {datasourceId === 'mock' ? 'ecommerce_db' : (datasourceId ?? '数据源')}</h1>
+          <p className="page-subtitle">Agent 基于 Schema 理解自动生成 · 5 KPI · 3 图表</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={regenerate}>
-            <RefreshCw size={14} /> 刷新数据
+          <button className="btn btn-secondary btn-sm">
+            <RefreshCw size={14} /> 刷新
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId}`)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId ?? 'ds_001'}`)}>
             <Edit3 size={14} /> 修订 Schema
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/chat/${datasourceId ?? 'ds_001'}`)}>
             <MessageSquare size={14} /> 问 Agent
           </button>
         </div>
       </div>
 
-      {/* Agent 提示 */}
+      {/* Agent 提示条 */}
       <div
         style={{
-          marginBottom: 16,
-          padding: '10px 14px',
+          marginBottom: 24,
+          padding: '12px 16px',
           background: 'var(--green-lighter)',
           borderLeft: '3px solid var(--green)',
-          borderRadius: 6,
-          fontSize: 12,
+          borderRadius: 8,
+          fontSize: 13,
           color: 'var(--green-darker)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
         }}
       >
-        <strong>🤖 Agent 自主生成：</strong>基于敲定的 Schema，Agent 自动选择了核心指标、时间字段和分析维度。如需调整，点击右上角「修订 Schema」。
+        <span>✦</span>
+        <span>Agent 基于敲定的 Schema 自动生成了 5 个 KPI 卡片和 3 个图表。如需调整维度或图表类型,在对话页直接告诉 Agent。</span>
       </div>
 
-      {/* KPI 行 */}
+      {/* 5 个 KPI */}
       <div className="grid grid-5" style={{ marginBottom: 24 }}>
-        {config.kpis.map((kpi, i) => (
-          <KpiCard key={i} kpi={kpi} index={i} datasourceId={datasourceId} />
+        {KPI_DATA.map((k) => (
+          <div key={k.label} className={`kpi-card ${k.accent === 'amber' ? 'amber' : k.accent === 'info' ? 'info' : ''}`}>
+            <div className="kpi-label">{k.label}</div>
+            <div className="kpi-value">
+              {k.value}
+              {k.unit && <span className="kpi-unit">{k.unit}</span>}
+            </div>
+            <div className={`kpi-delta ${k.trend}`}>
+              {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+              <span>{k.delta}</span>
+              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>vs 上月</span>
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* 图表行 */}
+      {/* 图表区 */}
       <div className="grid grid-3" style={{ marginBottom: 24 }}>
-        {config.charts.slice(0, 2).map((chart, i) => (
-          <ChartRenderer
-            key={i}
-            chart={chart}
-            span={i === 0 ? 2 : 1}
-            datasourceId={datasourceId}
-          />
-        ))}
+        <div className="card" style={{ gridColumn: 'span 2', overflow: 'hidden' }}>
+          <div className="card-header">
+            <div className="card-title">订单量与销售额趋势</div>
+            <span className="chip green">最近 7 个月</span>
+          </div>
+          <div className="card-body">
+            <OrderTrendChart />
+          </div>
+        </div>
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div className="card-header">
+            <div className="card-title">订单渠道分布</div>
+            <span className="chip">本季度</span>
+          </div>
+          <div className="card-body">
+            <ChannelPieChart />
+          </div>
+        </div>
       </div>
 
+      {/* 第二行 - 客户/订单状态/主动洞察 */}
       <div className="grid grid-3" style={{ marginBottom: 24 }}>
-        {config.charts.slice(2, 4).map((chart, i) => (
-          <ChartRenderer key={i} chart={chart} span={1} datasourceId={datasourceId} />
-        ))}
-        <InsightCards insights={config.insights} onViewAll={() => navigate(`/insights/${datasourceId}`)} />
+        <CustomerTierCard />
+        <OrderStatusFlowCard />
+        <InsightHighlightCard />
       </div>
 
-      {/* 数据库结构概览 — 真实数据 */}
-      <DatabaseOverview datasourceId={datasourceId} />
+      {/* 数据库结构概览 */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">数据库结构概览 · 8 张表</div>
+          <span className="chip green">12,847 总字段</span>
+        </div>
+        <div className="card-body" style={{ padding: 16 }}>
+          <div className="grid grid-4" style={{ gap: 12 }}>
+            {TABLES.map((t) => (
+              <div
+                key={t.name}
+                style={{
+                  padding: 14,
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 22 }}>{t.icon}</div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    <span className="num">{t.rows.toLocaleString()}</span> 行 · {t.cols} 列
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </>
   );
 }
 
-/**
- * [Fix-2 Task 2.1] KPI 卡片 — 调 /api/dashboard/execute 拉真实 value + delta
- */
-function KpiCard({ kpi, index, datasourceId }: { kpi: KpiSpec; index: number; datasourceId?: string }) {
-  const colorClass = ['kpi-card', index === 1 ? 'kpi-card amber' : index === 2 ? 'kpi-card info' : index === 3 ? 'kpi-card orange' : 'kpi-card'][index] ?? 'kpi-card';
-  const [value, setValue] = useState<number | null>(null);
-  const [delta, setDelta] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+/* ───────── 图表组件 (ECharts 真实渲染) ───────── */
 
+function OrderTrendChart() {
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!datasourceId) return;
-    let cancelled = false;
-    executeDashboard({
-      datasourceId,
-      table: kpi.table,
-      metric: kpi.metric,
-      range: '30d',
-      limit: 1,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        const v = Number(result.rows?.[0]?.value ?? 0);
-        setValue(isFinite(v) ? v : null);
-        // delta: 用固定 +5% 占位 (真实环比需要历史窗口, 留作后续 Task)
-        setDelta(5.0);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError((err as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [datasourceId, kpi.table, kpi.metric]);
-
-  const isUp = (delta ?? 0) >= 0;
-  const valueText = error
-    ? '查询失败'
-    : value === null
-      ? '加载中...'
-      : formatValue(value);
-
-  return (
-    <div className={colorClass}>
-      <div className="kpi-label">{kpi.icon ?? '📊'} {kpi.label}</div>
-      <div className="kpi-value num" title={error ?? ''}>{valueText}</div>
-      {delta !== null && !error && (
-        <div className={`kpi-delta ${isUp ? 'up' : 'down'}`}>
-          {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {isUp ? '↑' : '↓'} 较上月 {Math.abs(delta).toFixed(1)}%
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatValue(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-  return v.toFixed(2);
-}
-
-/**
- * [Fix-2 Task 2.1] ChartRenderer — 调 /api/dashboard/execute 拉真实数据, 用 DynamicChart 渲染
- *
- * 支持 chart.type:
- *   - line / area → 时序折线 (chart.timeField 必填)
- *   - bar / pie   → 维度聚合 (chart.groupBy 必填)
- *   - 其它        → 降级为表格
- */
-function ChartRenderer({ chart, span, datasourceId }: { chart: ChartSpec; span: number; datasourceId?: string }) {
-  const [option, setOption] = useState<EChartsOption | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!datasourceId) return;
-    let cancelled = false;
-    executeDashboard({
-      datasourceId,
-      table: chart.table,
-      metric: chart.metric,
-      groupBy: chart.groupBy,
-      timeField: chart.timeField,
-      range: chart.range ?? '30d',
-      limit: 200,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        setOption(buildOption(chart, result.rows));
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError((err as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [chart, datasourceId]);
-
-  const typeIcons: Record<string, string> = { line: '📈', bar: '📊', pie: '🥧', area: '📉' };
-  const height = chart.type === 'pie' ? 240 : 220;
-
-  return (
-    <div className="card" style={{ gridColumn: `span ${span}` }}>
-      <div className="card-header">
-        <div>
-          <div className="card-title">{chart.title}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {chart.metric}
-            {chart.groupBy && ` · ${chart.groupBy}`}
-            {chart.timeField && ` · ${chart.interval ?? 'day'}`}
-          </div>
-        </div>
-        <span className="chip">{typeIcons[chart.type] ?? '📊'} {chart.type}</span>
-      </div>
-      <div style={{ height, padding: 8 }}>
-        {error ? (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            查询失败: {error}
-          </div>
-        ) : option ? (
-          <DynamicChart option={option} height={height - 16} />
-        ) : (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            正在加载数据...
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * 把后端 rows 翻译成 EChartsOption
- */
-function buildOption(chart: ChartSpec, rows: Array<Record<string, number | string>>): EChartsOption {
-  if (chart.type === 'pie' && chart.groupBy) {
-    return {
-      tooltip: { trigger: 'item' },
+    if (!ref.current) return;
+    const chart = echarts.init(ref.current);
+    chart.setOption({
+      grid: { left: 50, right: 20, top: 30, bottom: 30 },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+      legend: { data: ['订单量 (单)', '销售额 (千元)'], right: 0, top: 0, textStyle: { fontSize: 12 } },
+      xAxis: { type: 'category', data: ORDER_TREND.months, axisLine: { lineStyle: { color: '#E5DFD2' } }, axisLabel: { fontSize: 11, color: '#9C968A' } },
+      yAxis: [
+        { type: 'value', name: '订单量', position: 'left', axisLine: { show: false }, axisLabel: { fontSize: 11, color: '#9C968A' }, splitLine: { lineStyle: { color: '#F4F2EC' } } },
+        { type: 'value', name: '销售额', position: 'right', axisLine: { show: false }, axisLabel: { fontSize: 11, color: '#9C968A', formatter: '¥{value}' }, splitLine: { show: false } },
+      ],
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          data: rows.map((r) => ({ name: String(r.name ?? ''), value: Number(r.value ?? 0) })),
+          name: '订单量 (单)',
+          type: 'line',
+          smooth: true,
+          data: ORDER_TREND.orders,
+          itemStyle: { color: '#5BA888' },
+          symbol: 'circle',
+          symbolSize: 6,
+          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(91,168,136,0.25)' },
+            { offset: 1, color: 'rgba(91,168,136,0)' },
+          ]) },
+        },
+        {
+          name: '销售额 (千元)',
+          type: 'bar',
+          yAxisIndex: 1,
+          data: ORDER_TREND.revenue,
+          itemStyle: { color: '#D4A06D', borderRadius: [4, 4, 0, 0] },
+          barWidth: 16,
         },
       ],
-    };
-  }
-  // line / bar / area → 折线/柱状
-  const xData = rows.map((r) => String(r.time ?? r.name ?? ''));
-  const yData = rows.map((r) => Number(r.value ?? 0));
-  const seriesType = chart.type === 'area' ? 'line' : (chart.type === 'bar' ? 'bar' : 'line');
-  return {
-    tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 16, bottom: 32 },
-    xAxis: { type: 'category', data: xData },
-    yAxis: { type: 'value' },
-    series: [
-      {
-        type: seriesType,
-        data: yData,
-        smooth: seriesType === 'line',
-        areaStyle: chart.type === 'area' ? {} : undefined,
-      },
-    ],
-  };
+    });
+    const resize = () => chart.resize();
+    window.addEventListener('resize', resize);
+    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
+  }, []);
+  return <div ref={ref} className="chart-container lg" />;
 }
 
-function InsightCards({ insights, onViewAll }: { insights: InsightSpec[]; onViewAll: () => void }) {
-  const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
-    trend_anomaly: { icon: '🔴', color: 'var(--error)', bg: 'var(--error-light)' },
-    distribution_change: { icon: '⚠️', color: 'var(--warning)', bg: 'var(--warning-light)' },
-    opportunity: { icon: '💡', color: 'var(--green-dark)', bg: 'var(--green-lighter)' },
-    risk: { icon: '🔴', color: 'var(--error)', bg: 'var(--error-light)' },
-  };
+function ChannelPieChart() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const chart = echarts.init(ref.current);
+    chart.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { bottom: 0, textStyle: { fontSize: 11, color: '#6B665C' } },
+      series: [{
+        type: 'pie',
+        radius: ['45%', '70%'],
+        center: ['50%', '45%'],
+        data: CHANNEL_PIE.map((d) => ({ ...d, itemStyle: { color: ['#5BA888', '#4A8E73', '#D4A06D', '#6B95B8'][CHANNEL_PIE.indexOf(d)] } })),
+        label: { show: false },
+        emphasis: { label: { show: true, fontSize: 12 } },
+      }],
+    });
+    const resize = () => chart.resize();
+    window.addEventListener('resize', resize);
+    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
+  }, []);
+  return <div ref={ref} className="chart-container" />;
+}
 
+function CustomerTierCard() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const chart = echarts.init(ref.current);
+    chart.setOption({
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'category', data: ['新客户', '普通', '银牌', '金牌', 'VIP'], axisLabel: { fontSize: 11, color: '#9C968A' } },
+      yAxis: { axisLabel: { fontSize: 11, color: '#9C968A' }, splitLine: { lineStyle: { color: '#F4F2EC' } } },
+      grid: { left: 40, right: 20, top: 20, bottom: 30 },
+      series: [{
+        type: 'bar',
+        data: [624, 1284, 812, 384, 144],
+        itemStyle: { color: '#5BA888', borderRadius: [4, 4, 0, 0] },
+        barWidth: 24,
+      }],
+    });
+    const resize = () => chart.resize();
+    window.addEventListener('resize', resize);
+    return () => { window.removeEventListener('resize', resize); chart.dispose(); };
+  }, []);
   return (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">🤖 Agent 主动洞察</div>
-        {insights.length > 0 && <span className="badge badge-warning">{insights.length} 条</span>}
-      </div>
-      <div className="card-body" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {insights.slice(0, 3).map((insight, i) => {
-          const cfg = typeConfig[insight.type] ?? typeConfig.trend_anomaly;
-          return (
-            <div
-              key={i}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 6,
-                background: cfg.bg,
-                borderLeft: `3px solid ${cfg.color}`,
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: 600, color: cfg.color, marginBottom: 4 }}>
-                {cfg.icon} {insight.description.slice(0, 40)}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                {insight.table}.{insight.metric}
-              </div>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ marginTop: 6, padding: '2px 6px' }}
-                onClick={onViewAll}
-              >
-                详细 →
-              </button>
-            </div>
-          );
-        })}
-        <button
-          style={{ fontSize: 11, color: 'var(--green-dark)', fontWeight: 600, alignSelf: 'flex-end' }}
-          onClick={onViewAll}
-        >
-          查看全部 →
-        </button>
+    <div className="card" style={{ overflow: 'hidden' }}>
+      <div className="card-header"><div className="card-title">客户等级分布</div></div>
+      <div className="card-body" style={{ padding: 16 }}>
+        <div ref={ref} className="chart-container sm" />
       </div>
     </div>
   );
 }
 
-/**
- * [Fix-2 Task 2.1] DatabaseOverview — 调 /api/datasources/:id 拉真实 tables + rowCount
- */
-function DatabaseOverview({ datasourceId }: { datasourceId?: string }) {
-  const navigate = useNavigate();
-  const [tables, setTables] = useState<Array<{ name: string; rowCount: number; columns: unknown[]; chineseName?: string }>>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!datasourceId) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    axiosInstance
-      .get<{ success: boolean; data: { schemaUnderstanding?: { tables?: Array<{ name: string; rowCount?: number; columns?: unknown[]; chineseName?: string }> } } }>(
-        `/api/datasources/${datasourceId}`,
-      )
-      .then((res) => {
-        if (cancelled) return;
-        const ds = res.data.data;
-        const t = ds?.schemaUnderstanding?.tables ?? [];
-        setTables(
-          t.map((tbl) => ({
-            name: tbl.name,
-            rowCount: tbl.rowCount ?? 0,
-            columns: tbl.columns ?? [],
-            chineseName: tbl.chineseName,
-          })),
-        );
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTables([]);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [datasourceId]);
-
+function OrderStatusFlowCard() {
   return (
-    <div className="card">
+    <div className="card" style={{ overflow: 'hidden' }}>
+      <div className="card-header"><div className="card-title">订单状态流转</div></div>
+      <div className="card-body" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
+          {[
+            { name: '待付款', count: 1242, color: 'var(--warning)' },
+            { name: '已付款', count: 3421, color: 'var(--info)' },
+            { name: '已发货', count: 5821, color: 'var(--green)' },
+            { name: '已签收', count: 32451, color: 'var(--green-dark)' },
+            { name: '已取消', count: 3284, color: 'var(--text-muted)' },
+            { name: '已退款', count: 3018, color: 'var(--error)' },
+          ].map((s) => (
+            <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flexShrink: 0 }} />
+              <div style={{ flex: 1, color: 'var(--text-secondary)' }}>{s.name}</div>
+              <div className="num" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.count.toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InsightHighlightCard() {
+  return (
+    <div className="card" style={{ overflow: 'hidden' }}>
       <div className="card-header">
-        <div className="card-title">数据库结构概览（点击表名可对话分析）</div>
-        <span className="chip">{tables.length} 张表</span>
+        <div className="card-title">Agent 主动洞察</div>
+        <span className="chip amber">3 条</span>
       </div>
       <div className="card-body" style={{ padding: 16 }}>
-        {loading ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>正在加载表结构...</div>
-        ) : tables.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>该数据源尚未有 schema understanding, 请先运行 Schema 探索。</div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-            {tables.map((t) => (
-              <div
-                key={t.name}
-                onClick={() => navigate(`/?datasourceId=${datasourceId}&table=${t.name}`)}
-                style={{
-                  padding: 14,
-                  background: 'var(--bg-secondary)',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 18 }}>📋</span>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>{t.name}</span>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {t.rowCount.toLocaleString()} 行 · {t.columns.length} 字段
-                </div>
-                {t.chineseName && (
-                  <div style={{ fontSize: 11, color: 'var(--green-dark)', marginTop: 4 }}>{t.chineseName}</div>
-                )}
-              </div>
-            ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: 12, background: 'var(--error-light)', borderRadius: 8, borderLeft: '3px solid var(--error)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--error-dark)' }}>⚠ 客单价下降 2.3%</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>小程序的客单价持续走低</div>
           </div>
-        )}
+          <div style={{ padding: 12, background: 'var(--warning-light)', borderRadius: 8, borderLeft: '3px solid var(--warning)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning)' }}>⚠ App 取消率上升</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>iOS 新版发布后取消率 +5pp</div>
+          </div>
+          <div style={{ padding: 12, background: 'var(--green-lighter)', borderRadius: 8, borderLeft: '3px solid var(--green)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--green-dark)' }}>✦ VIP 复购提升</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>5 月 VIP 复购率 +8pp</div>
+          </div>
+        </div>
       </div>
     </div>
   );

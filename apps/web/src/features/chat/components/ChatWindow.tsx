@@ -1,616 +1,226 @@
-import { useRef, useEffect, useCallback, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Loader2, PanelLeft } from "lucide-react";
-import MessageBubble from "./MessageBubble";
-import ChatInput from "./ChatInput";
-import { useChatStore } from "../store";
-import { useSSEChat } from "../hooks";
-import { useDatasourceStore } from "../../../core/store/datasource-store";
-import { useChatActions } from "../hooks/useChatActions";
-import { chatSessionApi } from "../api";
-import { recordToChatMessage } from "../utils/recordToChatMessage";
-import DataSourcePicker from "../../datasources/DataSourcePicker";
-import {
-  saveCurrentSessionId,
-  saveSessions,
-  saveSidebarOpen,
-  saveSidebarCollapsed,
-} from "../store/persistence";
-import {
-  SessionSidebar,
-  CollapsedSidebar,
-  MobileSidebarDrawer,
-  SidebarToggle,
-} from "./sidebar";
-import WelcomeScreen from "./WelcomeScreen";
-import type {
-  ChatMessage,
-  AssistantMessage,
-  ToolCallData,
-  ToolResultData,
-} from "../types";
+/**
+ * [Fix-7 Task 7.11] 对话追问页 — 1:1 还原原型 PAGES.chat (pages.js L899-983)
+ *
+ * 三栏布局:
+ *   左 240px: 推荐提问 + 可用表列表
+ *   中 flex-1: 对话流(mock 1 轮对话演示)
+ *   右 320px: 上下文面板 (使用工具 / 数据源 / Token / 耗时)
+ *
+ * Mock 数据 + 内嵌 inline styles, 不调 SSE; 保留 navigate 跳转工作台
+ */
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
+import { useDatasourceStore } from '../../../core/store/datasource-store';
 
-import type { ChatSession } from "../../../types/chat";
-
-function newId(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `id-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  );
-}
-
-/** Preset quick-command chips shown in the empty state and below the header */
-const QUICK_COMMANDS = [
-  {
-    label: "本月销售总览",
-    icon: "📊",
-    query: "帮我统计本月的总销售额、订单量和销量，并给出一个概览。",
-  },
-  {
-    label: "各品类业绩对比",
-    icon: "📈",
-    query:
-      "对比各类别商品今年的销售额和利润，画出柱状图，并分析哪个品类表现最好。",
-  },
-  {
-    label: "年度销售趋势",
-    icon: "📉",
-    query: "分析今年每个月的销售趋势，画出折线图，找出销售额最高和最低的月份。",
-  },
-  {
-    label: "客户画像洞察",
-    icon: "👥",
-    query: "对比不同客户类型在购买品类上的偏好差异，并给出商业建议。",
-  },
-  {
-    label: "地区利润分析",
-    icon: "🗺️",
-    query: "分析各个地区的利润表现，哪些地区亏损较多？",
-  },
-  {
-    label: "爆款商品盘点",
-    icon: "🔥",
-    query: "查一下今年销量最高的前 5 个商品，以及它们的总销售额。",
-  },
+const QUICK_QUERIES = [
+  '📦 本月销售额 Top 5 商品',
+  '👥 哪些客户 3 个月没下单了',
+  '📈 各渠道转化率对比',
+  '💸 退款率最高的商品类目',
+  '🎯 VIP 客户的复购周期',
 ];
 
-/** Simulated connection health — in production this would ping /database/schema */
-function StatusDot({ connected }: { connected: boolean }) {
-  return (
-    <span className="relative flex h-2 w-2">
-      {connected && (
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-      )}
-      <span
-        className={`relative inline-flex h-2 w-2 rounded-full ${
-          connected ? "bg-green-500" : "bg-red-500"
-        }`}
-      />
-    </span>
-  );
-}
+const AVAILABLE_TABLES = [
+  { name: 'customers', desc: '客户表 · 9 字段', core: true },
+  { name: 'orders', desc: '订单表 · 12 字段', core: true },
+  { name: 'order_items', desc: '明细 · 7 字段', core: false },
+  { name: 'products', desc: '商品 · 11 字段', core: false },
+  { name: 'payments', desc: '支付 · 9 字段', core: false },
+  { name: 'shipping', desc: '物流 · 10 字段', core: false },
+  { name: 'categories', desc: '分类 · 4 字段', core: false },
+  { name: 'reviews', desc: '评论 · 6 字段', core: false },
+];
 
-/**
- * ChatWindow — enterprise chat surface with multi-session sidebar.
- */
-function ChatWindow() {
-  const messages = useChatStore((s) => s.messages);
-  const updateLastAssistant = useChatStore((s) => s.updateLastAssistant);
-  const upsertSession = useChatStore((s) => s.upsertSession);
-  const theme = useChatStore((s) => s.theme);
-  const toggleTheme = useChatStore((s) => s.toggleTheme);
-  const currentSessionId = useChatStore((s) => s.currentSessionId);
-  const sessions = useChatStore((s) => s.sessions);
-  const sidebarOpen = useChatStore((s) => s.sidebarOpen);
-  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
-  const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
-  const historyLoading = useChatStore((s) => s.historyLoading);
+const MOCK_RESULT_ROWS = [
+  { name: '无线蓝牙耳机 Pro', sales: '¥184,320', orders: '1,247', refund: '2.1%', color: 'var(--green-dark)' },
+  { name: '智能手表 Series 6', sales: '¥156,840', orders: '892', refund: '4.8%', color: 'var(--warning)' },
+  { name: '便携充电宝 20000mAh', sales: '¥98,720', orders: '2,148', refund: '1.2%', color: 'var(--green-dark)' },
+  { name: '机械键盘 RGB', sales: '¥87,460', orders: '684', refund: '7.4%', color: 'var(--error)' },
+  { name: 'USB-C 集线器', sales: '¥72,180', orders: '1,832', refund: '0.8%', color: 'var(--green-dark)' },
+];
+
+export default function ChatWindow() {
+  const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
-  const selectedDataSourceId = useChatStore((s) => s.selectedDataSourceId);
-  const setSelectedDataSourceId = useChatStore((s) => s.setSelectedDataSourceId);
-  // [Fix-5 Task 5.8] 从 URL :datasourceId 拿, 也读全局 datasourceStore 兜底
-  const { datasourceId: urlDsId } = useParams<{ datasourceId: string }>();
-  const storedDsId = useDatasourceStore((s) => s.currentDatasourceId);
-  const datasourceId = (urlDsId || storedDsId || selectedDataSourceId || '');
-  // URL 传入的 dsId 变化时, 同步到 chatStore 后续 useSSEChat 可读
-  useEffect(() => {
-    if (datasourceId && datasourceId !== selectedDataSourceId) {
-      setSelectedDataSourceId(datasourceId);
-    }
-  }, [datasourceId, selectedDataSourceId, setSelectedDataSourceId]);
-  const currentSession = currentSessionId
-    ? sessions.find((s) => s.id === currentSessionId)
-    : undefined;
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const isNearBottomRef = useRef(true);
-  const [connected] = useState(true);
-
-  // ── 副作用封装 ──
-  const { sendInCurrentSession, loadSessions, refreshSessions } =
-    useChatActions();
-
-  const scrollToBottom = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    isNearBottomRef.current = true;
-  };
+  const urlDsId = useDatasourceStore((s) => s.currentDatasourceId);
+  const dsId = datasourceId || urlDsId || 'mock';
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isNearBottomRef.current) {
-      scrollToBottom();
-    }
-  }, [messages]);
-
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isNearBottomRef.current = distanceFromBottom < 80;
-  };
-
-  // ─── SSE Event Handlers ────────────────────────────────────
-
-  const onText = useCallback(
-    (data: { content: string }) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        content: msg.content + data.content,
-      }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onToolCall = useCallback(
-    (data: ToolCallData) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        toolCalls: [...(msg.toolCalls ?? []), data],
-      }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onToolResult = useCallback(
-    (data: ToolResultData) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        toolResults: [...(msg.toolResults ?? []), data],
-      }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onError = useCallback(
-    (data: { code: string; message: string }) => {
-      updateLastAssistant((msg) => ({
-        ...msg,
-        error: { code: data.code, message: data.message },
-      }));
-    },
-    [updateLastAssistant],
-  );
-
-  const onDone = useCallback(
-    (data?: { session?: ChatSession | null }) => {
-      updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
-      isNearBottomRef.current = true;
-      scrollToBottom();
-      // 优先用 done 事件携带的 session 局部更新（覆盖自动重命名 + touch updatedAt），
-      // 省一次 GET /chat/sessions。仅当后端没回 session 时（catch 路径）才走兜底刷新。
-      if (data?.session) {
-        upsertSession(data.session);
-      } else {
-        void refreshSessions();
-      }
-    },
-    [updateLastAssistant, upsertSession, refreshSessions],
-  );
-
-  const { sendMessage, isLoading, error, abort } = useSSEChat({
-    onText,
-    onToolCall,
-    onToolResult,
-    onError,
-    onDone,
-  });
-
-  // ─── Effects: 初始加载 + 持久化 ───────────────────────────
-
-  // 首次挂载：拉取会话列表；如果存在 currentSessionId 则恢复其历史
-  useEffect(() => {
-    void (async () => {
-      await loadSessions();
-      const id = useChatStore.getState().currentSessionId;
-      if (id) {
-        try {
-          const records = await chatSessionApi.messages(id);
-          const msgs: ChatMessage[] = records.map(recordToChatMessage);
-          useChatStore.getState().setMessages(msgs);
-        } catch (err) {
-          console.error("[ChatWindow] restore session failed", err);
-        }
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // 持久化 currentSessionId
-  useEffect(() => {
-    saveCurrentSessionId(currentSessionId);
-  }, [currentSessionId]);
-
-  // 持久化 sessions（200ms debounce）
-  useEffect(() => {
-    const t = setTimeout(() => saveSessions(sessions), 200);
-    return () => clearTimeout(t);
-  }, [sessions]);
-
-  // 持久化 sidebarOpen
-  useEffect(() => {
-    saveSidebarOpen(sidebarOpen);
-  }, [sidebarOpen]);
-
-  // 持久化 sidebarCollapsed
-  useEffect(() => {
-    saveSidebarCollapsed(sidebarCollapsed);
-  }, [sidebarCollapsed]);
-
-  // ─── User Actions ───────────────────────────────────────────
-
-  // [Sprint 5.7+] 编辑消息：将文本填入输入框
-  const [editText, setEditText] = useState("");
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      setEditText(""); // 发送后清空编辑文本
-      await sendInCurrentSession(text, { sendMessage, abort, newId });
-    },
-    [sendInCurrentSession, sendMessage, abort],
-  );
-
-  // [Sprint 5.7+] 重试：找到当前助手消息对应的用户问题并重新发送
-  const handleRetry = useCallback(
-    (assistantMsgId: string) => {
-      const idx = messages.findIndex((m) => m.id === assistantMsgId);
-      if (idx <= 0) return;
-      // 向前找到最近的用户消息
-      for (let i = idx - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
-          handleSend(messages[i].content);
-          return;
-        }
-      }
-    },
-    [messages, handleSend],
-  );
-
-  const handleQuickCommand = (query: string) => {
-    if (isLoading) return;
-    handleSend(query);
-  };
-
-  const isEmpty = messages.length === 0;
-
   return (
-    <div className="flex h-full">
-      {/* 移动端抽屉 (<md) */}
-      <MobileSidebarDrawer />
-      {/* 桌面侧栏 (md:) */}
-      <div className="hidden md:block">
-        {sidebarCollapsed ? <CollapsedSidebar /> : <SessionSidebar />}
-      </div>
-
-      <main className="flex h-full flex-1 flex-col">
-        {/* ── Header ─────────────────────────────────── */}
-        <header
-          className="flex shrink-0 items-center justify-between border-b px-4 py-3"
-          style={{
-            background: "var(--bg-primary)",
-            borderColor: "var(--border)",
-          }}
-        >
-          <div className="flex items-center gap-2">
-            {/* 移动端：打开抽屉 */}
-            <SidebarToggle />
-            {/* 桌面端：折叠状态时显示展开按钮 */}
-            {sidebarCollapsed && (
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                aria-label="展开侧边栏"
-                title="展开侧边栏"
-                className="hidden h-8 w-8 items-center justify-center rounded-md transition-colors md:flex"
-                style={{ color: "var(--text-secondary)" }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-hover)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <PanelLeft size={16} />
+    <div className="chat-layout">
+      {/* 左侧 - 推荐提问 + 可用表 */}
+      <aside className="chat-sidebar">
+        <div className="card" style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>
+            💡 推荐提问
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {QUICK_QUERIES.map((q) => (
+              <button key={q} className="btn btn-secondary btn-sm" style={{ justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', fontSize: 11 }}>
+                {q}
               </button>
-            )}
-            <div className="min-w-0 flex-1">
-              <h1
-                className="truncate text-sm font-semibold"
-                style={{ color: "var(--text-primary)" }}
-                title={currentSession?.title || "新对话"}
-              >
-                {currentSession?.title || "新对话"}
-              </h1>
-              <div
-                className="flex items-center gap-1.5 text-xs"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <StatusDot connected={connected} />
-                <span>{connected ? "服务正常" : "服务中断"}</span>
-                <span className="opacity-50">·</span>
-                <span>Agent 架构已启用</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* [Sprint 3] 数据源徽标选择器 */}
-            <DataSourcePicker
-              value={selectedDataSourceId}
-              onChange={id => setSelectedDataSourceId(id)}
-            />
-
-            {/* [Sprint 5] 用户信息 + 退出登录 */}
-            <UserMenu />
-            <button
-              onClick={() => navigate("/settings")}
-              className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-hover)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-              title="LLM 设置"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-
-            <button
-              onClick={toggleTheme}
-              className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-hover)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-              title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
-            >
-              {theme === "dark" ? (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="5" />
-                  <line x1="12" y1="1" x2="12" y2="3" />
-                  <line x1="12" y1="21" x2="12" y2="23" />
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                  <line x1="1" y1="12" x2="3" y2="12" />
-                  <line x1="21" y1="12" x2="23" y2="12" />
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                  <line x1="18.36" y1="5.64" x2="19.78" y2="19.78" />
-                </svg>
-              ) : (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </header>
-
-        {/* ── Quick Commands ──────────────────────── */}
-        {isEmpty && (
-          <div
-            className="shrink-0 border-b px-6 py-3"
-            style={{
-              borderColor: "var(--border)",
-              background: "var(--bg-primary)",
-            }}
-          >
-            <div className="mx-auto max-w-5xl">
-              <p
-                className="mb-2.5 text-xs font-medium"
-                style={{ color: "var(--text-muted)" }}
-              >
-                快捷指令
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_COMMANDS.map((cmd) => (
-                  <button
-                    key={cmd.query}
-                    className="quick-chip"
-                    onClick={() => handleQuickCommand(cmd.query)}
-                    disabled={isLoading}
-                  >
-                    <span>{cmd.icon}</span>
-                    <span>{cmd.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Messages / Welcome ─────────────────── */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="relative flex-1 overflow-y-auto"
-          style={{ background: "var(--bg-secondary)" }}
-        >
-          {historyLoading && (
-            <div
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3"
-              style={{
-                background: "var(--bg-secondary)",
-                color: "var(--text-muted)",
-              }}
-            >
-              <Loader2
-                className="animate-spin"
-                size={22}
-                style={{ color: "var(--accent)" }}
-              />
-              <div className="text-sm">正在加载历史对话…</div>
-            </div>
-          )}
-          {isEmpty ? (
-            <WelcomeScreen onSend={handleSend} isLoading={isLoading} />
-          ) : (
-            <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
-            {messages.map((m) => (
-              <div key={m.id} className="msg-enter">
-                <MessageBubble
-                  message={m}
-                  onSuggestionClick={handleSend}
-                  onRetry={m.role === "user" ? () => handleRetry(m.id) : undefined}
-                  onEdit={m.role === "user" ? setEditText : undefined}
-                />
-              </div>
             ))}
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* ── Error banner ──────────────────────── */}
-        {error && (
-          <div
-            className="flex items-center gap-2 border-t px-6 py-2 text-xs"
-            style={{
-              background: "var(--error-light)",
-              borderColor: "var(--error)",
-              color: "var(--error)",
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <span>{error}</span>
-            <button
-              className="ml-auto underline"
-              onClick={() => useChatStore.getState().clearMessages()}
-            >
-              清空并重试
-            </button>
+        <div className="card" style={{ padding: 14, flex: 1, overflowY: 'auto' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>
+            🗂️ 可用表
           </div>
-        )}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.8 }}>
+            {AVAILABLE_TABLES.slice(0, 4).map((t) => (
+              <div key={t.name}>
+                <div style={{ color: 'var(--green-dark)', fontWeight: 600 }}>{t.name === 'customers' ? '👥 ' : t.name === 'orders' ? '📦 ' : ''}{t.name}</div>
+                <div style={{ paddingLeft: 8 }}>{t.desc}</div>
+              </div>
+            ))}
+            <div style={{ marginTop: 6 }}>+ {AVAILABLE_TABLES.length - 4} 张其他表</div>
+          </div>
+        </div>
+      </aside>
 
-        {/* ── Input ──────────────────────────────── */}
-        {!isEmpty && (
-          <ChatInput
-            onSend={handleSend}
-            onStop={abort}
-            isLoading={isLoading}
-            editText={editText}
+      {/* 中间 - 对话主区 */}
+      <main className="chat-main card">
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate(`/dashboard/${dsId}`)}
+            title="返回工作台"
+          >
+            <ArrowLeft size={14} />
+            返回工作台
+          </button>
+          <span className="badge badge-success">● Schema 已确认</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>基于 8 张表 · 67 字段 · 7 关系</span>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          {/* 用户消息 */}
+          <div className="review-message">
+            <div className="review-avatar user">李</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="review-bubble" style={{ background: 'var(--green-lighter)', borderTopRightRadius: 4 }}>
+                本月销售额 Top 5 商品是哪些?顺便告诉我它们的退货率
+              </div>
+            </div>
+          </div>
+
+          {/* AI 消息 */}
+          <div className="review-message">
+            <div className="review-avatar ai">AI</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="review-bubble">
+                好的,我会从 <code style={{ background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 3, fontSize: 12 }}>order_items</code> 关联 <code style={{ background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 3, fontSize: 12 }}>products</code> 和 <code style={{ background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 3, fontSize: 12 }}>orders</code> 表查询本月销售额 Top 5 商品,并计算各自的退货率。
+              </div>
+
+              {/* SQL 块 */}
+              <div className="schema-field-card" style={{ marginTop: 10 }}>
+                <div className="schema-field-row" style={{ background: 'var(--bg-tertiary)', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  <span style={{ gridColumn: 'span 4' }}>🔧 调用工具:query_data · 执行 SQL</span>
+                </div>
+                <div style={{ padding: '10px 12px', fontFamily: '"SF Mono", Menlo, monospace', fontSize: 11, lineHeight: 1.7, color: 'var(--text-secondary)', background: 'var(--bg-primary)' }}>
+                  SELECT p.name, p.category_id,<br />
+                  &nbsp;&nbsp;SUM(oi.qty * oi.unit_price) AS sales,<br />
+                  &nbsp;&nbsp;COUNT(DISTINCT o.id) AS orders,<br />
+                  &nbsp;&nbsp;SUM(CASE WHEN o.status='refunded' THEN 1 ELSE 0 END)::float / COUNT(*) AS refund_rate<br />
+                  FROM order_items oi<br />
+                  JOIN orders o ON oi.order_id = o.id<br />
+                  JOIN products p ON oi.product_id = p.id<br />
+                  WHERE o.created_at &gt;= '2026-07-01'<br />
+                  GROUP BY p.id, p.name, p.category_id<br />
+                  ORDER BY sales DESC<br />
+                  LIMIT 5;<br />
+                  <span style={{ color: 'var(--green-dark)' }}>→ 返回 5 行 · 耗时 286ms</span>
+                </div>
+              </div>
+
+              {/* 结果表 */}
+              <div className="schema-field-card" style={{ marginTop: 10 }}>
+                <div className="schema-field-row" style={{ background: 'var(--bg-tertiary)', fontWeight: 600, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  <span style={{ gridColumn: 'span 4' }}>📊 查询结果</span>
+                </div>
+                <table className="table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>商品名</th>
+                      <th>销售额</th>
+                      <th>订单数</th>
+                      <th>退货率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {MOCK_RESULT_ROWS.map((r) => (
+                      <tr key={r.name}>
+                        <td>{r.name}</td>
+                        <td className="num">{r.sales}</td>
+                        <td className="num">{r.orders}</td>
+                        <td className="num" style={{ color: r.color }}>{r.refund}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 总结分析 */}
+              <div className="review-bubble" style={{ marginTop: 12 }}>
+                <strong>📊 Top 5 商品分析:</strong><br />
+                • 销售额冠军「无线蓝牙耳机 Pro」¥18.4 万,退货率仅 2.1%<br />
+                • <span style={{ color: 'var(--error)', fontWeight: 600 }}>⚠「机械键盘 RGB」退货率高达 7.4%</span>,建议排查质量问题<br />
+                • 「USB-C 集线器」走量为主,退货率 0.8%<br /><br />
+                需要我深入分析「机械键盘 RGB」的退货原因吗?
+              </div>
+            </div>
+          </div>
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--border-light)', padding: '12px 16px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <textarea
+            className="review-input"
+            placeholder="基于已确认的 Schema,问任何问题..."
+            style={{ flex: 1 }}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
           />
-        )}
+          <button className="btn btn-primary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+            发送
+          </button>
+        </div>
       </main>
-    </div>
-  );
-}
 
-export default ChatWindow;
-
-/**
- * [Sprint 5] UserMenu — 显示当前用户邮箱 + 退出登录按钮
- *
- * 从 localStorage 读 user(由 LoginPage / RegisterPage 写入)。
- * 不在这里调用 /auth/me(那需要 token,改用 Axios 拦截器统一处理)。
- */
-function UserMenu() {
-  const [user, setUser] = useState<{ email: string } | null>(() => {
-    try {
-      const raw = localStorage.getItem('aiip.auth.user.v1');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  });
-  const navigate = useNavigate();
-
-  if (!user) return null;
-
-  const handleLogout = () => {
-    localStorage.removeItem('aiip.auth.token.v1');
-    localStorage.removeItem('aiip.auth.user.v1');
-    // 清空本地 store 中的 sessions,避免下次登录看到上个用户的会话
-    try {
-      localStorage.removeItem('aiip.chat.sessions.v1');
-      localStorage.removeItem('aiip.chat.currentId.v1');
-    } catch {
-      // ignore
-    }
-    setUser(null);
-    navigate('/login');
-  };
-
-  return (
-    <div
-      className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px]"
-      style={{
-        borderColor: 'var(--border)',
-        background: 'var(--bg-secondary)',
-        color: 'var(--text-secondary)',
-      }}
-      title={user.email}
-    >
-      <span
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ background: 'var(--success)' }}
-      />
-      <span className="max-w-[100px] truncate">{user.email}</span>
-      <button
-        onClick={handleLogout}
-        className="ml-1 underline"
-        style={{ color: 'var(--text-muted)' }}
-        title="退出登录"
-      >
-        退出
-      </button>
+      {/* 右侧 - 上下文面板 */}
+      <aside className="chat-right chat-context-panel" aria-label="上下文面板">
+        <div className="context-section">
+          <h3>使用工具</h3>
+          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11 }}>
+            <li style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
+              <code style={{ fontFamily: 'monospace' }}>query_data</code>
+            </li>
+          </ul>
+        </div>
+        <div className="context-section">
+          <h3>数据源</h3>
+          <div style={{ fontSize: 12 }}>ecommerce_db</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>8 表 · 67 字段 · 已确认</div>
+        </div>
+        <div className="context-section">
+          <h3>Token 消耗 (本轮)</h3>
+          <div style={{ fontSize: 18, fontWeight: 700 }} className="num">1,847</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>输入 1.2K + 输出 0.6K</div>
+        </div>
+        <div className="context-section">
+          <h3>耗时</h3>
+          <div style={{ fontSize: 18, fontWeight: 700 }} className="num">2.3s</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>SQL 286ms + LLM 2.0s</div>
+        </div>
+      </aside>
     </div>
   );
 }

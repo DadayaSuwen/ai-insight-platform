@@ -140,7 +140,7 @@ export default function AppShell({ children }: AppShellProps) {
               ))}
               <div
                 className="ds-item ds-add"
-                onClick={() => { setShowDsList(false); navigate('/settings?tab=datasources'); }}
+                onClick={() => { setShowDsList(false); navigate('/datasources'); }}
               >
                 + 添加新数据源
               </div>
@@ -179,8 +179,8 @@ export default function AppShell({ children }: AppShellProps) {
             <NavItem
               icon={<Database size={16} />}
               label="数据源管理"
-              active={currentRoute === 'settings' && new URLSearchParams(location.search).get('tab') === 'datasources'}
-              onClick={() => navigate('/settings?tab=datasources')}
+              active={currentRoute === 'datasources'}
+              onClick={() => navigate('/datasources')}
             />
             <NavItem
               icon={<Edit3 size={16} />}
@@ -203,8 +203,8 @@ export default function AppShell({ children }: AppShellProps) {
               <NavItem
                 icon={<Settings size={16} />}
                 label="模型配置"
-                active={currentRoute === 'settings' && new URLSearchParams(location.search).get('tab') === 'llm'}
-                onClick={() => navigate('/settings?tab=llm')}
+                active={currentRoute === 'llm-config'}
+                onClick={() => navigate('/llm-config')}
               />
               <NavItem
                 icon={<Users size={16} />}

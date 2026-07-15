@@ -8,6 +8,8 @@ import {
 } from 'react-router-dom';
 import ChatWindow from './features/chat/components/ChatWindow';
 import SettingsPage from './features/settings/SettingsPage';
+import { LlmConfigPage } from './features/llm-config';
+import DatasourcesPage from './features/datasources/DatasourcesPage';
 import LoginPage from './features/auth/LoginPage';
 import RegisterPage from './features/auth/RegisterPage';
 import OnboardingPage from './features/onboarding/OnboardingPage';
@@ -51,9 +53,12 @@ function App() {
         <Route path="/admin/roles" element={<Shell><RolesPage /></Shell>} />
         <Route path="/profile" element={<Shell><ProfilePage /></Shell>} />
         <Route path="/history" element={<Shell><HistoryPage /></Shell>} />
-        <Route path="/chat/:datasourceId" element={<Shell><ChatWindow /></Shell>} />
+        {/* [Fix-6 Task 6.5] 对话页自己渲染布局 — 不套 AppShell, 自己有 SessionSidebar */}
+        <Route path="/chat/:datasourceId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
         <Route path="/" element={<Shell><HomeRedirect /></Shell>} />
         <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
+        <Route path="/llm-config" element={<Shell><LlmConfigPage /></Shell>} />
+        <Route path="/datasources" element={<Shell><DatasourcesPage /></Shell>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

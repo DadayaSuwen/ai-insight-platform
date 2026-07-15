@@ -23,8 +23,19 @@ export interface ExploreDone {
   totalTables: number;
 }
 
+/**
+ * [Fix-6 Task 6.2] 细粒度进度事件项 — 后端每发现一张表/字段/关系就推一条
+ */
+export interface ProgressItem {
+  step: number;
+  type: 'table_discovered' | 'field_analyzed' | 'relation_inferred';
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
 interface UseSSEExploreReturn {
   steps: ExploreStep[];
+  progressItems: ProgressItem[];  // [Fix-6 Task 6.2] 新增 — 前端逐行渲染
   done: ExploreDone | null;
   error: string | null;
   isRunning: boolean;
@@ -47,6 +58,8 @@ export function useSSEExplore(): UseSSEExploreReturn {
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  // [Fix-6 Task 6.2] 细粒度进度收集器 — 逐项 push, 前端逐行渲染
+  const [progressItems, setProgressItems] = useState<ProgressItem[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const startExplore = useCallback((datasourceId: string) => {
@@ -61,6 +74,7 @@ export function useSSEExplore(): UseSSEExploreReturn {
     setDone(null);
     setError(null);
     setLogs([]);
+    setProgressItems([]);  // [Fix-6 Task 6.2] 重置细粒度进度
     setIsRunning(true);
 
     const controller = new AbortController();
@@ -138,6 +152,24 @@ export function useSSEExplore(): UseSSEExploreReturn {
       });
 
     function handleSSEEvent(eventType: string, data: Record<string, unknown>) {
+      if (eventType === 'progress') {
+        // [Fix-6 Task 6.2] 细粒度进度事件 (table_discovered / field_analyzed / relation_inferred)
+        setProgressItems((prev) => [...prev, data as unknown as ProgressItem]);
+        // 同步到 logs 让用户也能在日志面板看到
+        const p = data as unknown as ProgressItem;
+        if (p.type === 'table_discovered') {
+          const d = p.data as { name: string; rowCount: number; columnCount: number };
+          setLogs((prev) => [...prev, `[${now()}]   ▸ ${d.name} (${d.rowCount.toLocaleString()} 行 · ${d.columnCount} 列)`]);
+        } else if (p.type === 'field_analyzed') {
+          const d = p.data as { table: string; field: string; inferredMeaning: string; confidence: number; needsConfirmation: boolean };
+          const icon = d.needsConfirmation ? '⏳' : '✓';
+          setLogs((prev) => [...prev, `[${now()}]   ${icon} ${d.table}.${d.field} → ${d.inferredMeaning} (${(d.confidence * 100).toFixed(0)}%)`]);
+        } else if (p.type === 'relation_inferred') {
+          const d = p.data as { fromTable: string; fromField: string; toTable: string };
+          setLogs((prev) => [...prev, `[${now()}]   → ${d.fromTable}.${d.fromField} → ${d.toTable}`]);
+        }
+        return;
+      }
       if (eventType === 'step') {
         const stepData = data as unknown as ExploreStep;
         setSteps((prev) =>
@@ -164,5 +196,5 @@ export function useSSEExplore(): UseSSEExploreReturn {
     setIsRunning(false);
   }, []);
 
-  return { steps, done, error, isRunning, logs, startExplore, abort };
+  return { steps, progressItems, done, error, isRunning, logs, startExplore, abort };
 }

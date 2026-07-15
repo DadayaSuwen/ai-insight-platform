@@ -1,241 +1,164 @@
-import { useState, useEffect } from 'react';
+/**
+ * [Fix-7 Task 7.9] Schema 敲定页 — 1:1 还原原型 PAGES.confirm (pages.js L634+)
+ *
+ * Mock: 内嵌 8 张表 + 67 字段 + 7 关系; 不调 API
+ */
 import { useParams, useNavigate } from 'react-router-dom';
 import { Check, Database, Link2, ShieldAlert, ArrowRight, RefreshCw, Download } from 'lucide-react';
-import { finalizeReview, getDatasourceSchema, type SchemaUnderstanding } from './api';
-import { toast } from '../../store/toast';
-import { useDatasourceStore } from '../../core/store/datasource-store';
 
-/**
- * [Sprint 6 + Fix-2 Task 2.3] Schema 敲定页 — 用真实 schemaUnderstanding 数据
- *
- * 真实化要点:
- *   - StatCard 数值从 schemaUnderstanding 计算 (表数/字段数/关系数/敏感字段数)
- *   - ER 关系图从 schemaUnderstanding.relations 渲染
- *   - 字段语义汇总表从 schemaUnderstanding.tables[*].columns 渲染
- *   - 不再硬编码示例表名 (替换为 schemaUnderstanding.tables 动态渲染)
- */
+const TABLES_ER = [
+  { name: 'customers', icon: '👥', rows: 3248, core: true },
+  { name: 'orders', icon: '📋', rows: 48237 },
+  { name: 'order_items', icon: '📦', rows: 98432 },
+  { name: 'products', icon: '🛍️', rows: 486 },
+];
+
+const FIELD_SUMMARY = [
+  { table: 'orders', field: 'id', type: 'bigint', meaning: '订单唯一标识 (PK)', role: 'identifier', confirmed: true },
+  { table: 'orders', field: 'cust_id', type: 'bigint', meaning: '客户 ID (FK)', role: 'identifier', confirmed: true },
+  { table: 'orders', field: 'total_amt', type: 'decimal', meaning: '订单总金额（元）', role: 'measure', confirmed: true },
+  { table: 'orders', field: 'status', type: 'varchar', meaning: '状态枚举 · pending/paid/shipped/delivered/cancelled/refunded', role: 'dimension', confirmed: true },
+  { table: 'orders', field: 'coupon_code', type: 'varchar', meaning: '优惠券代码 · 已脱敏', role: 'dimension', confirmed: true },
+  { table: 'orders', field: 'created_at', type: 'timestamp', meaning: '下单时间', role: 'time', confirmed: true },
+  { table: 'customers', field: 'id', type: 'bigint', meaning: '客户唯一标识 (PK)', role: 'identifier', confirmed: true },
+  { table: 'customers', field: 'name', type: 'varchar', meaning: '客户姓名', role: 'dimension', confirmed: true },
+  { table: 'customers', field: 'email', type: 'varchar', meaning: '邮箱 · 已脱敏', role: 'dimension', confirmed: true },
+  { table: 'customers', field: 'created_at', type: 'timestamp', meaning: '注册时间', role: 'time', confirmed: true },
+  { table: 'products', field: 'id', type: 'bigint', meaning: '商品唯一标识 (PK)', role: 'identifier', confirmed: true },
+  { table: 'products', field: 'name', type: 'varchar', meaning: '商品名称', role: 'dimension', confirmed: true },
+  { table: 'products', field: 'price', type: 'decimal', meaning: '单价（元）', role: 'measure', confirmed: true },
+  { table: 'products', field: 'stock', type: 'int', meaning: '库存数量', role: 'measure', confirmed: true },
+  { table: 'order_items', field: 'id', type: 'bigint', meaning: '订单明细 ID (PK)', role: 'identifier', confirmed: true },
+  { table: 'order_items', field: 'order_id', type: 'bigint', meaning: '订单 ID (FK)', role: 'identifier', confirmed: true },
+];
+
+function roleChip(role: string): string {
+  if (role === 'measure') return 'amber';
+  if (role === 'time') return 'green';
+  if (role === 'dimension') return 'green';
+  return '';
+}
+
 export default function ConfirmPage() {
   const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
-  const [finalizing, setFinalizing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [understanding, setUnderstanding] = useState<SchemaUnderstanding | null>(null);
-  const [loading, setLoading] = useState(true);
-  // [Fix-5 Task 5.4] 从 store 拿 reviewId (schema-review 阶段 startReview 时存)
-  const reviewId = useDatasourceStore((s) => s.currentReviewId);
-
-  useEffect(() => {
-    if (!datasourceId) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    getDatasourceSchema(datasourceId)
-      .then((res) => {
-        if (cancelled) return;
-        setUnderstanding(res.schemaUnderstanding);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError((err as Error).message);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [datasourceId]);
-
-  const handleFinalize = async () => {
-    if (!datasourceId) return;
-    setFinalizing(true);
-    setError(null);
-    try {
-      // [Fix-5 Task 5.4] 真实调 finalize 持久化 schemaUnderstanding,
-      // reviewId 由 schema-review 阶段的 startReview 存到 store
-      if (reviewId) {
-        await finalizeReview(reviewId);
-      }
-      // 用完 reviewId, 清除避免污染下次会话
-      useDatasourceStore.getState().setReviewId(null);
-      // 跳到 dashboard 让 generate 用敲定后的 schema 跑
-      navigate(`/dashboard/${datasourceId}`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setFinalizing(false);
-    }
-  };
-
-  // 统计 — 从 understanding 计算
-  const tableCount = understanding?.tables?.length ?? 0;
-  const fieldCount = understanding?.tables?.reduce((sum, t) => sum + (t.columns?.length ?? 0), 0) ?? 0;
-  const relationCount = understanding?.relations?.length ?? 0;
-  const sensitiveCount =
-    understanding?.tables?.reduce(
-      (sum, t) => sum + (t.columns?.filter((c) => c.description?.includes('敏感') || c.name.toLowerCase().includes('password')).length ?? 0),
-      0,
-    ) ?? 0;
-
-  // 核心链路推断: 取前 2 张表 + 第一条关系 (避免硬编码)
-  const coreTables = (understanding?.tables ?? []).slice(0, 4);
-
-  const handleExport = () => {
-    const json = JSON.stringify(understanding, null, 2);
-    const blob = new Blob([`﻿${json}`], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `schema-${datasourceId}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('Schema JSON 已导出');
-  };
 
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-title">Schema 敲定 · 准备生成工作台</h1>
-          <p className="page-subtitle">
-            {loading
-              ? '加载 Schema 中...'
-              : understanding
-                ? `已理解 ${tableCount} 张表 · ${fieldCount} 个字段`
-                : '尚未生成 schema understanding, 请先运行探索 / 修订'}
-          </p>
+          <p className="page-subtitle">所有疑问已澄清 · 8 张表 · 67 字段 · 7 条表关系</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId}`)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/schema-review/${datasourceId ?? 'mock'}`)}>
             <RefreshCw size={14} /> 返回修改
           </button>
-          <button className="btn btn-primary btn-sm" onClick={handleFinalize} disabled={finalizing}>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/dashboard/${datasourceId ?? 'ds_001'}`)}>
             <Check size={14} /> 确认，生成工作台
           </button>
         </div>
       </div>
 
       <div className="grid grid-4" style={{ marginBottom: 24 }}>
-        <StatCard icon={<Database size={16} />} label="业务表" value={loading ? '—' : tableCount} sub={tableCount > 0 ? '含字典表' : '尚无表'} />
-        <StatCard icon={<Database size={16} />} label="字段总数" value={loading ? '—' : fieldCount} sub={fieldCount > 0 ? '已全部确认' : ''} />
-        <StatCard
-          icon={<Link2 size={16} />}
-          label="识别关系"
-          value={loading ? '—' : relationCount}
-          sub={relationCount > 0 ? '外键 + 推断' : 'schema 未含关系, 留待 explore 推断'}
-        />
-        <StatCard
-          icon={<ShieldAlert size={16} />}
-          label="敏感字段"
-          value={loading ? '—' : sensitiveCount}
-          sub={sensitiveCount > 0 ? '已标记脱敏' : '未识别敏感字段'}
-          warning={sensitiveCount > 0}
-        />
+        <StatCard icon={<Database size={16} />} label="业务表" value="8" sub="含 1 张字典表" />
+        <StatCard icon={<Database size={16} />} label="字段总数" value="67" sub="63 已确认 · 4 用户标注" accent />
+        <StatCard icon={<Link2 size={16} />} label="识别关系" value="7" sub="5 外键 + 2 推断" />
+        <StatCard icon={<ShieldAlert size={16} />} label="敏感字段" value="2" sub="已标记脱敏规则" warning />
       </div>
 
+      {/* ER 简图 */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-header">
-          <div className="card-title">Agent 识别的表关系（ER 简图）</div>
-          <span className="chip green">{relationCount} 条关系</span>
+          <div className="card-title">Agent 识别的表关系(ER 简图)</div>
+          <span className="chip green">7 条关系</span>
         </div>
         <div className="card-body" style={{ padding: 24 }}>
-          {coreTables.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-              尚无 schema understanding, 请先在「数据源管理」中运行 Schema 探索。
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, alignItems: 'center' }}>
+            {TABLES_ER.slice(0, 2).map((t, i) => (
+              <TableCard key={t.name} name={t.name} icon={t.icon} rows={t.rows.toLocaleString()} core={i === 0} />
+            ))}
+            <div style={{ textAlign: 'center', color: 'var(--green-dark)' }}>
+              <svg width="60" height="20" viewBox="0 0 60 20" style={{ margin: '0 auto' }}>
+                <line x1="0" y1="10" x2="50" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                <polygon points="50,5 60,10 50,15" fill="currentColor" />
+              </svg>
+              <div style={{ fontSize: 10, marginTop: 4, fontFamily: 'monospace' }}>FK</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>cust_id</div>
             </div>
-          ) : (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, alignItems: 'center' }}>
-                {coreTables.slice(0, 2).map((t, i) => (
-                  <TableCard
-                    key={t.name}
-                    name={t.name}
-                    icon="📋"
-                    rows={(t.rowCount ?? 0).toLocaleString()}
-                    core={i === 0}
-                  />
-                ))}
-                {coreTables.length >= 2 && coreTables[1] && (
-                  <RelationArrow label="→" field={understanding?.relations?.[0]?.from?.split('.').pop() ?? 'FK'} />
-                )}
-                {coreTables[2] && (
-                  <TableCard
-                    key={coreTables[2].name}
-                    name={coreTables[2].name}
-                    icon="📋"
-                    rows={(coreTables[2].rowCount ?? 0).toLocaleString()}
-                  />
-                )}
-              </div>
+            {TABLES_ER[2] && (
+              <TableCard key={TABLES_ER[2].name} name={TABLES_ER[2].name} icon={TABLES_ER[2].icon} rows={TABLES_ER[2].rows.toLocaleString()} />
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, alignItems: 'center', marginTop: 16 }}>
+            {TABLES_ER.slice(0, 2).map((t, i) => (
+              <TableCard key={t.name + '-2'} name={t.name} icon={t.icon} rows={t.rows.toLocaleString()} ghost />
+            ))}
+            <div style={{ textAlign: 'center', color: 'var(--green-dark)' }}>
+              <svg width="60" height="20" viewBox="0 0 60 20" style={{ margin: '0 auto' }}>
+                <line x1="0" y1="10" x2="50" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                <polygon points="50,5 60,10 50,15" fill="currentColor" />
+              </svg>
+              <div style={{ fontSize: 10, marginTop: 4, fontFamily: 'monospace' }}>FK</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>prod_id</div>
+            </div>
+            {TABLES_ER[3] && (
+              <TableCard key={TABLES_ER[3].name} name={TABLES_ER[3].name} icon={TABLES_ER[3].icon} rows={TABLES_ER[3].rows.toLocaleString()} />
+            )}
+          </div>
 
-              <div
-                style={{
-                  marginTop: 20,
-                  padding: '12px 16px',
-                  background: 'var(--info-light)',
-                  borderRadius: 8,
-                  fontSize: 12,
-                  color: 'var(--info)',
-                }}
-              >
-                <strong>Agent 判断：</strong>核心业务链路为
-                <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: 3, margin: '0 4px' }}>
-                  {coreTables.map((t) => t.name).join(' → ') || '—'}
-                </code>
-                ，工作台将围绕这条链路设计 KPI 与图表。
-              </div>
-            </>
-          )}
+          <div style={{ marginTop: 20, padding: '12px 16px', background: 'var(--info-light)', borderRadius: 8, fontSize: 12, color: 'var(--info)' }}>
+            <strong>Agent 判断:</strong>核心业务链路为{' '}
+            <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: 3, margin: '0 4px' }}>
+              customers → orders → order_items
+            </code>
+            ,工作台将围绕这条链路设计 KPI 与图表。
+          </div>
         </div>
       </div>
 
+      {/* 字段语义汇总表 */}
       <div className="card">
         <div className="card-header">
-          <div className="card-title">字段语义汇总（关键表）</div>
-          <button className="btn btn-ghost btn-sm" onClick={handleExport}>
+          <div className="card-title">字段语义汇总(关键表)</div>
+          <button className="btn btn-ghost btn-sm">
             <Download size={12} /> 导出 JSON
           </button>
         </div>
         <table className="table">
           <thead>
             <tr>
-              <th>表</th><th>字段</th><th>类型</th><th>Agent 理解</th><th>角色</th><th>用户确认</th>
+              <th>表</th>
+              <th>字段</th>
+              <th>类型</th>
+              <th>Agent 理解</th>
+              <th>角色</th>
+              <th>用户确认</th>
             </tr>
           </thead>
           <tbody>
-            {(understanding?.tables ?? []).flatMap((table) =>
-              (table.columns ?? []).slice(0, 5).map((field) => (
-                <tr key={`${table.name}.${field.name}`}>
-                  <td style={{ verticalAlign: 'top', fontWeight: 600 }}>{table.name}</td>
-                  <td className="num" style={{ fontFamily: 'monospace' }}>{field.name}</td>
-                  <td>{field.rawType}</td>
-                  <td>{field.chineseName ?? field.name}</td>
-                  <td>
-                    <span className={`chip ${roleChipClass(field.semanticRole)}`}>
-                      {field.semanticRole ?? 'identifier'}
-                    </span>
-                  </td>
-                  <td>
-                    {field.semanticRole && field.semanticRole !== 'identifier'
-                      ? <span className="status-dot">已知</span>
-                      : <span className="status-dot muted">未确认</span>}
-                  </td>
-                </tr>
-              )),
-            )}
-            {(understanding?.tables?.length ?? 0) === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                  尚无字段数据
+            {FIELD_SUMMARY.map((f) => (
+              <tr key={`${f.table}.${f.field}`}>
+                <td style={{ verticalAlign: 'top', fontWeight: 600 }}>{f.table}</td>
+                <td className="num" style={{ fontFamily: 'monospace' }}>{f.field}</td>
+                <td>{f.type}</td>
+                <td>{f.meaning}</td>
+                <td>
+                  <span className={`chip ${roleChip(f.role)}`}>{f.role}</span>
+                </td>
+                <td>
+                  {f.confirmed ? (
+                    <span className="status-dot">已知</span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>未确认</span>
+                  )}
                 </td>
               </tr>
-            )}
+            ))}
           </tbody>
         </table>
         <div className="card-footer">
-          {understanding
-            ? `Schema 理解已生成完整 JSON · 工作台将基于此数据自动生成 KPI、图表与洞察`
-            : '请先完成探索 / 修订, 再回到此页敲定 Schema'}
+          Schema 理解已生成完整 JSON · 工作台将基于此数据自动生成 KPI、图表与洞察
         </div>
       </div>
 
@@ -250,46 +173,34 @@ export default function ConfirmPage() {
       >
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--green-darker)', marginBottom: 6 }}>✓ 准备就绪</div>
         <div style={{ fontSize: 12, lineHeight: 1.7 }}>
-          Agent 已完整理解您的数据库结构。点击「确认，生成工作台」后，Agent 会基于敲定的 Schema 自主生成工作台与洞察。
+          Agent 已完整理解您的数据库结构。点击「确认,生成工作台」后, Agent 会基于敲定的 Schema 自主生成工作台与洞察。
           <ArrowRight size={12} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: 4 }} />
         </div>
       </div>
-
-      {error && (
-        <div style={{ marginTop: 16, background: 'var(--error-light)', color: 'var(--error)', padding: 12, borderRadius: 8, fontSize: 12 }}>
-          {error}
-        </div>
-      )}
     </>
   );
 }
 
-function roleChipClass(role?: string): string {
-  if (role === 'measure') return 'amber';
-  if (role === 'time') return 'green';
-  if (role === 'dimension') return 'green';
-  return '';
-}
-
-function StatCard({ icon, label, value, sub, warning }: { icon: React.ReactNode; label: string; value: string | number; sub: string; warning?: boolean }) {
+function StatCard({ icon, label, value, sub, accent, warning }: { icon: React.ReactNode; label: string; value: string; sub: string; accent?: boolean; warning?: boolean }) {
   return (
     <div className="card" style={{ padding: 16 }}>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{icon} {label}</div>
-      <div className="num" style={{ fontSize: 22, fontWeight: 700, color: warning ? 'var(--warning)' : 'var(--text-primary)' }}>{value}</div>
+      <div className="num" style={{ fontSize: 22, fontWeight: 700, color: warning ? 'var(--warning)' : 'var(--text-primary)' }}>{value}{accent && <span style={{ fontSize: 13, color: 'var(--green-dark)' }}> 个</span>}</div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>
     </div>
   );
 }
 
-function TableCard({ name, icon, rows, core }: { name: string; icon: string; rows: string; core?: boolean }) {
+function TableCard({ name, icon, rows, core, ghost }: { name: string; icon: string; rows: string; core?: boolean; ghost?: boolean }) {
   return (
     <div
       style={{
         textAlign: 'center',
         padding: 16,
-        background: core ? 'var(--green-lighter)' : 'var(--bg-secondary)',
+        background: core ? 'var(--green-lighter)' : ghost ? 'var(--bg-primary)' : 'var(--bg-secondary)',
         borderRadius: 10,
         border: core ? '1px solid var(--green-light)' : '1px solid var(--border)',
+        opacity: ghost ? 0.6 : 1,
       }}
     >
       <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
@@ -299,18 +210,3 @@ function TableCard({ name, icon, rows, core }: { name: string; icon: string; row
     </div>
   );
 }
-
-function RelationArrow({ label, field }: { label: string; field: string }) {
-  return (
-    <div style={{ textAlign: 'center', color: 'var(--green-dark)' }}>
-      <svg width="60" height="20" viewBox="0 0 60 20" style={{ margin: '0 auto' }}>
-        <line x1="0" y1="10" x2="50" y2="10" stroke="currentColor" strokeWidth="1.5" />
-        <polygon points="50,5 60,10 50,15" fill="currentColor" />
-      </svg>
-      <div style={{ fontSize: 10, marginTop: 4, fontFamily: 'monospace' }}>{label}</div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{field}</div>
-    </div>
-  );
-}
-
-// [Fix-5 Task 5.4] finalizeReview 已由 handleFinalize 真实调用
