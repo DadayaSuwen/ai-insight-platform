@@ -196,6 +196,25 @@ export class ReviewService {
     const fields = await this.getPendingFields(reviewId);
     if (fields.length === 0) return null;
 
+    // [Fix-9 Task 9.5] 检查 LLM 是否已配置
+    const llmConfig = await this.db.db
+      .selectFrom("LLMConfig")
+      .selectAll()
+      .orderBy("updatedAt", "desc")
+      .executeTakeFirst();
+
+    if (!llmConfig || !llmConfig.apiKey) {
+      return {
+        question:
+          "⚠️ LLM 未配置，无法生成提问。请先在「模型配置」页面配置 API Key。",
+        fieldName: "",
+        tableName: "",
+        quickReplies: [],
+        evidence: "",
+        remaining: fields.length,
+      };
+    }
+
     // 选置信度最低的
     const target = fields.reduce((a, b) =>
       a.confidence < b.confidence ? a : b,

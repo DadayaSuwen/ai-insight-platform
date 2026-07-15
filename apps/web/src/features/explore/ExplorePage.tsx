@@ -227,16 +227,34 @@ export default function ExplorePage() {
         )}
         {allDone && (
           <div>
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={() => navigate(`/schema-review/${datasourceId ?? 'mock'}`)}
-            >
-              查看探索结果，开始确认
-              <ArrowRight size={16} />
-            </button>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-              Agent 发现 4 个不确定字段（共 67 字段），需要您确认
-            </p>
+            {/* [Fix-9 Task 9.6] reviewNeeded 条件跳转 */}
+            {true /* mock: 假设有 pending fields — 真实 SSE 会返回 done.reviewNeeded */ ? (
+              <>
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={() => navigate(`/schema-review/${datasourceId ?? 'mock'}`)}
+                >
+                  查看探索结果，开始确认
+                  <ArrowRight size={16} />
+                </button>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                  Agent 发现部分不确定字段，需要您确认后才能生成工作台
+                </p>
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={() => navigate(`/dashboard/${datasourceId ?? 'mock'}`)}
+                >
+                  进入工作台
+                  <ArrowRight size={16} />
+                </button>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                  所有字段已自动确认，可直接查看工作台
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>

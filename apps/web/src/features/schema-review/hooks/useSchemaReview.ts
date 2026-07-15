@@ -73,11 +73,12 @@ export function useSchemaReview(): UseSchemaReviewReturn {
       useDatasourceStore.getState().setReviewId(result.reviewId);
       setFields(result.fields);
 
-      // 发第一条消息触发首个提问
-      const firstMsg = `开始 Schema 确认。共有 ${result.pendingFields} 个字段置信度不足。`;
-      setMessages([{ role: 'user', content: firstMsg }]);
+      // [Fix-9 Task 9.4] 不再硬编码 firstMsg
+      // 后端 startReview 已准备好 pending fields, SSE 发触发消息获取首个 AI 提问
+      const triggerMsg = `请开始分析待确认字段`;
+      setMessages([{ role: 'user', content: triggerMsg }]);
 
-      await sendSSEMessage(result.reviewId, firstMsg);
+      await sendSSEMessage(result.reviewId, triggerMsg);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -89,6 +90,11 @@ export function useSchemaReview(): UseSchemaReviewReturn {
     setIsProcessing(true);
     const token = localStorage.getItem(TOKEN_KEY);
     const url = `${API_BASE}/api/schema/review/chat?reviewId=${encodeURIComponent(id)}&message=${encodeURIComponent(message)}`;
+    if (url.length > 2000) {
+      setError('回答过长，请精简后重试');
+      setIsProcessing(false);
+      return;
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
