@@ -59,7 +59,9 @@ const ExecuteSchema = z.object({
   limit: z.number().int().min(1).max(1000).optional(),
 });
 
-const SAFE_METRIC = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// [Fix-5 Task 5.11] 放宽 metric 白名单: 允许中文 + 空格 (Fix-1 之后 LLM 可输出中文列名),
+// 拒绝 SQL 注入特殊字符 (单引号/分号/连字符/括号等)
+const SAFE_METRIC = /^[A-Za-z_一-龥][A-Za-z0-9_一-龥\s]*$/;
 const AGG_METRIC = /^(SUM|COUNT|AVG|MIN|MAX)\([A-Za-z_*][A-Za-z0-9_]*\)$/i;
 
 @Controller("api/dashboard")

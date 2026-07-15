@@ -26,10 +26,18 @@ export default function OnboardingPage() {
         if (cancelled) return;
         const list = res.data.data ?? [];
         if (list.length > 0) {
-          // 已有数据源: 选第一个, 写入 store 并跳转到工作台
-          const first = list[0];
-          useDatasourceStore.getState().setCurrent(first.id, first.name);
-          navigate(`/dashboard/${first.id}`, { replace: true });
+          // [Fix-5 Task 5.5] 优先选已 finalized 数据源; 否则按状态智能跳转避免死循环
+          const finalized = list.find((d) => d.exploreStatus === 'finalized');
+          const target = finalized || list[0];
+          useDatasourceStore.getState().setCurrent(target.id, target.name);
+          if (target.exploreStatus === 'finalized') {
+            // 已敲定 → dashboard
+            navigate(`/dashboard/${target.id}`, { replace: true });
+          } else {
+            // 未敲定 (pending / exploring) → explore 继续探索,
+            // 避免直接跳 dashboard 报错又回到 onboarding 形成死循环
+            navigate(`/explore/${target.id}`, { replace: true });
+          }
           return;
         }
         setChecking(false);

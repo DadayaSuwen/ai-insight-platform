@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Check, Database, Link2, ShieldAlert, ArrowRight, RefreshCw, Download } from 'lucide-react';
 import { finalizeReview, getDatasourceSchema, type SchemaUnderstanding } from './api';
 import { toast } from '../../store/toast';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 
 /**
  * [Sprint 6 + Fix-2 Task 2.3] Schema 敲定页 — 用真实 schemaUnderstanding 数据
@@ -20,6 +21,8 @@ export default function ConfirmPage() {
   const [error, setError] = useState<string | null>(null);
   const [understanding, setUnderstanding] = useState<SchemaUnderstanding | null>(null);
   const [loading, setLoading] = useState(true);
+  // [Fix-5 Task 5.4] 从 store 拿 reviewId (schema-review 阶段 startReview 时存)
+  const reviewId = useDatasourceStore((s) => s.currentReviewId);
 
   useEffect(() => {
     if (!datasourceId) {
@@ -48,9 +51,14 @@ export default function ConfirmPage() {
     setFinalizing(true);
     setError(null);
     try {
-      // 简化: 直接调 finalize(若有 reviewId 传过来; 现在是 confirm 阶段, 留作 follow-up)
-      // 实际生产中, 应先 startReview 拿 reviewId, 再 finalize. 这里假设 datasourceId === reviewId 不可行,
-      // 走 /api/schema/review/finalize 时需要 reviewId. 若无 review, 跳到 dashboard 让 generate 自己 finalize schemaUnderstanding
+      // [Fix-5 Task 5.4] 真实调 finalize 持久化 schemaUnderstanding,
+      // reviewId 由 schema-review 阶段的 startReview 存到 store
+      if (reviewId) {
+        await finalizeReview(reviewId);
+      }
+      // 用完 reviewId, 清除避免污染下次会话
+      useDatasourceStore.getState().setReviewId(null);
+      // 跳到 dashboard 让 generate 用敲定后的 schema 跑
       navigate(`/dashboard/${datasourceId}`);
     } catch (err) {
       setError((err as Error).message);
@@ -305,6 +313,4 @@ function RelationArrow({ label, field }: { label: string; field: string }) {
   );
 }
 
-// 静默使用 finalizeReview (Task 2.3 备用 — 用于 reviewId 流程)
-// 当前流程简化, 直接 navigate 到 dashboard
-void finalizeReview;
+// [Fix-5 Task 5.4] finalizeReview 已由 handleFinalize 真实调用

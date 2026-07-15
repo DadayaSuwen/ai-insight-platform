@@ -1,10 +1,11 @@
 import { useRef, useEffect, useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, PanelLeft } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { useChatStore } from "../store";
 import { useSSEChat } from "../hooks";
+import { useDatasourceStore } from "../../../core/store/datasource-store";
 import { useChatActions } from "../hooks/useChatActions";
 import { chatSessionApi } from "../api";
 import { recordToChatMessage } from "../utils/recordToChatMessage";
@@ -107,6 +108,16 @@ function ChatWindow() {
   const navigate = useNavigate();
   const selectedDataSourceId = useChatStore((s) => s.selectedDataSourceId);
   const setSelectedDataSourceId = useChatStore((s) => s.setSelectedDataSourceId);
+  // [Fix-5 Task 5.8] 从 URL :datasourceId 拿, 也读全局 datasourceStore 兜底
+  const { datasourceId: urlDsId } = useParams<{ datasourceId: string }>();
+  const storedDsId = useDatasourceStore((s) => s.currentDatasourceId);
+  const datasourceId = (urlDsId || storedDsId || selectedDataSourceId || '');
+  // URL 传入的 dsId 变化时, 同步到 chatStore 后续 useSSEChat 可读
+  useEffect(() => {
+    if (datasourceId && datasourceId !== selectedDataSourceId) {
+      setSelectedDataSourceId(datasourceId);
+    }
+  }, [datasourceId, selectedDataSourceId, setSelectedDataSourceId]);
   const currentSession = currentSessionId
     ? sessions.find((s) => s.id === currentSessionId)
     : undefined;

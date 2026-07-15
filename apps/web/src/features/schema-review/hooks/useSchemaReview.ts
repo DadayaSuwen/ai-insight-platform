@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { TOKEN_KEY } from '../../../core/api/AxiosInstance';
 import { startReview as apiStartReview, finalizeReview } from '../api';
 import type { PendingField, StartReviewResponse } from '../api';
+import { useDatasourceStore } from '../../../core/store/datasource-store';
 
 /**
  * [Sprint 6] Schema Review 对话 hook
@@ -68,6 +69,8 @@ export function useSchemaReview(): UseSchemaReviewReturn {
     try {
       const result: StartReviewResponse = await apiStartReview(datasourceId);
       setReviewId(result.reviewId);
+      // [Fix-5 Task 5.4] 同步 reviewId 到全局 store, ConfirmPage 拿它调 finalize
+      useDatasourceStore.getState().setReviewId(result.reviewId);
       setFields(result.fields);
 
       // 发第一条消息触发首个提问

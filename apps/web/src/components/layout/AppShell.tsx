@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { TOKEN_KEY } from '../../core/api/AxiosInstance';
+import axiosInstance from '../../core/api/AxiosInstance';
 import { useDatasourceStore } from '../../core/store/datasource-store';
 
 const BREADCRUMB_MAP: Record<string, string> = {
@@ -70,6 +71,24 @@ export default function AppShell({ children }: AppShellProps) {
     ? { id: currentDsId, name: currentDsName }
     : null;
 
+  // [Fix-5 Task 5.7] 数据源切换器下拉 — 拉列表 + 选中切 store + 跳 dashboard
+  const [dsList, setDsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [showDsList, setShowDsList] = useState(false);
+  useEffect(() => {
+    // 切页面时拉一次
+    axiosInstance.get('/api/datasources')
+      .then((res) => {
+        const list = (res.data as { success: boolean; data: Array<{ id: string; name: string }> }).data || [];
+        setDsList(list);
+      })
+      .catch(() => { /* ignore */ });
+  }, [location.pathname]);
+  const handleSwitchDs = (ds: { id: string; name: string }) => {
+    setCurrent(ds.id, ds.name);
+    setShowDsList(false);
+    navigate(`/dashboard/${ds.id}`);
+  };
+
   const isAdmin = user.role === 'admin';
 
   const handleLogout = () => {
@@ -93,8 +112,11 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        {/* 数据源切换器 — [Fix-2 Task 2.4] 死链修复: 跳到 /settings?tab=datasources */}
-        <div className="datasource-switcher" onClick={() => navigate('/settings?tab=datasources')}>
+        {/* 数据源切换器 — [Fix-5 Task 5.7] 下拉选择 + store setCurrent */}
+        <div
+          className="datasource-switcher"
+          onClick={() => setShowDsList((v) => !v)}
+        >
           <div className="datasource-name">
             <span>{datasource?.name ?? '未配置'}</span>
             <ChevronDown size={14} />
@@ -102,6 +124,28 @@ export default function AppShell({ children }: AppShellProps) {
           <div className="datasource-meta">
             {datasource ? `ID: ${datasource.id}` : '点击配置数据源'}
           </div>
+          {showDsList && (
+            <div className="ds-dropdown" onClick={(e) => e.stopPropagation()}>
+              {dsList.length === 0 && (
+                <div className="ds-item ds-empty">暂无数据源</div>
+              )}
+              {dsList.map((ds) => (
+                <div
+                  key={ds.id}
+                  className={`ds-item${ds.id === currentDsId ? ' active' : ''}`}
+                  onClick={() => handleSwitchDs(ds)}
+                >
+                  {ds.name}
+                </div>
+              ))}
+              <div
+                className="ds-item ds-add"
+                onClick={() => { setShowDsList(false); navigate('/settings?tab=datasources'); }}
+              >
+                + 添加新数据源
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 导航 */}
@@ -119,7 +163,7 @@ export default function AppShell({ children }: AppShellProps) {
               label="对话追问"
               active={currentRoute === 'chat' || currentRoute === '' || location.pathname === '/'}
               disabled={!hasDS}
-              onClick={() => navigate('/')}
+              onClick={() => currentDsId && navigate(`/chat/${currentDsId}`)}
             />
             <NavItem
               icon={<Lightbulb size={16} />}
@@ -210,7 +254,7 @@ export default function AppShell({ children }: AppShellProps) {
               <Settings size={14} />
               模型配置
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
+            <button className="btn btn-primary btn-sm" onClick={() => currentDsId ? navigate(`/chat/${currentDsId}`) : navigate('/')}>
               <MessageSquare size={14} />
               提问
             </button>

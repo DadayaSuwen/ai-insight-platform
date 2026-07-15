@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore } from '../../core/store';
 import type { LLMConfig } from '@workspace/types';
 import { LLMProvider } from '@workspace/types';
@@ -52,7 +52,16 @@ function HealthDot({ ok }: { ok: boolean | undefined }) {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<SettingsTab>('llm');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // [Fix-5 Task 5.3] 读 URL ?tab= 参数, 默认 llm
+  const initialTab = (searchParams.get('tab') as SettingsTab | null) || 'llm';
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+
+  // 同步 tab 切换到 URL (浏览器后退/分享链接可用)
+  const handleTabChange = (next: SettingsTab) => {
+    setTab(next);
+    setSearchParams({ tab: next }, { replace: true });
+  };
   const { llmConfigs, activeProvider, llmHealth, isLoadingConfig, fetchLlmConfig, saveLlmConfig, fetchLlmHealth } =
     useAppStore();
 
@@ -204,7 +213,7 @@ export default function SettingsPage() {
         {(['llm', 'datasources'] as SettingsTab[]).map(t => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => handleTabChange(t)}
             className="-mb-px border-b-2 px-3 py-2 text-xs transition-colors"
             style={{
               borderColor: tab === t ? 'var(--accent)' : 'transparent',

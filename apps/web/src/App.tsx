@@ -51,6 +51,7 @@ function App() {
         <Route path="/admin/roles" element={<Shell><RolesPage /></Shell>} />
         <Route path="/profile" element={<Shell><ProfilePage /></Shell>} />
         <Route path="/history" element={<Shell><HistoryPage /></Shell>} />
+        <Route path="/chat/:datasourceId" element={<Shell><ChatWindow /></Shell>} />
         <Route path="/" element={<Shell><HomeRedirect /></Shell>} />
         <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
 
@@ -72,8 +73,7 @@ function HomeRedirect() {
   return <Navigate to="/onboarding" replace />;
 }
 
-/** 静默使用 ChatWindow (HomeRedirect 替代根路径直接渲染聊天, 避免无数据源时空白) */
-void ChatWindow;
+/** [Fix-5 Task 5.1] ChatWindow 由 /chat/:datasourceId 路由直接渲染 */
 
 /**
  * [Sprint 6] Shell 包装 — RequireAuth + AppShell

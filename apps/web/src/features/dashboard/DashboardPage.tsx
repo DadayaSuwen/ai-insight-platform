@@ -20,6 +20,36 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { config, loading, error, regenerate } = useDashboard(datasourceId);
 
+  // [Fix-5 Task 5.9] 未 finalize 时显示引导, 不直接进工作台
+  const [dsStatus, setDsStatus] = useState<string>('');
+  useEffect(() => {
+    if (!datasourceId) return;
+    axiosInstance
+      .get(`/api/datasources/${datasourceId}`)
+      .then((res) => {
+        setDsStatus((res.data as { data?: { exploreStatus?: string } }).data?.exploreStatus || 'unknown');
+      })
+      .catch(() => {
+        setDsStatus('unknown');
+      });
+  }, [datasourceId]);
+  if (dsStatus && dsStatus !== 'finalized') {
+    return (
+      <div style={{ margin: '0 auto', maxWidth: 560, padding: 48, textAlign: 'center' }}>
+        <h2 style={{ fontSize: 20, marginBottom: 12 }}>数据源尚未完成 Schema 确认</h2>
+        <p style={{ color: 'var(--text-muted)', marginBottom: 24, fontSize: 13 }}>
+          当前状态：<code style={{ background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 4 }}>{dsStatus}</code>
+        </p>
+        <button
+          className="btn btn-primary"
+          onClick={() => navigate(`/explore/${datasourceId}`)}
+        >
+          {dsStatus === 'pending' || dsStatus === 'exploring' ? '查看探索进度' : '去确认 Schema'}
+        </button>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', height: 256, alignItems: 'center', justifyContent: 'center' }}>
