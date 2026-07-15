@@ -10,8 +10,8 @@ import { toast } from '../../store/toast';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('li.weiming@example.com');
-  const [password, setPassword] = useState('demo-password');
+  const [email, setEmail] = useState('demo@local.dev');
+  const [password, setPassword] = useState('demo123');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {

@@ -1,12 +1,14 @@
 /**
- * [Fix-7 Task 7.3] 首次引导页 — 1:1 还原原型 PAGES.onboarding (pages.js L12-57)
+ * [Fix-7 Task 7.3 + Fix-8 Task 8.2] 首次引导页
  *
- * Mock: 不调 /api/datasources, 永远显示引导卡 (UI 还原第一)
- * 点击「连接数据库」 → navigate('/datasources/new')
- * 点击「上传 CSV」 → navigate('/datasources/csv')
+ * 调 /api/datasources 检测数据源:
+ *   有 → 跳 dashboard/explore
+ *   无 → 显示引导卡
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../../core/api/AxiosInstance';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -14,7 +16,7 @@ export default function OnboardingPage() {
   const [userName, setUserName] = useState('用户');
 
   useEffect(() => {
-    // [Fix-7] Mock: 永远显示引导 (跳过 API 探测)
+    // 读取用户名
     try {
       const raw = localStorage.getItem('aiip.auth.user.v1');
       if (raw) {
@@ -25,8 +27,28 @@ export default function OnboardingPage() {
     } catch {
       /* ignore */
     }
-    setChecking(false);
-  }, []);
+
+    // [Fix-8 Task 8.2] 真实 API 探测数据源
+    axiosInstance
+      .get('/api/datasources')
+      .then((res) => {
+        const list: Array<{ id: string; name: string; exploreStatus: string }> =
+          res.data.data ?? [];
+        if (list.length > 0) {
+          const finalized = list.find((d) => d.exploreStatus === 'finalized');
+          const target = finalized || list[0];
+          useDatasourceStore.getState().setCurrent(target.id, target.name);
+          if (target.exploreStatus === 'finalized') {
+            navigate(`/dashboard/${target.id}`, { replace: true });
+          } else {
+            navigate(`/explore/${target.id}`, { replace: true });
+          }
+        } else {
+          setChecking(false);
+        }
+      })
+      .catch(() => setChecking(false));
+  }, [navigate]);
 
   if (checking) {
     return (

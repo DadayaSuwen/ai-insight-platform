@@ -145,6 +145,24 @@ export class ExploreService {
     yield this.stepEvent(3, "analyze_fields", "active", "LLM 正在推断字段语义...");
     const t1 = Date.now();
 
+    // [Fix-8 Task 8.7] 检查 LLM 是否已配置
+    const llmConfig = await this.db.db
+      .selectFrom("LLMConfig")
+      .selectAll()
+      .orderBy("updatedAt", "desc")
+      .executeTakeFirst();
+
+    if (!llmConfig || !llmConfig.apiKey) {
+      yield {
+        type: "error",
+        data: {
+          message:
+            "[LLM_NOT_CONFIGURED] 请先在「模型配置」页面配置 LLM API Key",
+        },
+      };
+      return;
+    }
+
     try {
       const snapshot = await this.meta.get(dataSourceId);
       const lowConfFields: string[] = [];

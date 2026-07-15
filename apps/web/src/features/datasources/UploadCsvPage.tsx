@@ -1,10 +1,14 @@
 /**
- * [Fix-7 Task 7.6] 上传 CSV 页 — 1:1 还原原型 PAGES['datasource-csv'] (pages.js L247-339)
+ * [Fix-7 Task 7.6 + Fix-8 Task 8.5] 上传 CSV 页
  *
- * Mock 3 文件 + 拖拽区 + 关系预推断
+ * Mock 文件列表作为初始展示, 真实上传后替换为 API 返回的预览
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { uploadCsvPreview, registerCsvFromPreview } from './api';
+import type { UploadPreviewResponse, ColumnOverride } from './api';
+import { useDatasourceStore } from '../../core/store/datasource-store';
+import { toast } from '../../store/toast';
 
 interface CsvFile {
   id: string;
@@ -16,6 +20,8 @@ interface CsvFile {
   cols: number;
   size: string;
   inferred: string;
+  /** 真实上传的 preview 数据 */
+  preview?: UploadPreviewResponse;
 }
 
 const MOCK_FILES: CsvFile[] = [
@@ -28,6 +34,66 @@ export default function UploadCsvPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [files, setFiles] = useState<CsvFile[]>(MOCK_FILES);
+  const [submitting, setSubmitting] = useState(false);
+
+  // [Fix-8 Task 8.5] 真实文件上传 → 调 uploadCsvPreview
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected || selected.length === 0) return;
+    for (let i = 0; i < selected.length; i++) {
+      try {
+        const preview = await uploadCsvPreview({ file: selected[i] });
+        const entry: CsvFile = {
+          id: preview.uploadId,
+          name: preview.originalName,
+          icon: '📄',
+          iconBg: 'var(--green-lighter)',
+          iconColor: 'var(--green-dark)',
+          rows: preview.rowCount,
+          cols: preview.columns.length,
+          size: '—',
+          inferred: preview.originalName.replace('.csv', ''),
+          preview,
+        };
+        setFiles((prev) => [...prev.filter((f) => f.name !== entry.name), entry]);
+      } catch (err) {
+        toast.error(`上传 ${selected[i].name} 失败: ${(err as Error).message}`);
+      }
+    }
+    // reset so same file can be re-selected
+    e.target.value = '';
+  };
+
+  // [Fix-8 Task 8.5] 真实注册 CSV 数据源
+  const handleStartExplore = async () => {
+    const first = files.find((f) => f.preview);
+    if (!first?.preview) {
+      // 无真实上传 → 提示用户上传
+      fileInputRef.current?.click();
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const overrides: ColumnOverride[] = first.preview.columns.map((c) => ({
+        originalName: c.originalName,
+        newName: c.defaultName,
+        type: 'AUTO' as const,
+      }));
+      const ds = await registerCsvFromPreview({
+        uploadId: first.preview.uploadId,
+        name: first.preview.originalName.replace('.csv', ''),
+        columnOverrides: overrides,
+      });
+      useDatasourceStore.getState().setCurrent(ds.id, ds.name);
+      toast.success(`CSV 数据源已创建`);
+      navigate(`/explore/${ds.id}`);
+    } catch (err) {
+      toast.error(`注册失败: ${(err as Error).message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <>
@@ -62,10 +128,7 @@ export default function UploadCsvPage() {
               accept=".csv"
               multiple
               style={{ display: 'none' }}
-              onChange={() => {
-                /* Fix-7 Mock: 忽略真实上传, 仅 alert */
-                alert('已选择 CSV 文件(原型演示)');
-              }}
+              onChange={handleFileSelect}
             />
           </div>
 
@@ -74,7 +137,7 @@ export default function UploadCsvPage() {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>已上传文件</div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {MOCK_FILES.map((f) => (
+              {files.map((f) => (
                 <div
                   key={f.id}
                   style={{
@@ -136,10 +199,11 @@ export default function UploadCsvPage() {
             <button
               className="btn btn-primary btn-lg"
               style={{ flex: 1 }}
-              onClick={() => navigate('/explore/csv_mock')}
+              onClick={handleStartExplore}
+              disabled={submitting}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-              开始探索 3 个 CSV
+              {submitting ? '创建中...' : '开始探索'}
             </button>
           </div>
         </div>

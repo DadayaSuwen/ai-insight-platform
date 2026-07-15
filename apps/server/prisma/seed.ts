@@ -1,26 +1,46 @@
 /**
- * [Sprint 5.5] 种子脚本已精简
+ * [Fix-8 Task 8.1] 种子脚本 — 创建默认管理员
  *
- * 历史:本脚本负责从 superstore_sales.csv 导入 9994 行业务数据到
- * Customer/Product/SalesOrder/SalesOrderItem 四张表。
- *
- * Sprint 5.5 删除了这四张业务表。Superstore 演示数据已导出为
- * prisma/data/superstore_sales.csv,可通过 CSV 上传功能作为
- * DuckDB 数据源接入。
- *
- * 如需恢复 Superstore 演示环境:
- *   1. Settings → 数据源 → 上传 CSV → 选择 superstore_sales.csv
- *   2. 或在外部 PG 中建表后通过"数据库连接"接入
+ * 首次 pnpm db:seed 后, 数据库中有:
+ *   demo@local.dev / demo123 (管理员)
  */
+import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 async function main() {
-  console.log("✅ Seed: 无需导入业务数据 (Sprint 5.5 已删除 Superstore 表)");
+  console.log('Seed: 创建默认管理员...');
+
+  const existing = await prisma.user.findUnique({
+    where: { id: DEFAULT_USER_ID },
+  });
+
+  if (!existing) {
+    const passwordHash = await bcrypt.hash('demo123', 10);
+    await prisma.user.create({
+      data: {
+        id: DEFAULT_USER_ID,
+        email: 'demo@local.dev',
+        passwordHash,
+        name: 'Demo Admin',
+        role: 'ADMIN',
+        status: 'active',
+      },
+    });
+    console.log('✓ 默认管理员已创建: demo@local.dev / demo123');
+  } else {
+    console.log('✓ 默认管理员已存在, 跳过');
+  }
 }
 
 main()
   .catch((e) => {
-    console.error("Seed 失败:", e);
+    console.error('Seed 失败:', e);
     process.exit(1);
   })
   .finally(async () => {
-    // PrismaClient 不再需要导入业务数据
+    await prisma.$disconnect();
   });
