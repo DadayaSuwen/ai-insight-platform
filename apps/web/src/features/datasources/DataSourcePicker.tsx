@@ -181,7 +181,7 @@ export default function DataSourcePicker({ value, onChange }: Props) {
             <button
               onClick={() => {
                 setOpen(false);
-                navigate('/settings');
+                navigate('/datasources');
               }}
               className="w-full rounded-md py-1.5 text-[10px]"
               style={{

@@ -1,149 +1,122 @@
-import { useState } from 'react';
-import { toast } from '../../store/toast';
-
-const PERMISSIONS = [
-  { id: 'dashboard:view', label: '查看工作台' },
-  { id: 'chat:create', label: '对话追问' },
-  { id: 'insights:view', label: '查看主动洞察' },
-  { id: 'insights:dismiss', label: '标记/屏蔽洞察' },
-  { id: 'datasource:connect', label: '连接数据源' },
-  { id: 'schema:review', label: 'Schema 修订' },
-  { id: 'report:export', label: '导出报告' },
-  { id: 'users:manage', label: '用户管理' },
-  { id: 'roles:manage', label: '角色权限管理' },
-  { id: 'llm:config', label: '模型配置' },
-  { id: 'audit:view', label: '查看审计日志' },
+/**
+ * [Fix-7 Task 7.17] 角色权限页 — 1:1 还原原型 PAGES.roles (pages.js L1373-1438)
+ *
+ * 3 个角色卡片 + 权限点矩阵, mock 数据
+ */
+const ROLES = [
+  {
+    key: 'admin', title: '管理员', badge: 'success', count: 1,
+    desc: '平台最高权限,可管理数据源、用户、模型配置。首个注册用户自动成为管理员。',
+    chips: ['全部权限', '用户管理', '模型配置', '数据源管理'],
+  },
+  {
+    key: 'analyst', title: '分析师', badge: 'info', count: 3,
+    desc: '可连接数据源、对话分析、查看洞察。不能管理用户或配置模型。',
+    chips: ['对话分析', '工作台', '主动洞察', '数据源(指定)', '无管理权限'],
+  },
+  {
+    key: 'viewer', title: '查看者', badge: 'warning', count: 1,
+    desc: '只读权限,只能查看已生成的工作台与洞察,不能对话或修改。',
+    chips: ['工作台(只读)', '洞察(只读)', '无对话权限', '无导出权限'],
+  },
 ];
 
-const ROLE_PERMS: Record<string, Record<string, boolean>> = {
-  admin: Object.fromEntries(PERMISSIONS.map(p => [p.id, true])),
-  analyst: {
-    'dashboard:view': true, 'chat:create': true, 'insights:view': true,
-    'insights:dismiss': true, 'datasource:connect': true, 'schema:review': true,
-    'report:export': true,
-  },
-  viewer: { 'dashboard:view': true, 'insights:view': true },
+const PERM_MATRIX = [
+  { id: 'dashboard:view', label: '查看工作台', admin: true, analyst: true, viewer: true },
+  { id: 'chat:create', label: '对话追问', admin: true, analyst: true, viewer: false },
+  { id: 'insights:view', label: '查看主动洞察', admin: true, analyst: true, viewer: true },
+  { id: 'insights:dismiss', label: '标记/屏蔽洞察', admin: true, analyst: true, viewer: false },
+  { id: 'datasource:connect', label: '连接数据源', admin: true, analyst: true, viewer: false },
+  { id: 'schema:review', label: 'Schema 修订', admin: true, analyst: true, viewer: false },
+  { id: 'report:export', label: '导出报告', admin: true, analyst: true, viewer: false },
+  { id: 'user:manage', label: '用户管理', admin: true, analyst: false, viewer: false },
+  { id: 'role:manage', label: '角色权限管理', admin: true, analyst: false, viewer: false },
+  { id: 'model:config', label: '模型配置', admin: true, analyst: false, viewer: false },
+  { id: 'audit:view', label: '查看审计日志', admin: true, analyst: false, viewer: false },
+];
+
+const CHIP_CLASS: Record<string, boolean> = {
+  '全部权限': true, '用户管理': true, '模型配置': true, '数据源管理': true,
+  '对话分析': true, '工作台': true, '主动洞察': true,
 };
 
-/**
- * [Sprint 6 + Fix-2 Task 2.6] 角色权限页 — 保存按钮 toast 反馈
- *
- * 注: 后端无角色权限修改端点 (Sprint 5.5 RbacModule 仅枚举权限常量),
- * 留作后续 sprint. 当前保存仅前端状态 + 提示, 实际生产可加 /api/roles 端点
- */
+function isChipGreen(name: string) {
+  return name in CHIP_CLASS;
+}
+
 export default function RolesPage() {
-  const [perms, setPerms] = useState(ROLE_PERMS);
-  const [dirty, setDirty] = useState(false);
-
-  const toggle = (role: string, permId: string) => {
-    if (role === 'admin') return;
-    setPerms(prev => ({
-      ...prev,
-      [role]: { ...prev[role], [permId]: !prev[role][permId] },
-    }));
-    setDirty(true);
-  };
-
-  const handleSave = () => {
-    // [Fix-2 Task 2.6] 暂存前端状态 (后端无端点), 提示用户已保存
-    setDirty(false);
-    toast.success('权限配置已保存 (前端, 后端 RbacModule 端点待后续 Sprint 接入)');
-  };
-
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-title">角色权限</h1>
-          <p className="page-subtitle">3 个预置角色 · {PERMISSIONS.length} 项权限点矩阵 · 仅管理员可见</p>
+          <p className="page-subtitle">3 个预置角色 · 权限点矩阵 · 仅管理员可见</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-primary btn-sm" onClick={() => toast.info('自定义角色功能开发中')}>
-            + 创建自定义角色
+          <button className="btn btn-primary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            创建自定义角色
           </button>
         </div>
       </div>
 
       <div className="grid grid-3" style={{ marginBottom: 24 }}>
-        <RoleCard name="管理员" badge="系统" count={1} description="平台最高权限。" tags={['全部权限', '用户管理', '模型配置']} />
-        <RoleCard name="分析师" badge="系统" count={3} description="可对话分析、修订 Schema、查看洞察。" tags={['对话分析', '工作台', '主动洞察']} />
-        <RoleCard name="查看者" badge="系统" count={1} description="只读权限。" tags={['工作台(只读)', '洞察(只读)']} />
+        {ROLES.map((r) => (
+          <div key={r.key} className="card">
+            <div className="card-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="card-title">{r.title}</span>
+                <span className={`badge badge-${r.badge}`}>系统</span>
+              </div>
+              <span className="chip">{r.count} 人</span>
+            </div>
+            <div className="card-body">
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px' }}>{r.desc}</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {r.chips.map((c) => (
+                  <span key={c} className={`chip${isChipGreen(c) ? ' green' : ''}${c.includes('无') || c.includes('只读') ? ' amber' : ''}`}>
+                    {c}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
+      {/* 权限点矩阵 */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">权限点矩阵</div>
-          <button className="btn btn-ghost btn-sm" onClick={() => toast.info('配置导出功能开发中')}>
-            导出配置
-          </button>
+          <button className="btn btn-ghost btn-sm">导出配置</button>
         </div>
-        <table className="perm-matrix" style={{ width: '100%' }}>
+        <table className="perm-matrix">
           <thead>
             <tr>
-              <th>权限点</th><th>管理员</th><th>分析师</th><th>查看者</th>
+              <th>权限点</th>
+              <th>管理员</th>
+              <th>分析师</th>
+              <th>查看者</th>
             </tr>
           </thead>
           <tbody>
-            {PERMISSIONS.map((p) => (
+            {PERM_MATRIX.map((p) => (
               <tr key={p.id}>
                 <td>{p.label}</td>
-                <td>
-                  <input type="checkbox" className="perm-checkbox" checked disabled />
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    className="perm-checkbox"
-                    checked={!!perms.analyst?.[p.id]}
-                    onChange={() => toggle('analyst', p.id)}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    className="perm-checkbox"
-                    checked={!!perms.viewer?.[p.id]}
-                    onChange={() => toggle('viewer', p.id)}
-                  />
-                </td>
+                <td><input type="checkbox" className="perm-checkbox" defaultChecked={p.admin} disabled /></td>
+                <td><input type="checkbox" className="perm-checkbox" defaultChecked={p.analyst} /></td>
+                <td><input type="checkbox" className="perm-checkbox" defaultChecked={p.viewer} /></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div
-          className="card-footer"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <span>{dirty ? '有未保存的修改' : '修改权限后会立即生效，影响所有该角色用户'}</span>
-          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!dirty}>
-            保存权限配置
-          </button>
+        <div className="card-footer">
+          <button className="btn btn-primary btn-sm">保存权限配置</button>
+          <span style={{ marginLeft: 12 }}>
+            修改权限后会立即生效,影响所有该角色用户
+          </span>
         </div>
       </div>
     </>
-  );
-}
-
-function RoleCard({ name, badge, count, description, tags }: {
-  name: string; badge: string; count: number; description: string; tags: string[];
-}) {
-  return (
-    <div className="card">
-      <div className="card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="card-title">{name}</span>
-          <span className="badge">{badge}</span>
-        </div>
-        <span className="chip">{count} 人</span>
-      </div>
-      <div className="card-body">
-        <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-secondary)' }}>{description}</p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {tags.map((tag) => (
-            <span key={tag} className="chip green">{tag}</span>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }

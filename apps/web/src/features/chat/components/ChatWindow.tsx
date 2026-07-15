@@ -13,25 +13,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useDatasourceStore } from '../../../core/store/datasource-store';
 
-const QUICK_QUERIES = [
-  '📦 本月销售额 Top 5 商品',
-  '👥 哪些客户 3 个月没下单了',
-  '📈 各渠道转化率对比',
-  '💸 退款率最高的商品类目',
-  '🎯 VIP 客户的复购周期',
-];
-
-const AVAILABLE_TABLES = [
-  { name: 'customers', desc: '客户表 · 9 字段', core: true },
-  { name: 'orders', desc: '订单表 · 12 字段', core: true },
-  { name: 'order_items', desc: '明细 · 7 字段', core: false },
-  { name: 'products', desc: '商品 · 11 字段', core: false },
-  { name: 'payments', desc: '支付 · 9 字段', core: false },
-  { name: 'shipping', desc: '物流 · 10 字段', core: false },
-  { name: 'categories', desc: '分类 · 4 字段', core: false },
-  { name: 'reviews', desc: '评论 · 6 字段', core: false },
-];
-
 const MOCK_RESULT_ROWS = [
   { name: '无线蓝牙耳机 Pro', sales: '¥184,320', orders: '1,247', refund: '2.1%', color: 'var(--green-dark)' },
   { name: '智能手表 Series 6', sales: '¥156,840', orders: '892', refund: '4.8%', color: 'var(--warning)' },
@@ -53,38 +34,7 @@ export default function ChatWindow() {
   }, []);
 
   return (
-    <div className="chat-layout">
-      {/* 左侧 - 推荐提问 + 可用表 */}
-      <aside className="chat-sidebar">
-        <div className="card" style={{ padding: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>
-            💡 推荐提问
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {QUICK_QUERIES.map((q) => (
-              <button key={q} className="btn btn-secondary btn-sm" style={{ justifyContent: 'flex-start', textAlign: 'left', whiteSpace: 'normal', fontSize: 11 }}>
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: 14, flex: 1, overflowY: 'auto' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>
-            🗂️ 可用表
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.8 }}>
-            {AVAILABLE_TABLES.slice(0, 4).map((t) => (
-              <div key={t.name}>
-                <div style={{ color: 'var(--green-dark)', fontWeight: 600 }}>{t.name === 'customers' ? '👥 ' : t.name === 'orders' ? '📦 ' : ''}{t.name}</div>
-                <div style={{ paddingLeft: 8 }}>{t.desc}</div>
-              </div>
-            ))}
-            <div style={{ marginTop: 6 }}>+ {AVAILABLE_TABLES.length - 4} 张其他表</div>
-          </div>
-        </div>
-      </aside>
-
+    <div style={{ display: 'flex', flex: 1, height: '100%', overflow: 'hidden' }}>
       {/* 中间 - 对话主区 */}
       <main className="chat-main card">
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8 }}>

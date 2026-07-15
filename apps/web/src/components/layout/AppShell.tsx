@@ -250,7 +250,7 @@ export default function AppShell({ children }: AppShellProps) {
             <span className="current">{currentBreadcrumb}</span>
           </div>
           <div className="topbar-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => navigate('/settings')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => navigate('/llm-config')}>
               <Settings size={14} />
               模型配置
             </button>
