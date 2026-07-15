@@ -321,12 +321,17 @@ export class ReviewService {
     const targetField = lastQuestion?.fieldName ?? "";
 
     if (!targetField) {
+      // 首条触发消息或无待确认字段，跳过 LLM 解析，直接生成提问
+      const pendingCount = await this.countRemaining(
+        review.datasourceId as string,
+        messages,
+      );
       await this.db.db
         .updateTable("SchemaReview")
         .set({ messages: JSON.stringify(messages) as unknown as Record<string, unknown> })
         .where("id", "=", reviewId)
         .execute();
-      return { updated: null, remaining: review.pendingFields as number };
+      return { updated: null, remaining: pendingCount };
     }
 
     const [tableName, fieldName] = targetField.split(".");
@@ -518,6 +523,11 @@ export class ReviewService {
     schemaUnderstanding: Record<string, unknown>;
   }> {
     const review = await this.getReviewOwnedByUser(reviewId, userId);
+
+    if ((review.status as string) === "finalized") {
+      this.logger.log(`Review ${reviewId} already finalized, returning existing schema`);
+      return { schemaUnderstanding: (review as any).finalSchema ?? {} };
+    }
 
     const snapshot = await this.meta.get(review.datasourceId as string);
 

@@ -40,6 +40,8 @@ export default function OnboardingPage() {
           useDatasourceStore.getState().setCurrent(target.id, target.name);
           if (target.exploreStatus === 'finalized') {
             navigate(`/dashboard/${target.id}`, { replace: true });
+          } else if (target.exploreStatus === 'reviewing') {
+            navigate(`/schema-review/${target.id}`, { replace: true });
           } else {
             navigate(`/explore/${target.id}`, { replace: true });
           }

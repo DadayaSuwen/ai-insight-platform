@@ -158,9 +158,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
 
       const baseURL =
         import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
-      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(
-        message,
-      )}&sessionId=${encodeURIComponent(sessionId)}`;
+      const url = `${baseURL}/chat/stream`;
 
       // eventsource-parser 实例，每个 fetch 一个（否则多流交叉）
       const parser = createParser({
@@ -169,11 +167,13 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
 
       try {
         const token = localStorage.getItem("aiip.auth.token.v1");
-        const headers: Record<string, string> = {};
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers["Authorization"] = `Bearer ${token}`;
         const res = await fetch(url, {
+          method: "POST",
           signal: controller.signal,
           headers,
+          body: JSON.stringify({ message, sessionId }),
         });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);

@@ -3,12 +3,12 @@ import {
   Controller,
   Get,
   Post,
-  Query,
-  Sse,
   UseGuards,
   BadRequestException,
+  Res,
+  Req,
 } from "@nestjs/common";
-import { Observable } from "rxjs";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { ReviewService } from "./review.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
@@ -21,7 +21,7 @@ import { PERMISSIONS } from "../rbac/permissions";
  * [Sprint 6 + Fix-3 Task 3.1] Schema 纠错对话端点
  *
  * POST /api/schema/review/start         → 开始纠错
- * GET  /api/schema/review/chat          → SSE 流式纠错对话 (query: reviewId + message)
+ * POST /api/schema/review/chat          → SSE 流式纠错对话 { reviewId, message }
  * POST /api/schema/review/finalize      → 敲定 Schema
  */
 
@@ -52,7 +52,7 @@ export class ReviewController {
   /**
    * SSE 纠错对话
    *
-   * GET /api/schema/review/chat?reviewId=xxx&message=xxx
+   * POST /api/schema/review/chat  { reviewId, message }
    *
    * SSE Events:
    *   ai_thinking   — Agent 正在理解回答
@@ -60,79 +60,60 @@ export class ReviewController {
    *   next_question — 下一个提问 {question, fieldName, quickReplies, remaining}
    *   done          — {remaining, allConfirmed}
    */
-  @Sse("chat")
+  @Post("chat")
   @Permissions(PERMISSIONS.SCHEMA_REVIEW)
-  chat(
-    @Query("reviewId") reviewId: string,
-    @Query("message") message: string,
+  async chat(
+    @Body() body: { reviewId: string; message: string },
     @CurrentUser() user: { sub: string },
-  ): Observable<{ type: string; data: unknown }> {
+    @Res() res: Response,
+  ) {
+    const { reviewId, message } = body || {};
     if (!reviewId || !message) {
-      throw new BadRequestException("reviewId and message are required");
+      res.status(400).json({ success: false, error: { message: "reviewId and message are required" } });
+      return;
     }
 
-    return new Observable((subscriber) => {
-      void (async () => {
-        try {
-          // Step 1: 处理用户回答
-          subscriber.next({
-            type: "ai_thinking",
-            data: { content: "正在理解你的回答..." },
-          } as unknown as { type: string; data: unknown });
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-          const processed = await this.reviewService.processAnswer(
-            reviewId,
-            message,
-            user.sub,
-          );
+    const send = (type: string, data: unknown) => {
+      res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
 
-          if (processed.updated) {
-            subscriber.next({
-              type: "field_updated",
-              data: {
-                table: processed.updated.table,
-                field: processed.updated.field,
-                chineseName: processed.updated.chineseName,
-                role: processed.updated.role,
-              },
-            } as unknown as { type: string; data: unknown });
-          }
+    try {
+      send("ai_thinking", { content: "正在理解你的回答..." });
 
-          // Step 2: 生成下一个提问
-          if (processed.remaining > 0) {
-            const next = await this.reviewService.generateQuestion(reviewId);
-            if (next) {
-              subscriber.next({
-                type: "next_question",
-                data: {
-                  question: next.question,
-                  fieldName: next.fieldName,
-                  tableName: next.tableName,
-                  quickReplies: next.quickReplies,
-                  evidence: next.evidence,
-                  remaining: next.remaining,
-                },
-              } as unknown as { type: string; data: unknown });
-            }
-          }
+      const processed = await this.reviewService.processAnswer(reviewId, message, user.sub);
 
-          // Step 3: 完成
-          subscriber.next({
-            type: "done",
-            data: {
-              remaining: processed.remaining,
-              allConfirmed: processed.remaining === 0,
-            },
-          } as unknown as { type: string; data: unknown });
-        } catch (err) {
-          subscriber.next({
-            type: "error",
-            data: { message: (err as Error).message },
-          } as unknown as { type: string; data: unknown });
+      if (processed.updated) {
+        send("field_updated", {
+          table: processed.updated.table,
+          field: processed.updated.field,
+          chineseName: processed.updated.chineseName,
+          role: processed.updated.role,
+        });
+      }
+
+      if (processed.remaining > 0) {
+        const next = await this.reviewService.generateQuestion(reviewId);
+        if (next) {
+          send("next_question", {
+            question: next.question,
+            fieldName: next.fieldName,
+            tableName: next.tableName,
+            quickReplies: next.quickReplies,
+            evidence: next.evidence,
+            remaining: next.remaining,
+          });
         }
-        subscriber.complete();
-      })();
-    });
+      }
+
+      send("done", { remaining: processed.remaining, allConfirmed: processed.remaining === 0 });
+    } catch (err) {
+      send("error", { message: (err as Error).message });
+    }
+    res.end();
   }
 
   @Post("confirm-all")

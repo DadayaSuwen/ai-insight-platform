@@ -99,10 +99,11 @@ export class InsightController {
 
     if (!item) throw new NotFoundException("Insight not found");
     // [Fix-1 Task 1.8] 校验归属
-    await this.datasourceService.getByIdForUser(
+    const ds = await this.datasourceService.getByIdForUser(
       item.datasourceId as string,
       user.sub,
     );
+    if (!ds) throw new NotFoundException("Insight not found or access denied");
     return { success: true, data: item };
   }
 
@@ -115,10 +116,11 @@ export class InsightController {
       .where("id", "=", id)
       .executeTakeFirst();
     if (!item) throw new NotFoundException("Insight not found");
-    await this.datasourceService.getByIdForUser(
+    const dsDismiss = await this.datasourceService.getByIdForUser(
       item.datasourceId as string,
       user.sub,
     );
+    if (!dsDismiss) throw new NotFoundException("Insight not found or access denied");
     await this.db.db
       .updateTable("Insight")
       .set({ status: "handled", handledAt: new Date() })
@@ -136,10 +138,11 @@ export class InsightController {
       .where("id", "=", id)
       .executeTakeFirst();
     if (!item) throw new NotFoundException("Insight not found");
-    await this.datasourceService.getByIdForUser(
+    const dsShield = await this.datasourceService.getByIdForUser(
       item.datasourceId as string,
       user.sub,
     );
+    if (!dsShield) throw new NotFoundException("Insight not found or access denied");
     // 简化: shield 把 severity 标记为 low (实际生产应维护屏蔽表)
     await this.db.db
       .updateTable("Insight")
@@ -155,6 +158,8 @@ export class InsightController {
     @CurrentUser() user: { sub: string },
   ) {
     if (datasourceId) {
+      const ds = await this.datasourceService.getByIdForUser(datasourceId, user.sub);
+      if (!ds) throw new NotFoundException("DataSource not found or access denied");
       const log = await this.scheduler.runForDataSource(datasourceId, user.sub);
       return { success: true, data: log };
     }

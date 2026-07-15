@@ -117,17 +117,6 @@ export class DashboardGeneratorController {
   ) {
     const parsed = ExecuteSchema.parse(body);
 
-    // 校验 metric: 单列名 / 聚合表达式
-    let metricExpr: string;
-    if (SAFE_METRIC.test(parsed.metric)) {
-      // 默认按 SUM 聚合 measure 字段
-      metricExpr = `SUM("${parsed.metric}")`;
-    } else if (AGG_METRIC.test(parsed.metric)) {
-      metricExpr = parsed.metric;
-    } else {
-      throw new NotFoundException("Unsafe metric expression");
-    }
-
     // ownership 校验
     const ds = await this.datasourceService.getByIdForUser(
       parsed.datasourceId,
@@ -135,13 +124,24 @@ export class DashboardGeneratorController {
     );
     if (!ds) throw new NotFoundException("DataSource not found");
 
-    // 安全: CSV 数据源用 connectionConfig.tableName 覆盖, 防止元数据/LLM 表名漂移
-    const cfg = ds.connectionConfig as Record<string, unknown>;
-    const table = (cfg?.tableName as string) || parsed.table;
-
     // 根据数据源类型选择标识符引号 (PG→"  MySQL→`)
     const q = ds.type === "mysql" ? "`" : "\"";
     const isPg = ds.type !== "mysql";
+
+    // 校验 metric: 单列名 / 聚合表达式
+    let metricExpr: string;
+    if (SAFE_METRIC.test(parsed.metric)) {
+      // 用 COUNT 而非 SUM：无法判断列是否为数值类型，SUM 对字符串列会报错
+      metricExpr = `COUNT(${q}${parsed.metric}${q})`;
+    } else if (AGG_METRIC.test(parsed.metric)) {
+      metricExpr = parsed.metric;
+    } else {
+      throw new NotFoundException("Unsafe metric expression");
+    }
+
+    // 安全: CSV 数据源用 connectionConfig.tableName 覆盖, 防止元数据/LLM 表名漂移
+    const cfg = ds.connectionConfig as Record<string, unknown>;
+    const table = (cfg?.tableName as string) || parsed.table;
 
     // range 解析 (默认 30d, 支持 7d/30d/90d/12m)
     const rangeDays = this.parseRangeDays(parsed.range);

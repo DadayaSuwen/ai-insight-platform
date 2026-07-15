@@ -1,15 +1,15 @@
 import {
   Controller,
-  Sse,
-  Query,
-  MessageEvent,
+  Post,
+  Body,
+  HttpCode,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
-import type { Request } from "express";
-import { Observable, defer, finalize } from "rxjs";
-import { ChatService } from "./chat.service";
+import type { Request, Response } from "express";
 import { runWithTrace, traceLogger } from "../ai/debug-log";
+import { ChatService } from "./chat.service";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
 import { PermissionsGuard } from "../rbac/permissions.guard";
@@ -19,64 +19,61 @@ import { PERMISSIONS } from "../rbac/permissions";
 /**
  * [Sprint 2+5] SSE chat controller — 多租户
  *
- *   GET /chat/stream?message=...&sessionId=...   (Bearer)
+ *   POST /chat/stream  { message, sessionId }   (Bearer)
  *
- * [Sprint 5] @UseGuards(JwtAuthGuard) — 把 currentUser 透传到 ChatService
- * 保证 SessionService.getSessionById(sessionId, userId) 越权 → NotFound。
- *
- * [Fix-3 Task 3.1] @UseGuards(JwtAuthGuard, PermissionsGuard) + @Permissions(CHAT_QUERY)
+ * [BUG-005] 改为 POST + body 传参，避免长消息 URL 414
  */
 @Controller("chat")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  @Sse("stream")
+  @Post("stream")
+  @HttpCode(200)
   @Permissions(PERMISSIONS.CHAT_QUERY)
-  stream(
-    @Query("message") message: string,
-    @Query("sessionId") sessionId: string,
+  async stream(
+    @Body() body: { message: string; sessionId: string },
     @CurrentUser() user: { sub: string },
     @Req() req: Request,
-  ): Observable<MessageEvent> {
+    @Res() res: Response,
+  ) {
+    const { message, sessionId } = body || {};
     if (!message || !sessionId) {
-      return new Observable<MessageEvent>((subscriber) => {
-        subscriber.next({
-          type: "error",
-          data: { code: "INVALID_PARAMS", message: "参数缺失" },
-        });
-        subscriber.next({ type: "done", data: {} });
-        subscriber.complete();
-      });
+      res.status(400).json({ success: false, error: { code: "INVALID_PARAMS", message: "参数缺失" } });
+      return;
     }
 
-    const traceId =
-      (req as Request & { traceId?: string }).traceId ?? "no-trace";
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
 
-    return defer(() => {
-      const controller = new AbortController();
-      req.on("close", () => controller.abort());
-      return runWithTrace(
-        {
-          traceId,
-          sessionId,
-          userMessage: message.slice(0, 200),
-          startTs: Date.now(),
-        },
+    const traceId = (req as any).traceId ?? "no-trace";
+    const controller = new AbortController();
+    req.on("close", () => controller.abort());
+
+    try {
+      const observable = runWithTrace(
+        { traceId, sessionId, userMessage: message.slice(0, 200), startTs: Date.now() },
         () => {
-          traceLogger.trace({
-            phase: "controller-entry",
-            ctx: { sessionId, messageLen: message.length },
-            level: "log",
-          });
-          return this.chatService.processMessageStream(
-            sessionId,
-            user.sub, // [Sprint 5]
-            message,
-            { signal: controller.signal },
-          );
+          traceLogger.trace({ phase: "controller-entry", ctx: { sessionId, messageLen: message.length }, level: "log" });
+          return this.chatService.processMessageStream(sessionId, user.sub, message, { signal: controller.signal });
         },
       );
-    }).pipe(finalize(() => req.removeAllListeners("close")));
+
+      observable.subscribe({
+        next: (evt: any) => {
+          res.write(`event: ${evt.type}\ndata: ${JSON.stringify(evt.data)}\n\n`);
+        },
+        complete: () => res.end(),
+        error: (err: any) => {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: err?.message || String(err) })}\n\n`);
+          res.end();
+        },
+      });
+    } catch (err) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: (err as Error).message })}\n\n`);
+      res.end();
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { DatabaseService } from "../database/database.service";
 import {
   Body,
   Controller,
@@ -68,6 +69,7 @@ export class DatasourceController {
     private readonly ds: DatasourceService,
     private readonly meta: MetadataService,
     private readonly cache: MetadataCacheService,
+    private readonly db: DatabaseService,
     private readonly queryCache: QueryCacheService,
     private readonly factory: ExecutorFactory,
     private readonly csvImport: CsvImportService,
@@ -238,6 +240,15 @@ export class DatasourceController {
     if (!item) {
       throw new NotFoundException(`DataSource ${id} not found`);
     }
+
+    // 清空引用该数据源的 ChatSession（无 FK 约束，手动清理）
+    try {
+      await this.db.db
+        .updateTable("ChatSession")
+        .set({ dataSourceId: null as unknown as string })
+        .where("dataSourceId", "=", id)
+        .execute();
+    } catch { /* best-effort */ }
 
     const deleted = await this.ds.deleteForUser(id, user.sub);
     if (deleted === 0) {

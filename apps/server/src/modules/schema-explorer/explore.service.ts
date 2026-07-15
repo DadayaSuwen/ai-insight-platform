@@ -79,6 +79,7 @@ export class ExploreService {
       const record = await this.ds.getByIdForUser(dataSourceId, userId);
       if (!record) {
         yield this.stepEvent(1, "connecting", "error", "数据源不存在");
+        await this.markError(dataSourceId);
         return;
       }
 
@@ -97,12 +98,14 @@ export class ExploreService {
 
       if (!health.ok) {
         yield this.stepEvent(1, "connecting", "error", health.error ?? "连接失败");
+        await this.markError(dataSourceId);
         return;
       }
 
       yield this.stepEvent(1, "connecting", "done", `已连接 · ${health.latencyMs}ms`, Date.now() - startedAt);
     } catch (err) {
       yield this.stepEvent(1, "connecting", "error", (err as Error).message);
+      await this.markError(dataSourceId);
       return;
     }
 
@@ -138,6 +141,7 @@ export class ExploreService {
       );
     } catch (err) {
       yield this.stepEvent(2, "discover_tables", "error", (err as Error).message);
+      await this.markError(dataSourceId);
       return;
     }
 
@@ -160,6 +164,7 @@ export class ExploreService {
             "[LLM_NOT_CONFIGURED] 请先在「模型配置」页面配置 LLM API Key",
         },
       };
+      await this.markError(dataSourceId);
       return;
     }
 
@@ -201,6 +206,7 @@ export class ExploreService {
       yield this.stepEvent(3, "analyze_fields", "done", detail, Date.now() - t1);
     } catch (err) {
       yield this.stepEvent(3, "analyze_fields", "error", (err as Error).message);
+      await this.markError(dataSourceId);
       return;
     }
 
@@ -260,6 +266,7 @@ export class ExploreService {
       );
     } catch (err) {
       yield this.stepEvent(5, "generate_report", "error", (err as Error).message);
+      await this.markError(dataSourceId);
       return;
     }
 
@@ -280,6 +287,17 @@ export class ExploreService {
   }
 
   /* ───────── helpers ───────── */
+
+  /** 探索失败时回滚 exploreStatus 为 error */
+  private async markError(dataSourceId: string) {
+    try {
+      await this.db.db
+        .updateTable("DataSource")
+        .set({ exploreStatus: "error" })
+        .where("id", "=", dataSourceId)
+        .execute();
+    } catch { /* best-effort */ }
+  }
 
   private stepEvent(
     step: number,

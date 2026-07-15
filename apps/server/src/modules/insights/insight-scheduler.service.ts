@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import * as cron from "node-cron";
 import { DatabaseService } from "../database/database.service";
@@ -37,7 +37,7 @@ export interface DetectionLog {
 }
 
 @Injectable()
-export class InsightSchedulerService implements OnModuleInit {
+export class InsightSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(InsightSchedulerService.name);
   private task: cron.ScheduledTask | null = null;
 
@@ -279,6 +279,10 @@ export class InsightSchedulerService implements OnModuleInit {
   }
 
   /** 关闭定时任务 (用于测试) */
+  onModuleDestroy() {
+    this.stop();
+  }
+
   stop() {
     if (this.task) {
       this.task.stop();

@@ -90,23 +90,21 @@ export function useSchemaReview(): UseSchemaReviewReturn {
   const sendSSEMessage = useCallback(async (id: string, message: string) => {
     setIsProcessing(true);
     const token = localStorage.getItem(TOKEN_KEY);
-    const url = `${API_BASE}/api/schema/review/chat?reviewId=${encodeURIComponent(id)}&message=${encodeURIComponent(message)}`;
-    if (url.length > 2000) {
-      setError('回答过长，请精简后重试');
-      setIsProcessing(false);
-      return;
-    }
+    const url = `${API_BASE}/api/schema/review/chat`;
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
       const response = await fetch(url, {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: token ? `Bearer ${token}` : '',
           Accept: 'text/event-stream',
         },
         signal: controller.signal,
+        body: JSON.stringify({ reviewId: id, message }),
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

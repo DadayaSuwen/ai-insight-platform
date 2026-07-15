@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
+import { DatasourceService } from "../datasource/datasource.service";
 import { randomUUID } from "crypto";
 
 /**
@@ -14,13 +15,21 @@ import { randomUUID } from "crypto";
  */
 @Injectable()
 export class ChatSessionService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly ds: DatasourceService,
+  ) {}
 
   async createSession(opts: {
     title?: string;
     dataSourceId?: string | null;
     userId: string; // [Sprint 5] 必填
   }) {
+    // [BUG-002] 校验 dataSourceId 归属，防止用户 A 绑定用户 B 的数据源
+    if (opts.dataSourceId) {
+      const ds = await this.ds.getByIdForUser(opts.dataSourceId, opts.userId);
+      if (!ds) throw new NotFoundException("DataSource not found or access denied");
+    }
     return this.db.db
       .insertInto("ChatSession")
       .values({

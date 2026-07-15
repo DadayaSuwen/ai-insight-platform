@@ -35,6 +35,13 @@ export default function ChatWindow() {
   const urlDsId = useDatasourceStore((s) => s.currentDatasourceId);
   const dsId = datasourceId || urlDsId || '';
 
+  // [Bug-1] 同步 URL 的 datasourceId 到 chat store, 否则后端收不到数据源
+  useEffect(() => {
+    if (dsId && dsId !== 'mock') {
+      useChatStore.getState().setSelectedDataSourceId(dsId);
+    }
+  }, [dsId]);
+
   const messages = useChatStore((s) => s.messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
