@@ -1,14 +1,12 @@
 #!/bin/sh
-# Production-safe server entrypoint: initialize the schema once, then start NestJS.
 set -eu
 
 cd /repo/apps/server
 
-DB_HOST="${DATABASE_HOST:-postgres}"
-DB_PORT="${DATABASE_PORT:-5432}"
-DB_USER_VALUE="${DB_USER:-app}"
-DB_NAME_VALUE="${DB_NAME:-ai_insight}"
-DB_PASSWORD_VALUE="${DB_PASSWORD:?DB_PASSWORD must be set}"
+# Enable PostgreSQL TLS for managed providers such as Neon.
+if echo "${DATABASE_URL:-}" | grep -q 'sslmode=require'; then
+  export PGSSLMODE=require
+fi
 
 if [ "${NODE_ENV:-production}" = "production" ]; then
   [ -n "${JWT_SECRET:-}" ] && [ "${#JWT_SECRET}" -ge 32 ] || {
@@ -21,26 +19,35 @@ if [ "${NODE_ENV:-production}" = "production" ]; then
   }
 fi
 
-export PGPASSWORD="$DB_PASSWORD_VALUE"
+DATABASE_URL_VALUE="${DATABASE_URL:?DATABASE_URL must be set}"
+DB_HOST=$(printf '%s' "$DATABASE_URL_VALUE" | sed -n 's#.*@\([^:/?]*\).*#\1#p')
+DB_PORT=$(printf '%s' "$DATABASE_URL_VALUE" | sed -n 's#.*@[^:/?]*:\([0-9][0-9]*\).*#\1#p')
+DB_PORT="${DB_PORT:-5432}"
+DB_USER_VALUE="${DB_USER:-$(printf '%s' "$DATABASE_URL_VALUE" | sed -n 's#^[^:]*://\([^:]*\):.*#\1#p')}"
+DB_NAME_VALUE="${DB_NAME:-$(printf '%s' "$DATABASE_URL_VALUE" | sed -n 's#^.*/\([^/?]*\).*#\1#p')}"
+DB_PASS="${DB_PASSWORD:-$(printf '%s' "$DATABASE_URL_VALUE" | sed -n 's#^[^:]*://[^:]*:\([^@]*\)@.*#\1#p')}"
 
+[ -n "$DB_HOST" ] || { echo "[entrypoint] could not parse database host" >&2; exit 1; }
+[ -n "$DB_USER_VALUE" ] || { echo "[entrypoint] could not parse database user" >&2; exit 1; }
+[ -n "$DB_NAME_VALUE" ] || { echo "[entrypoint] could not parse database name" >&2; exit 1; }
+
+# Managed databases cannot be probed with a local socket; wait for TCP only.
 echo "[entrypoint] waiting for postgres at ${DB_HOST}:${DB_PORT}..."
 i=0
-until nc -z "$DB_HOST" "$DB_PORT"; do
+until nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
   i=$((i + 1))
-  if [ "$i" -gt 60 ]; then
-    echo "[entrypoint] postgres not ready after 60s, giving up" >&2
-    exit 1
-  fi
+  [ "$i" -le 60 ] || { echo "[entrypoint] database not reachable after 60s" >&2; exit 1; }
   sleep 1
 done
 
-psql_cmd="psql -h $DB_HOST -p $DB_PORT -U $DB_USER_VALUE -d $DB_NAME_VALUE"
-TABLE_COUNT=$($psql_cmd -tA -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('User','DataSource','ChatSession','ChatMessage','LLMConfig');" | tr -d '[:space:]')
+echo "[entrypoint] database is reachable"
+export PGPASSWORD="$DB_PASS"
+PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER_VALUE -d $DB_NAME_VALUE"
+TABLE_COUNT=$($PSQL -tA -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('User','DataSource','ChatSession','ChatMessage','LLMConfig');" 2>/dev/null | tr -d '[:space:]')
 
 if [ "${TABLE_COUNT:-0}" = "0" ]; then
   echo "[entrypoint] first boot detected; applying schema.sql"
-  $psql_cmd -v ON_ERROR_STOP=1 -f prisma/schema.sql
-
+  $PSQL -v ON_ERROR_STOP=1 -f prisma/schema.sql
   if [ "${INIT_SEED:-false}" = "true" ]; then
     echo "[entrypoint] running first-boot seed"
     ./node_modules/.bin/ts-node prisma/seed.ts
