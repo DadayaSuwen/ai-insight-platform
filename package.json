@@ -23,7 +23,12 @@
     "docker:reset": "docker compose down -v && docker compose up -d",
     "docker:rebuild": "docker compose build --no-cache && docker compose up -d",
     "docker:seed": "docker compose exec server /repo/apps/server/node_modules/.bin/ts-node prisma/seed.ts",
-    "docker:infra": "docker compose up postgres -d"
+    "docker:infra": "docker compose up postgres -d",
+    "docker:prod:up": "sh scripts/deploy-prod.sh",
+    "docker:prod:down": "docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml down",
+    "docker:prod:logs": "docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml logs -f",
+    "docker:prod:verify": "sh scripts/verify-prod.sh",
+    "docker:prod:backup": "sh scripts/backup-postgres.sh"
   },
   "devDependencies": {
     "turbo": "^2.0.0",
