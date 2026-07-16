@@ -13,10 +13,10 @@ import { LlmService } from "../llm/llm.service";
 import { ChartHelper } from "../tools/chart.helper";
 import { ChartAgent } from "./chart.agent";
 import type { StructuredTool } from "@langchain/core/tools";
-import { createQueryDetailsTool } from "../tools/query-details.tool";
-import { createGenChartTool } from "../tools/gen-chart.tool";
-import { createGenerateInsightTool } from "../tools/generate-insight.tool";
-import { createGetTableSchemaTool } from "../tools/get-table-schema.tool";
+import { QueryDetailsTool } from "../tools/query-details.tool";
+import { GenChartTool } from "../tools/gen-chart.tool";
+import { GenerateInsightTool } from "../tools/generate-insight.tool";
+import { GetTableSchemaTool } from "../tools/get-table-schema.tool";
 import { InsightAgent } from "./insight.agent";
 import { ToolResultContext } from "../tools/tool-result.context";
 import { LlmStatsCollector } from "../llm/llm-stats.collector";
@@ -66,7 +66,11 @@ export type PlannerStreamEvent =
       type: "done";
       data: {
         /** 当前聚合 token 快照,前端 ChatService 透传到 SSE done 事件 */
-        tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+        tokenUsage?: {
+          inputTokens: number;
+          outputTokens: number;
+          totalTokens: number;
+        };
       };
     }
   | { type: "tool_call"; data: PlannerToolCallData }
@@ -98,13 +102,13 @@ export class PlannerAgent {
    * 捕获本次的 currentUserId,工具调用时校验 ownership。
    */
   private buildTools(currentUserId: string): StructuredTool[] {
-    const queryDetailsTool = createQueryDetailsTool(
+    const queryDetailsTool = new QueryDetailsTool(
       this.ds,
       this.metadataService,
       this.gateway,
       currentUserId,
     );
-    const genChartTool = createGenChartTool(
+    const genChartTool = new GenChartTool(
       this.ds,
       this.metadataService,
       this.gateway,
@@ -112,11 +116,11 @@ export class PlannerAgent {
       this.chartAgent,
       currentUserId,
     );
-    const generateInsightTool = createGenerateInsightTool(
+    const generateInsightTool = new GenerateInsightTool(
       this.insightAgent,
       this.toolResultContext,
     );
-    const getTableSchemaTool = createGetTableSchemaTool(
+    const getTableSchemaTool = new GetTableSchemaTool(
       this.ds,
       this.metadataService,
       this.metadataCache,
@@ -222,7 +226,7 @@ ${toolDescs}
     if (typeof content === "string") return content;
     if (Array.isArray(content)) {
       return content
-        .map(part => {
+        .map((part) => {
           if (typeof part === "string") return part;
           if (typeof part === "object" && part !== null && "text" in part) {
             return String(part.text);
@@ -270,8 +274,7 @@ ${toolDescs}
           type: "error",
           data: {
             code: "NO_DATASOURCE",
-            message:
-              "当前会话未绑定数据源，请先在设置中选择数据源后再提问。",
+            message: "当前会话未绑定数据源，请先在设置中选择数据源后再提问。",
           },
         };
         return;
@@ -289,10 +292,13 @@ ${toolDescs}
           let availableList = "";
           try {
             const allDS = await this.ds.listForUser(currentUserId);
-            availableList = allDS.length > 0
-              ? ` 当前可用的数据源: [${allDS.map(d => `${d.id} (${d.name})`).join(", ")}]`
-              : " 当前没有任何已注册的数据源，请先上传 CSV 或连接数据库。";
-          } catch { /* ignore */ }
+            availableList =
+              allDS.length > 0
+                ? ` 当前可用的数据源: [${allDS.map((d) => `${d.id} (${d.name})`).join(", ")}]`
+                : " 当前没有任何已注册的数据源，请先上传 CSV 或连接数据库。";
+          } catch {
+            /* ignore */
+          }
 
           yield {
             type: "error",
@@ -325,10 +331,13 @@ ${toolDescs}
           if (obj && typeof obj === "object") {
             return Object.keys(obj as Record<string, unknown>)
               .sort()
-              .reduce((acc, k) => {
-                acc[k] = stable((obj as Record<string, unknown>)[k]);
-                return acc;
-              }, {} as Record<string, unknown>);
+              .reduce(
+                (acc, k) => {
+                  acc[k] = stable((obj as Record<string, unknown>)[k]);
+                  return acc;
+                },
+                {} as Record<string, unknown>,
+              );
           }
           return obj;
         };
@@ -340,7 +349,9 @@ ${toolDescs}
       while (true) {
         iterations++;
         if (iterations > MAX_ITERATIONS) {
-          this.logger.warn(`Max iterations (${MAX_ITERATIONS}) reached, forcing stop`);
+          this.logger.warn(
+            `Max iterations (${MAX_ITERATIONS}) reached, forcing stop`,
+          );
           yield {
             type: "error",
             data: {
@@ -348,7 +359,10 @@ ${toolDescs}
               message: `已尝试 ${MAX_ITERATIONS} 次,仍无法完成请求,请尝试换一种问法。`,
             },
           };
-          yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
+          yield {
+            type: "done",
+            data: { tokenUsage: this.statsCollector.peek() },
+          };
           return;
         }
 
@@ -360,7 +374,9 @@ ${toolDescs}
 
         for await (const chunk of stream) {
           if (combinedSignal.aborted) {
-            const reason = timeoutController.signal.aborted ? "timeout" : "client_disconnect";
+            const reason = timeoutController.signal.aborted
+              ? "timeout"
+              : "client_disconnect";
             this.logger.log(`[PlannerAgent] Stream aborted (${reason})`);
             return;
           }
@@ -418,11 +434,14 @@ ${toolDescs}
             data: { id: toolCallId, name: toolName, args: toolArgs },
           };
 
-          const tool = tools.find(t => t.name === toolName);
+          const tool = tools.find((t) => t.name === toolName);
           let result: Record<string, unknown>;
 
           // [Fix] 幂等缓存命中:相同 (toolName, args) 直接复用,不再真正执行工具
-          const cacheKey = cacheKeyOf(toolName, toolArgs as Record<string, unknown>);
+          const cacheKey = cacheKeyOf(
+            toolName,
+            toolArgs as Record<string, unknown>,
+          );
           const cached = toolCallCache.get(cacheKey);
           if (cached) {
             this.logger.warn(
@@ -529,13 +548,13 @@ ${toolDescs}
                 message: `工具连续 ${consecutiveErrors} 次执行失败,已停止。请换一种问法或检查数据源。`,
               },
             };
-            yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
+            yield { type: "done", data: {} };
             return;
           }
         }
       }
 
-      yield { type: "done", data: { tokenUsage: this.statsCollector.peek() } };
+      yield { type: "done", data: {} };
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         const reason = timeoutController.signal.aborted
@@ -546,7 +565,10 @@ ${toolDescs}
         );
         yield {
           type: "error",
-          data: { code: "LLM_ABORTED", message: `LLM stream aborted (${reason})` },
+          data: {
+            code: "LLM_ABORTED",
+            message: `LLM stream aborted (${reason})`,
+          },
         };
         return;
       }

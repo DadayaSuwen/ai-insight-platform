@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 // ============================================================
 // [Sprint 1] 多数据源架构 V3 — DataSource 类型契约
@@ -17,11 +17,7 @@ import { z } from 'zod';
 // 1. 数据源类型 + 连接配置
 // ============================================================
 
-export const DataSourceTypeSchema = z.enum([
-  'postgres',
-  'mysql',
-  'duckdb-csv',
-]);
+export const DataSourceTypeSchema = z.enum(["postgres", "mysql", "duckdb-csv"]);
 export type DataSourceType = z.infer<typeof DataSourceTypeSchema>;
 
 /**
@@ -34,21 +30,21 @@ export type DataSourceType = z.infer<typeof DataSourceTypeSchema>;
  * 安全要求(架构师铁律 #3):外部 PG/MySQL 强烈建议使用只读 DB 用户 (`ai_insight_ro`),
  * 即使如此,运行时仍走 sql-guard 正则 + LIMIT 1000 强制包裹。
  */
-export const ConnectionConfigSchema = z.discriminatedUnion('type', [
+export const ConnectionConfigSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal('postgres'),
+    type: z.literal("postgres"),
     host: z.string().min(1),
     port: z.number().int().positive(),
     database: z.string().min(1),
     user: z.string().min(1),
     password: z.string().optional(),
     ssl: z.boolean().default(false),
-    schema: z.string().default('public'),
+    schema: z.string().default("public"),
     /** [Sprint 5.6] CSV 导入时指定目标表名, PgExecutor 仅内省该表 */
     tableName: z.string().optional(),
   }),
   z.object({
-    type: z.literal('mysql'),
+    type: z.literal("mysql"),
     host: z.string().min(1),
     port: z.number().int().positive(),
     database: z.string().min(1),
@@ -56,19 +52,19 @@ export const ConnectionConfigSchema = z.discriminatedUnion('type', [
     password: z.string().optional(),
   }),
   z.object({
-    type: z.literal('duckdb-csv'),
+    type: z.literal("duckdb-csv"),
     /** 相对于 apps/server/uploads/ 的路径(Sprint 3 使用) */
     filePath: z.string().min(1),
     /** DuckDB 暴露给 LLM 的逻辑表名(默认 'data') */
-    tableAlias: z.string().min(1).default('data'),
+    tableAlias: z.string().min(1).default("data"),
     /** [Sprint 4] 列覆写:前端预览页用户修改后的列名 / 类型 */
     columnOverrides: z
       .array(
         z.object({
           originalName: z.string(),
           newName: z.string(),
-          type: z.enum(['AUTO', 'VARCHAR', 'DECIMAL', 'DATE', 'BOOLEAN']),
-        })
+          type: z.enum(["AUTO", "VARCHAR", "DECIMAL", "DATE", "BOOLEAN"]),
+        }),
       )
       .optional(),
   }),
@@ -79,7 +75,7 @@ export type ConnectionConfig = z.infer<typeof ConnectionConfigSchema>;
 // 2. DataSource 主体 (Prisma 模型对齐)
 // ============================================================
 
-export const DataSourceStatusSchema = z.enum(['active', 'paused', 'error']);
+export const DataSourceStatusSchema = z.enum(["active", "paused", "error"]);
 export type DataSourceStatus = z.infer<typeof DataSourceStatusSchema>;
 
 export const DataSourceSchema = z.object({
@@ -88,7 +84,7 @@ export const DataSourceSchema = z.object({
   description: z.string().max(1000).optional(),
   type: DataSourceTypeSchema,
   connectionConfig: ConnectionConfigSchema,
-  status: DataSourceStatusSchema.default('active'),
+  status: DataSourceStatusSchema.default("active"),
   lastError: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -107,10 +103,10 @@ export type DataSource = z.infer<typeof DataSourceSchema>;
  * - 'identifier': 高基数字符串/UUID 列(不适合聚合,只用于过滤)
  */
 export const SemanticRoleSchema = z.enum([
-  'dimension',
-  'measure',
-  'time',
-  'identifier',
+  "dimension",
+  "measure",
+  "time",
+  "identifier",
 ]);
 export type SemanticRole = z.infer<typeof SemanticRoleSchema>;
 

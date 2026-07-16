@@ -138,13 +138,15 @@ export default function SchemaRevisePage() {
           <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/explore/${datasourceId}`)}>
             🔄 重新探索
           </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleSave}
-            disabled={dirtyCount === 0 || saving}
-          >
-            {saving ? '保存中...' : `保存修改${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
-          </button>
+          {cols.length > 0 && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleSave}
+              disabled={dirtyCount === 0 || saving}
+            >
+              {saving ? '保存中...' : `保存修改${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+            </button>
+          )}
         </div>
       </div>
 

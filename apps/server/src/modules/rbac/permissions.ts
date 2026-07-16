@@ -62,3 +62,18 @@ export const ROLE_LABELS: Record<string, string> = {
   analyst: "分析师",
   viewer: "查看者",
 };
+
+/** 所有权限点常量数组 (供前端复选框渲染与后端 Zod 校验) */
+export const PERMISSION_LIST: Array<{ key: string; label: string }> = [
+  { key: PERMISSIONS.VIEW_DASHBOARD, label: "查看工作台" },
+  { key: PERMISSIONS.CHAT_QUERY, label: "对话追问" },
+  { key: PERMISSIONS.VIEW_INSIGHTS, label: "查看主动洞察" },
+  { key: PERMISSIONS.DISMISS_INSIGHTS, label: "处理洞察" },
+  { key: PERMISSIONS.CONNECT_DATASOURCE, label: "连接/管理数据源" },
+  { key: PERMISSIONS.SCHEMA_REVIEW, label: "Schema 修订/确认" },
+  { key: PERMISSIONS.EXPORT_REPORT, label: "导出报告" },
+  { key: PERMISSIONS.USER_MANAGE, label: "用户管理" },
+  { key: PERMISSIONS.ROLE_MANAGE, label: "角色权限管理" },
+  { key: PERMISSIONS.LLM_CONFIG, label: "LLM 模型配置" },
+  { key: PERMISSIONS.AUDIT_LOG, label: "审计日志" },
+];

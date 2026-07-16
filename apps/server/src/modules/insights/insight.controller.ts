@@ -89,6 +89,30 @@ export class InsightController {
     return { success: true, data: items };
   }
 
+  @Get("count")
+  async count(
+    @Query("datasourceId") datasourceId: string,
+    @CurrentUser() user: { sub: string },
+  ) {
+    const ds = await this.datasourceService.getByIdForUser(
+      datasourceId,
+      user.sub,
+    );
+    if (!ds) throw new NotFoundException("DataSource not found");
+
+    const result = await this.db.db
+      .selectFrom("Insight")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .where("datasourceId", "=", datasourceId)
+      .where("status", "=", "active")
+      .executeTakeFirst();
+
+    return {
+      success: true,
+      data: { count: Number(result?.count ?? 0) },
+    };
+  }
+
   @Get(":id")
   async get(@Param("id") id: string, @CurrentUser() user: { sub: string }) {
     const item = await this.db.db

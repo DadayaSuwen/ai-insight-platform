@@ -217,6 +217,11 @@ export class DatasourceService {
 
   /**
    * 更新数据源的 columnAliases (Schema 修订手动编辑后保存)
+   *
+   * [Fix] 同时把新别名应用到已确认的 schemaUnderstanding 里,
+   * 这样 /api/datasources/:id 返回的 schemaUnderstanding 立即反映修改,
+   * 前端页面(包括 Schema 修订页 + ChatWindow 推荐提问 + Dashboard 表卡片)
+   * 都能看到最新字段中文名。
    */
   async updateColumnAliases(
     dataSourceId: string,
@@ -227,14 +232,40 @@ export class DatasourceService {
     if (!record) throw new Error("DataSource not found");
     const config = (record.connectionConfig as Record<string, unknown>) ?? {};
     config.columnAliases = aliases;
+
+    // [Fix] 把别名应用到 schemaUnderstanding.tables.columns
+    const understanding = (record.schemaUnderstanding as Record<string, unknown> | null) ?? null;
+    if (understanding && Array.isArray((understanding as any).tables)) {
+      const tables = (understanding as any).tables as Array<{
+        name: string;
+        columns: Array<{ name: string; chineseName?: string; semanticRole?: string; description?: string }>;
+      }>;
+      for (const t of tables) {
+        for (const col of t.columns) {
+          const alias = aliases[col.name];
+          if (!alias) continue;
+          if (alias.chineseName) col.chineseName = alias.chineseName;
+          if (alias.role === "dimension" ||
+              alias.role === "measure" ||
+              alias.role === "time" ||
+              alias.role === "identifier") {
+            col.semanticRole = alias.role as any;
+          }
+          if (alias.description) col.description = alias.description;
+        }
+      }
+    }
+
     await this.db.db
       .updateTable("DataSource")
       .set({
         connectionConfig: config,
+        schemaUnderstanding: understanding,
         updatedAt: new Date(),
       })
       .where("id", "=", dataSourceId)
       .execute();
+
     return { updated: Object.keys(aliases).length };
   }
 }

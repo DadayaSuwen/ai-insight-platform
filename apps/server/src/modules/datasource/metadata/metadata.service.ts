@@ -51,7 +51,9 @@ export class MetadataService {
 
     // [Sprint 4] executor 创建前解密 connectionConfig.password
     const decrypted = this.ds.decryptConfigForExecutor(
-      record.connectionConfig as unknown as Parameters<ExecutorFactory["create"]>[1],
+      record.connectionConfig as unknown as Parameters<
+        ExecutorFactory["create"]
+      >[1],
     );
 
     // [Sprint 5.6] executor 由 ExecutorFactory 池管理生命周期,
@@ -63,7 +65,8 @@ export class MetadataService {
     // [Sprint 5.7+] 读取用户确认的中文别名 (注册时保存,优先级最高)
     // [Fix-1 Task 1.4] 兼容旧格式(纯字符串 chineseName) + 新格式({chineseName, role, description})
     const config = record.connectionConfig as Record<string, unknown>;
-    const columnAliases = (config?.columnAliases as Record<string, unknown>) ?? {};
+    const columnAliases =
+      (config?.columnAliases as Record<string, unknown>) ?? {};
 
     // [Sprint 5.7+] 用户确认的中文别名先覆盖规则推断 (最高优先级, 快速路径)
     if (Object.keys(columnAliases).length > 0) {
@@ -100,36 +103,42 @@ export class MetadataService {
     snapshot: MetadataSnapshot,
     columnAliases: Record<string, unknown>,
   ): void {
-    Promise.resolve().then(async () => {
-      for (const table of snapshot.tables) {
-        try {
-          const llmResult = await this.semanticInference
-            .inferColumns(table.columns, table.name);
-          if (llmResult) {
-            table.columns = llmResult;
-          } else {
-            table.columns = this.semanticInference.fallbackColumns(table.columns);
+    Promise.resolve()
+      .then(async () => {
+        for (const table of snapshot.tables) {
+          try {
+            const llmResult = await this.semanticInference.inferColumns(
+              table.columns,
+              table.name,
+            );
+            if (llmResult) {
+              table.columns = llmResult;
+            } else {
+              table.columns = this.semanticInference.fallbackColumns(
+                table.columns,
+              );
+            }
+            // 重新应用用户别名覆盖 LLM 推断
+            if (Object.keys(columnAliases).length > 0) {
+              applyUserAliases(snapshot.tables, columnAliases);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `Async semantic inference failed for table "${table.name}": ${(err as Error).message}`,
+            );
           }
-          // 重新应用用户别名覆盖 LLM 推断
-          if (Object.keys(columnAliases).length > 0) {
-            applyUserAliases(snapshot.tables, columnAliases);
-          }
-        } catch (err) {
-          this.logger.warn(
-            `Async semantic inference failed for table "${table.name}": ${(err as Error).message}`,
-          );
         }
-      }
-      // 用 LLM 增强结果更新缓存
-      this.cache.set(dataSourceId, snapshot);
-      this.logger.log(
-        `Metadata[${dataSourceId}] LLM-enriched: ${snapshot.tables.length} tables`,
-      );
-    }).catch((err) => {
-      this.logger.warn(
-        `Async LLM enrichment failed for ${dataSourceId}: ${(err as Error).message}`,
-      );
-    });
+        // 用 LLM 增强结果更新缓存
+        this.cache.set(dataSourceId, snapshot);
+        this.logger.log(
+          `Metadata[${dataSourceId}] LLM-enriched: ${snapshot.tables.length} tables`,
+        );
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `Async LLM enrichment failed for ${dataSourceId}: ${(err as Error).message}`,
+        );
+      });
   }
 
   /**
@@ -154,7 +163,11 @@ function applyUserAliases(
       if (typeof alias === "string") {
         col.chineseName = alias;
       } else if (typeof alias === "object") {
-        const obj = alias as { chineseName?: string; role?: string; description?: string };
+        const obj = alias as {
+          chineseName?: string;
+          role?: string;
+          description?: string;
+        };
         if (obj.chineseName) col.chineseName = obj.chineseName;
         if (
           obj.role === "dimension" ||

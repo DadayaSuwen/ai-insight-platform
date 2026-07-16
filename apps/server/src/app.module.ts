@@ -20,6 +20,8 @@ import { DashboardGeneratorModule } from './modules/dashboard-generator/generato
 import { InsightModule } from './modules/insights/insight.module';
 // [Sprint 6] 用户管理 + 邀请码
 import { UsersModule } from './modules/users/users.module';
+// [Sprint 5.7+] 自定义角色 CRUD
+import { RolesModule } from './modules/roles/roles.module';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { UsersModule } from './modules/users/users.module';
     InsightModule,
     // [Sprint 6] 用户管理 + 邀请码
     UsersModule,
+    // [Sprint 5.7+] 自定义角色 CRUD
+    RolesModule,
   ],
   providers: [
     // [Fix-3 Task 3.4] 全局 ThrottlerGuard — 兜底所有路由

@@ -10,6 +10,7 @@ interface AppState {
 
   fetchLlmConfig: () => Promise<void>;
   saveLlmConfig: (config: LLMConfig) => Promise<{ ok: boolean; message: string }>;
+  activateProvider: (provider: LLMProvider) => Promise<{ ok: boolean; message?: string }>;
   fetchLlmHealth: () => Promise<void>;
 }
 
@@ -61,12 +62,33 @@ export const useAppStore = create<AppState>((set) => ({
       const res = await axiosInstance.post("/llm/config", payload);
       const data = res.data;
       if (data.ok) {
+        // 保存配置不切换活跃 — 活跃状态由 activateProvider 单独控制
         set((state) => ({
           llmConfigs: { ...state.llmConfigs, [config.provider]: config },
-          activeProvider: config.provider,
         }));
       }
       return { ok: !!data.ok, message: data.message ?? "" };
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || `网络错误：${(e as Error).message}` };
+    }
+  },
+
+  /**
+   * [Fix] 显式切换活跃 Provider — 与保存配置解耦。
+   * 调用后端 /llm/config (不传 model 等也会保留),然后拉一次最新 activeProvider。
+   */
+  activateProvider: async (provider: LLMProvider) => {
+    try {
+      const res = await axiosInstance.post<{ success: boolean; data: { activeProvider: LLMProvider } }>(
+        "/llm/config/active",
+        { provider },
+      );
+      const active = res.data?.data?.activeProvider ?? provider;
+      set({ activeProvider: active });
+      // 重新拉一次完整配置同步 UI
+      const cur = useAppStore.getState();
+      await cur.fetchLlmConfig();
+      return { ok: true };
     } catch (e: any) {
       return { ok: false, message: e?.response?.data?.message || `网络错误：${(e as Error).message}` };
     }

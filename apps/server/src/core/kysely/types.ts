@@ -8,8 +8,21 @@ export interface UserTable {
   email: string;
   passwordHash: string;
   name: string | null;
-  role: string;        // admin | analyst | viewer
+  role: string;        // admin | analyst | viewer | custom role name
   status: string;      // active | disabled
+  customRoleId: string | null;
+  createdAt: Generated<Date>;
+  updatedAt: Date;
+}
+
+export interface RoleTable {
+  id: Generated<string>;
+  name: string;
+  label: string;
+  description: string | null;
+  /** JSON 字符串, 应用层 parse 成 string[] */
+  permissions: string;
+  isSystem: boolean;
   createdAt: Generated<Date>;
   updatedAt: Date;
 }
@@ -42,6 +55,7 @@ export interface ChatMessageTable {
 
 export interface Database {
   User: UserTable;
+  Role: RoleTable;
   ChatSession: ChatSessionTable;
   ChatMessage: ChatMessageTable;
   LLMConfig: LLMConfigTable;

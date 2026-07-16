@@ -26,12 +26,32 @@ model User {
   email        String        @unique
   passwordHash String
   name         String?
-  role         String        @default("admin") // admin | analyst | viewer
+  role         String        @default("admin") // admin | analyst | viewer | 自定义 Role.name
   status       String        @default("active") // active | disabled
+  /// [Sprint 5.7+] 自定义角色 — 若设置, PermissionsGuard 会合并 Role.permissions 进用户的权限集
+  customRoleId String?
+  customRole   Role?         @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   dataSources  DataSource[]
   sessions     ChatSession[]
+}
+
+/// [Sprint 5.7+] 自定义角色 — 管理员可在 /admin/roles 创建并分配权限。
+/// 系统角色 (admin/analyst/viewer) 由代码硬编码,不可创建/删除; isSystem=true 锁定。
+model Role {
+  id          String   @id @default(uuid())
+  /// 内部唯一名 (admin/analyst/viewer 是系统保留名, 自定义需 custom_xxx 或独立名)
+  name        String   @unique
+  /// 显示用中文名
+  label       String
+  description String?
+  /// JSON 数组, 如 ["dashboard:view","chat:create"]
+  permissions String   @default("[]")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
 }
 
 model DataSource {

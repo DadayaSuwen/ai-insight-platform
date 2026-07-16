@@ -10,6 +10,8 @@ import { TrendingUp, TrendingDown, RefreshCw, MessageSquare, Edit3, Loader2 } fr
 import * as echarts from 'echarts';
 import { useDashboard } from './hooks/useDashboard';
 import { executeDashboard, type KpiSpec, type ChartSpec } from './api';
+import { getDatasourceSchema, type SchemaUnderstanding } from '../schema-review/api';
+import { useDatasourceStore } from '../../core/store/datasource-store';
 import { toast } from '../../store/toast';
 
 export default function DashboardPage() {
@@ -17,6 +19,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
 
   const { config, loading, error, regenerate } = useDashboard(datasourceId);
+  const datasourceName = useDatasourceStore((s) => s.currentDatasourceName);
 
   const [kpiValues, setKpiValues] = useState<Record<string, number | null>>({});
   const [chartData, setChartData] = useState<Record<string, Array<Record<string, unknown>>>>({});
@@ -112,7 +115,7 @@ export default function DashboardPage() {
 
   if (!config) return null;
 
-  const dsName = datasourceId?.slice(0, 8) ?? '数据源';
+  const dsName = datasourceName || datasourceId?.slice(0, 8) || '数据源';
 
   return (
     <>
@@ -210,56 +213,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 洞察列表 */}
-      {config.insights && config.insights.length > 0 && (
-        <div className="card overflow-hidden mb-6">
-          <div className="card-header">
-            <div className="card-title">Agent 主动洞察</div>
-            <span className="chip amber">{config.insights.length} 条</span>
-          </div>
-          <div className="card-body p-4">
-            <div className="flex flex-col gap-3">
-              {config.insights.map((insight, i) => {
-                const bgMap = {
-                  trend_anomaly: 'var(--error-light)',
-                  distribution_change: 'var(--warning-light)',
-                  opportunity: 'var(--green-lighter)',
-                  risk: 'var(--error-light)',
-                };
-                const borderMap = {
-                  trend_anomaly: 'var(--error)',
-                  distribution_change: 'var(--warning)',
-                  opportunity: 'var(--green)',
-                  risk: 'var(--error)',
-                };
-                const colorMap = {
-                  trend_anomaly: 'var(--error-dark)',
-                  distribution_change: 'var(--warning)',
-                  opportunity: 'var(--green-dark)',
-                  risk: 'var(--error-dark)',
-                };
-                return (
-                  <div key={i} className="p-3 rounded-lg" style={{
-                    background: bgMap[insight.type as keyof typeof bgMap] || 'var(--bg-secondary)',
-                    borderLeft: `3px solid ${borderMap[insight.type as keyof typeof borderMap] || 'var(--border)'}`,
-                  }}>
-                    <div className="text-xs font-semibold" style={{ color: colorMap[insight.type as keyof typeof colorMap] || 'var(--text-primary)' }}>
-                      {insight.type === 'trend_anomaly' ? '⚠' : insight.type === 'risk' ? '🔴' : insight.type === 'opportunity' ? '✦' : '📊'} {insight.description}
-                    </div>
-                    <div className="text-xs text-muted mt-1">
-                      {insight.table}.{insight.metric}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 数据库结构概览 — 来自 schemaUnderstanding */}
-      {config.kpis.length > 0 && (
-        <SchemaOverviewCard datasourceId={datasourceId ?? ''} />
+      {/* 数据库结构概览 — 点击表名可对话分析 */}
+      {datasourceId && (
+        <SchemaOverviewCard datasourceId={datasourceId} onAnalyzeTable={(table) => navigate(`/chat/${datasourceId}`)} />
       )}
     </>
   );
@@ -414,41 +370,97 @@ function buildEChartsOption(chart: ChartSpec, data: Array<Record<string, unknown
 
 /* ───────── Schema 概览卡片 ───────── */
 
-function SchemaOverviewCard({ datasourceId }: { datasourceId: string }) {
-  const [tables, setTables] = useState<Array<{ name: string; rowCount: number; cols: number; icon: string }>>([]);
-  const [loaded, setLoaded] = useState(false);
+function SchemaOverviewCard({
+  datasourceId,
+  onAnalyzeTable,
+}: {
+  datasourceId: string;
+  onAnalyzeTable?: (tableName: string) => void;
+}) {
+  const [schema, setSchema] = useState<SchemaUnderstanding | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!datasourceId || loaded) return;
-    // 通过 getDashboard 拿到的 config 不含 schema 细节，
-    // 这里从 dataSource store 或单独请求获取 schema 概览
-    // 暂时用占位：后续如果有 API 再补充
-    setLoaded(true);
-  }, [datasourceId, loaded]);
+    if (!datasourceId) return;
+    let cancelled = false;
+    setLoading(true);
+    getDatasourceSchema(datasourceId)
+      .then((res) => {
+        if (!cancelled) {
+          setSchema(res.schemaUnderstanding);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [datasourceId]);
 
+  if (loading) {
+    return (
+      <div className="card overflow-hidden mb-6">
+        <div className="card-header">
+          <div className="card-title">数据库结构概览</div>
+        </div>
+        <div className="card-body p-4">
+          <div className="text-sm text-muted">加载中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  const tables = schema?.tables ?? [];
   if (tables.length === 0) return null;
 
   return (
-    <div className="card">
+    <div className="card overflow-hidden mb-6">
       <div className="card-header">
-        <div className="card-title">数据库结构概览 · {tables.length} 张表</div>
+        <div className="card-title">🗄️ 数据库结构概览 · {tables.length} 张表</div>
+        <span className="chip green">点击表名可对话分析</span>
       </div>
       <div className="card-body p-4">
         <div className="grid grid-4 gap-3">
-          {tables.map((t) => (
-            <div
-              key={t.name}
-              className="p-3.5 bg-muted rounded-xl border border-default flex items-center gap-2.5"
-            >
-              <div className="text-2xl">{t.icon}</div>
-              <div>
-                <div className="text-sm font-semibold">{t.name}</div>
-                <div className="text-xs text-muted mt-0.5">
-                  <span className="num">{t.rowCount.toLocaleString()}</span> 行 · {t.cols} 列
+          {tables.map((t) => {
+            const measureCount = t.columns.filter(
+              (c) => c.semanticRole === "measure",
+            ).length;
+            const dimCount = t.columns.filter(
+              (c) =>
+                c.semanticRole === "dimension" || c.semanticRole === "time",
+            ).length;
+            return (
+              <button
+                key={t.name}
+                className="p-3.5 bg-muted rounded-xl border border-default text-left hover:border-green hover:bg-[var(--green-lighter)] transition-colors cursor-pointer"
+                onClick={() => onAnalyzeTable?.(t.name)}
+                title={`点击分析 ${t.name} 表`}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold truncate">
+                    {t.name}
+                  </div>
+                  <div className="text-xs text-muted mt-0.5">
+                    {t.columns.length} 字段
+                    {measureCount > 0 && <> · {measureCount} 指标</>}
+                    {dimCount > 0 && <> · {dimCount} 维度</>}
+                    {t.rowCount != null && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <span className="num">
+                          {t.rowCount.toLocaleString()}
+                        </span>{" "}
+                        行
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

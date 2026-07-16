@@ -35,4 +35,21 @@ export const insightsApi = {
 
   shield: (insightId: string) =>
     axiosInstance.post<{ success: boolean }>(`/api/insights/${insightId}/shield`),
+
+  /** 获取数据源的活跃洞察数量 (用于侧边栏 badge) */
+  count: async (datasourceId: string): Promise<number> => {
+    const res = await axiosInstance.get<{
+      success: boolean;
+      data: { count: number };
+    }>("/api/insights/count", { params: { datasourceId } });
+    return res.data.data?.count ?? 0;
+  },
+
+  /** 手动触发巡检 */
+  runNow: (datasourceId: string) =>
+    axiosInstance.post<{ success: boolean; data?: unknown }>(
+      "/api/insights/run-now",
+      null,
+      { params: { datasourceId } },
+    ),
 };

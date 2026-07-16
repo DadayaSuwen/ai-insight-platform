@@ -4,6 +4,7 @@ import type { ChatSession } from '../../../types/chat';
 import {
   loadSessions,
   loadCurrentSessionId,
+  saveCurrentSessionId,
   loadSidebarOpen,
   loadSidebarCollapsed,
   loadSearchQuery,
@@ -120,7 +121,10 @@ export const useChatStore = create<ChatState>((set) => ({
   // [Sprint 3] 用户选择的数据源 (null = 未选择)
   selectedDataSourceId: loadSelectedDataSourceId(),
 
-  setCurrentSessionId: (id) => set({ currentSessionId: id }),
+  setCurrentSessionId: (id) => {
+    saveCurrentSessionId(id);
+    set({ currentSessionId: id });
+  },
   setSessions: (s) => set({ sessions: s }),
   upsertSession: (s) =>
     set((state) => {

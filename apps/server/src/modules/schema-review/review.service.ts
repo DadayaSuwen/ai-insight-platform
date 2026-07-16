@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+} from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { DatabaseService } from "../database/database.service";
 import { MetadataService } from "../datasource/metadata/metadata.service";
@@ -93,7 +98,8 @@ export class ReviewService {
             rawType: col.rawType,
             currentGuess: col.chineseName ?? col.name,
             confidence,
-            sampleValues: (col.sampleValues as string[] | undefined)?.slice(0, 10) ?? [],
+            sampleValues:
+              (col.sampleValues as string[] | undefined)?.slice(0, 10) ?? [],
           });
         }
       }
@@ -175,7 +181,8 @@ export class ReviewService {
             rawType: col.rawType,
             currentGuess: col.chineseName ?? col.name,
             confidence,
-            sampleValues: (col.sampleValues as string[] | undefined)?.slice(0, 10) ?? [],
+            sampleValues:
+              (col.sampleValues as string[] | undefined)?.slice(0, 10) ?? [],
           });
         }
       }
@@ -232,8 +239,7 @@ export class ReviewService {
 
     try {
       const result = await this.llm.invokeStructured({
-        system:
-          "你是数据库 Schema 分析专家。对不确定的字段向用户提问确认。",
+        system: "你是数据库 Schema 分析专家。对不确定的字段向用户提问确认。",
         human: `请为以下字段生成一个简洁的确认提问：
 
 表名: ${target.table}
@@ -265,7 +271,12 @@ export class ReviewService {
       });
       await this.db.db
         .updateTable("SchemaReview")
-        .set({ messages: JSON.stringify(messages) as unknown as Record<string, unknown> })
+        .set({
+          messages: JSON.stringify(messages) as unknown as Record<
+            string,
+            unknown
+          >,
+        })
         .where("id", "=", reviewId)
         .execute();
 
@@ -305,14 +316,23 @@ export class ReviewService {
     answer: string,
     userId: string,
   ): Promise<{
-    updated: { table: string; field: string; chineseName: string; role: string } | null;
+    updated: {
+      table: string;
+      field: string;
+      chineseName: string;
+      role: string;
+    } | null;
     remaining: number;
   }> {
     const review = await this.getReviewOwnedByUser(reviewId, userId);
 
     // 保存用户消息
     const messages = this.parseMessages(review.messages);
-    messages.push({ role: "user", content: answer, ts: new Date().toISOString() });
+    messages.push({
+      role: "user",
+      content: answer,
+      ts: new Date().toISOString(),
+    });
 
     // 找到当前提问的字段
     const lastQuestion = [...messages]
@@ -328,7 +348,12 @@ export class ReviewService {
       );
       await this.db.db
         .updateTable("SchemaReview")
-        .set({ messages: JSON.stringify(messages) as unknown as Record<string, unknown> })
+        .set({
+          messages: JSON.stringify(messages) as unknown as Record<
+            string,
+            unknown
+          >,
+        })
         .where("id", "=", reviewId)
         .execute();
       return { updated: null, remaining: pendingCount };
@@ -353,16 +378,15 @@ export class ReviewService {
       });
 
       // 更新 connectionConfig 中的 columnAliases
-      const dsRecord = await this.ds.getById(
-        review.datasourceId as string,
-      );
+      const dsRecord = await this.ds.getById(review.datasourceId as string);
       if (dsRecord) {
-        const config = (dsRecord.connectionConfig as Record<string, unknown>) ?? {};
+        const config =
+          (dsRecord.connectionConfig as Record<string, unknown>) ?? {};
         const aliases = (config.columnAliases as Record<string, unknown>) ?? {};
         // 论文创新点 #2：持久化用户对字段语义的完整纠正（不只 chineseName）
         aliases[parsed.fieldName] = {
           chineseName: parsed.chineseName,
-          role: parsed.role,             // 用户纠正的语义角色
+          role: parsed.role, // 用户纠正的语义角色
           description: parsed.description, // 用户补充的描述
         };
         config.columnAliases = aliases;
@@ -386,19 +410,27 @@ export class ReviewService {
         ts: new Date().toISOString(),
       });
 
-      const remaining = await this.countRemaining(review.datasourceId as string, messages);
+      const remaining = await this.countRemaining(
+        review.datasourceId as string,
+        messages,
+      );
 
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+          messages: JSON.stringify(messages) as unknown as Record<
+            string,
+            unknown
+          >,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: remaining,
         })
         .where("id", "=", reviewId)
         .execute();
 
-      this.logger.log(`Field confirmed: ${targetField} → ${parsed.chineseName}`);
+      this.logger.log(
+        `Field confirmed: ${targetField} → ${parsed.chineseName}`,
+      );
 
       return {
         updated: {
@@ -422,7 +454,10 @@ export class ReviewService {
       await this.db.db
         .updateTable("SchemaReview")
         .set({
-          messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+          messages: JSON.stringify(messages) as unknown as Record<
+            string,
+            unknown
+          >,
           confirmedFields: (review.confirmedFields as number) + 1,
           pendingFields: Math.max(0, (review.pendingFields as number) - 1),
         })
@@ -430,7 +465,12 @@ export class ReviewService {
         .execute();
 
       return {
-        updated: { table: tableName, field: fieldName, chineseName: answer.slice(0, 30), role: "dimension" },
+        updated: {
+          table: tableName,
+          field: fieldName,
+          chineseName: answer.slice(0, 30),
+          role: "dimension",
+        },
         remaining: Math.max(0, (review.pendingFields as number) - 1),
       };
     }
@@ -440,7 +480,10 @@ export class ReviewService {
    * 批量确认 — 一键将所有待确认字段按当前 AI 推断值确认。
    * 跳过逐个问答, 直接写入 columnAliases 并标记全部字段为已确认。
    */
-  async confirmAllFields(reviewId: string, userId: string): Promise<{
+  async confirmAllFields(
+    reviewId: string,
+    userId: string,
+  ): Promise<{
     confirmed: number;
     total: number;
   }> {
@@ -453,7 +496,8 @@ export class ReviewService {
 
     // 读取现有 columnAliases
     const dsRecord = await this.ds.getById(review.datasourceId as string);
-    const config = (dsRecord?.connectionConfig as Record<string, unknown>) ?? {};
+    const config =
+      (dsRecord?.connectionConfig as Record<string, unknown>) ?? {};
     const aliases = (config.columnAliases as Record<string, unknown>) ?? {};
 
     const messages = this.parseMessages(review.messages);
@@ -463,11 +507,14 @@ export class ReviewService {
       if (!aliases[key]) {
         aliases[key] = {
           chineseName: f.currentGuess,
-          role: f.rawType === "date" || f.rawType === "timestamp"
-            ? "time"
-            : f.currentGuess.includes("额") || f.currentGuess.includes("价") || f.currentGuess.includes("量")
-              ? "measure"
-              : "dimension",
+          role:
+            f.rawType === "date" || f.rawType === "timestamp"
+              ? "time"
+              : f.currentGuess.includes("额") ||
+                  f.currentGuess.includes("价") ||
+                  f.currentGuess.includes("量")
+                ? "measure"
+                : "dimension",
           description: `批量确认: ${f.currentGuess} (${f.rawType})`,
         };
       }
@@ -493,7 +540,10 @@ export class ReviewService {
     await this.db.db
       .updateTable("SchemaReview")
       .set({
-        messages: JSON.stringify(messages) as unknown as Record<string, unknown>,
+        messages: JSON.stringify(messages) as unknown as Record<
+          string,
+          unknown
+        >,
         confirmedFields: (review.confirmedFields as number) + fields.length,
         pendingFields: 0,
       })
@@ -504,7 +554,9 @@ export class ReviewService {
     try {
       await this.meta.get(review.datasourceId as string, { refresh: true });
     } catch (err) {
-      this.logger.warn(`Metadata refresh after batch confirm failed: ${(err as Error).message}`);
+      this.logger.warn(
+        `Metadata refresh after batch confirm failed: ${(err as Error).message}`,
+      );
     }
 
     this.logger.log(
@@ -519,13 +571,18 @@ export class ReviewService {
    *
    * [Fix-1 Task 1.2] 增加 userId 参数 + 归属校验, 防止越权
    */
-  async finalizeReview(reviewId: string, userId: string): Promise<{
+  async finalizeReview(
+    reviewId: string,
+    userId: string,
+  ): Promise<{
     schemaUnderstanding: Record<string, unknown>;
   }> {
     const review = await this.getReviewOwnedByUser(reviewId, userId);
 
     if ((review.status as string) === "finalized") {
-      this.logger.log(`Review ${reviewId} already finalized, returning existing schema`);
+      this.logger.log(
+        `Review ${reviewId} already finalized, returning existing schema`,
+      );
       return { schemaUnderstanding: (review as any).finalSchema ?? {} };
     }
 
@@ -563,9 +620,7 @@ export class ReviewService {
       .where("id", "=", reviewId)
       .execute();
 
-    this.logger.log(
-      `Review finalized for ${review.datasourceId as string}`,
-    );
+    this.logger.log(`Review finalized for ${review.datasourceId as string}`);
 
     return { schemaUnderstanding: understanding };
   }
@@ -580,7 +635,11 @@ export class ReviewService {
   private parseMessages(raw: unknown): ReviewMessage[] {
     if (Array.isArray(raw)) return raw as ReviewMessage[];
     if (typeof raw === "string") {
-      try { return JSON.parse(raw) as ReviewMessage[]; } catch { return []; }
+      try {
+        return JSON.parse(raw) as ReviewMessage[];
+      } catch {
+        return [];
+      }
     }
     return [];
   }
@@ -629,7 +688,10 @@ export class ReviewService {
     if (!review) throw new NotFoundException("Review not found");
 
     // 通过 datasource 校验归属 — 越权时 getByIdForUser 返回 null → 抛 NotFound
-    const ds = await this.ds.getByIdForUser(review.datasourceId as string, userId);
+    const ds = await this.ds.getByIdForUser(
+      review.datasourceId as string,
+      userId,
+    );
     if (!ds) throw new NotFoundException("Review not found");
 
     return review;

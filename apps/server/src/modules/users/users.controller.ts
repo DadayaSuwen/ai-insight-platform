@@ -1,16 +1,20 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Logger,
   Param,
   Post,
   Put,
   UseGuards,
   NotFoundException,
+  BadRequestException,
 } from "@nestjs/common";
 import { z } from "zod";
 import * as bcrypt from "bcrypt";
 import * as crypto from "crypto";
+import { randomUUID } from "crypto";
 import { JwtAuthGuard } from "../auth/auth.guard";
 import { CurrentUser } from "../auth/auth.decorators";
 import { PermissionsGuard } from "../rbac/permissions.guard";
@@ -32,13 +36,15 @@ const CreateUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().optional(),
-  role: z.enum(["admin", "analyst", "viewer"]).default("analyst"),
+  role: z.string().min(1).max(64).default("analyst"),
+  customRoleId: z.string().uuid().optional().nullable(),
 });
 
 const UpdateUserSchema = z.object({
-  role: z.enum(["admin", "analyst", "viewer"]).optional(),
+  role: z.string().min(1).max(64).optional(), // 允许自定义角色 name
   status: z.enum(["active", "disabled"]).optional(),
   name: z.string().optional(),
+  customRoleId: z.string().uuid().optional().nullable(),
 });
 
 const InviteCodeCreateSchema = z.object({
@@ -49,6 +55,8 @@ const InviteCodeCreateSchema = z.object({
 @Controller("api")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class UsersController {
+  private readonly logger = new Logger(UsersController.name);
+
   constructor(private readonly db: DatabaseService) {}
 
   @Get("users")
@@ -56,7 +64,7 @@ export class UsersController {
   async list() {
     const users = await this.db.db
       .selectFrom("User")
-      .select(["id", "email", "name", "role", "status", "createdAt", "updatedAt"])
+      .select(["id", "email", "name", "role", "status", "customRoleId", "createdAt", "updatedAt"])
       .orderBy("createdAt", "desc")
       .execute();
     return { success: true, data: users };
@@ -65,23 +73,33 @@ export class UsersController {
   @Post("users")
   @Permissions(PERMISSIONS.USER_MANAGE)
   async create(@Body() body: unknown) {
-    const parsed = CreateUserSchema.parse(body);
-    const passwordHash = await bcrypt.hash(parsed.password, 10);
+    try {
+      const parsed = CreateUserSchema.parse(body);
+      const passwordHash = await bcrypt.hash(parsed.password, 10);
 
-    const created = await this.db.db
-      .insertInto("User")
-      .values({
-        email: parsed.email,
-        passwordHash,
-        name: parsed.name ?? null,
-        role: parsed.role,
-        status: "active",
-        updatedAt: new Date(),
-      })
-      .returning(["id", "email", "name", "role", "status"])
-      .executeTakeFirstOrThrow();
+      const created = await this.db.db
+        .insertInto("User")
+        .values({
+          id: randomUUID(),
+          email: parsed.email,
+          passwordHash,
+          name: parsed.name ?? null,
+          role: parsed.role,
+          status: "active",
+          customRoleId: parsed.customRoleId ?? null,
+          updatedAt: new Date(),
+        })
+        .returning(["id", "email", "name", "role", "status", "customRoleId"])
+        .executeTakeFirstOrThrow();
 
-    return { success: true, data: created };
+      return { success: true, data: created };
+    } catch (err) {
+      this.logger.error(
+        `POST /api/users failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
   }
 
   @Put("users/:id")
@@ -100,6 +118,7 @@ export class UsersController {
     if (parsed.role !== undefined) setUpdate.role = parsed.role;
     if (parsed.status !== undefined) setUpdate.status = parsed.status;
     if (parsed.name !== undefined) setUpdate.name = parsed.name;
+    if (parsed.customRoleId !== undefined) setUpdate.customRoleId = parsed.customRoleId;
 
     await this.db.db
       .updateTable("User")
@@ -107,6 +126,37 @@ export class UsersController {
       .where("id", "=", id)
       .execute();
 
+    return { success: true };
+  }
+
+  @Delete("users/:id")
+  @Permissions(PERMISSIONS.USER_MANAGE)
+  async delete(@Param("id") id: string, @CurrentUser() user: { sub: string }) {
+    if (id === user.sub) {
+      throw new BadRequestException("不能删除自己");
+    }
+
+    const target = await this.db.db
+      .selectFrom("User")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!target) throw new NotFoundException("User not found");
+
+    // 至少保留 1 个活跃管理员
+    if (target.role === "admin" && target.status === "active") {
+      const admins = await this.db.db
+        .selectFrom("User")
+        .select("id")
+        .where("role", "=", "admin")
+        .where("status", "=", "active")
+        .execute();
+      if (admins.length <= 1) {
+        throw new BadRequestException("至少保留 1 个活跃管理员");
+      }
+    }
+
+    await this.db.db.deleteFrom("User").where("id", "=", id).execute();
     return { success: true };
   }
 
@@ -149,5 +199,18 @@ export class UsersController {
       .orderBy("createdAt", "desc")
       .execute();
     return { success: true, data: codes };
+  }
+
+  @Delete("invite-codes/:id")
+  @Permissions(PERMISSIONS.USER_MANAGE)
+  async revokeInviteCode(@Param("id") id: string) {
+    const existing = await this.db.db
+      .selectFrom("InviteCode")
+      .select("id")
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!existing) throw new NotFoundException("InviteCode not found");
+    await this.db.db.deleteFrom("InviteCode").where("id", "=", id).execute();
+    return { success: true };
   }
 }

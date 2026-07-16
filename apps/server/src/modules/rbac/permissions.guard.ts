@@ -31,10 +31,18 @@ export interface AuthenticatedRequest extends Request {
   user: JwtPayload;
 }
 
+interface CachedPerms {
+  /** 系统角色 (admin/analyst/viewer) 的内置权限 */
+  systemPerms: Permission[];
+  /** 自定义角色追加的权限 (若 user 有 customRoleId) */
+  customPerms: Permission[];
+  ts: number;
+}
+
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  /** 缓存 userId→role, 避免每次请求都查 DB */
-  private roleCache = new Map<string, { role: string; ts: number }>();
+  /** 缓存 userId→合并后的权限列表, 避免每次请求都查 DB */
+  private permCache = new Map<string, CachedPerms>();
   private readonly CACHE_TTL = 60_000; // 1 分钟
 
   constructor(
@@ -60,15 +68,12 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException("未登录");
     }
 
-    const role = await this.getUserRole(userId);
-    if (!role) {
+    const { systemPerms, customPerms } = await this.getUserPerms(userId);
+    if (systemPerms === null) {
       throw new ForbiddenException("用户不存在或已禁用");
     }
 
-    const userPerms = ROLE_PERMISSIONS[role];
-    if (!userPerms) {
-      throw new ForbiddenException(`未知角色: ${role}`);
-    }
+    const userPerms = [...new Set([...systemPerms, ...customPerms])];
 
     const hasAll = required.every((p) => userPerms.includes(p));
     if (!hasAll) {
@@ -81,21 +86,42 @@ export class PermissionsGuard implements CanActivate {
     return true;
   }
 
-  private async getUserRole(userId: string): Promise<string | null> {
-    const cached = this.roleCache.get(userId);
+  private async getUserPerms(userId: string): Promise<CachedPerms> {
+    const cached = this.permCache.get(userId);
     if (cached && Date.now() - cached.ts < this.CACHE_TTL) {
-      return cached.role;
+      return cached;
     }
 
     const user = await this.db.db
       .selectFrom("User")
-      .select(["role", "status"])
+      .select(["role", "status", "customRoleId"])
       .where("id", "=", userId)
       .executeTakeFirst();
 
-    if (!user || user.status !== "active") return null;
+    if (!user || user.status !== "active") {
+      return { systemPerms: null as unknown as Permission[], customPerms: [], ts: Date.now() };
+    }
 
-    this.roleCache.set(userId, { role: user.role, ts: Date.now() });
-    return user.role;
+    const systemPerms = (ROLE_PERMISSIONS[user.role] ?? []) as Permission[];
+    let customPerms: Permission[] = [];
+    if (user.customRoleId) {
+      const customRole = await this.db.db
+        .selectFrom("Role")
+        .select(["permissions"])
+        .where("id", "=", user.customRoleId)
+        .executeTakeFirst();
+      if (customRole) {
+        try {
+          const arr = JSON.parse(customRole.permissions);
+          if (Array.isArray(arr)) customPerms = arr as Permission[];
+        } catch {
+          /* 损坏的 JSON 视为空 */
+        }
+      }
+    }
+
+    const entry = { systemPerms, customPerms, ts: Date.now() };
+    this.permCache.set(userId, entry);
+    return entry;
   }
 }

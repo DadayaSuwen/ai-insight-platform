@@ -1,11 +1,9 @@
 /**
- * [Fix-11 Task 11.1] 模型配置页 — 接入真实 API
- *
- * 删除 Fix-7 mock (PROVIDERS 数组)
- * 改用 useAppStore.saveLlmConfig / fetchLlmConfig / fetchLlmHealth
+ * 模型配置页 — 每个 Provider 卡片自带表单 state,
+ * 两个卡片同时显示完整表单,可以分别配置、单独"设为活跃"。
  */
 import { useEffect, useState } from 'react';
-import { LLMProvider, type LLMConfig } from '@workspace/types';
+import { LLMProvider } from '@workspace/types';
 import { useAppStore } from '../../core/store';
 import { toast } from '../../store/toast';
 
@@ -32,54 +30,53 @@ function maskKey(key: string): string {
   return `${key.slice(0, 6)}…${key.slice(-4)}`;
 }
 
-export default function LlmConfigPage() {
-  const [tab, setTab] = useState<Tab>('provider');
-  const { llmConfigs, activeProvider, isLoadingConfig, fetchLlmConfig, saveLlmConfig, fetchLlmHealth, llmHealth } = useAppStore();
+/* ───────── Provider 卡片 (自带表单 state) ───────── */
 
-  // 当前选中的 provider（用于切换表单）
-  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>(LLMProvider.OPENAI);
+function ProviderCard({ provider }: { provider: LLMProvider }) {
+  const meta = PROVIDER_META[provider];
+  const saved = useAppStore((s) => s.llmConfigs[provider]);
+  const isActive = useAppStore((s) => s.activeProvider === provider);
+  const saveLlmConfig = useAppStore((s) => s.saveLlmConfig);
+  const activateProvider = useAppStore((s) => s.activateProvider);
+  const fetchLlmConfig = useAppStore((s) => s.fetchLlmConfig);
 
-  // 表单 state
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [baseUrl, setBaseUrl] = useState(getDefaultBaseUrl(LLMProvider.OPENAI));
-  const [model, setModel] = useState('gpt-4o-mini');
+  const [baseUrl, setBaseUrl] = useState(getDefaultBaseUrl(provider));
+  const [model, setModel] = useState(
+    provider === LLMProvider.OPENAI ? 'gpt-4o-mini' : 'claude-3-5-sonnet',
+  );
   const [temperature, setTemperature] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [testingHealth, setTestingHealth] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
-  // 加载配置
+  // 已保存配置变化时,若当前未编辑则同步到表单
   useEffect(() => {
-    fetchLlmConfig();
-  }, [fetchLlmConfig]);
-
-  // 配置加载后预填表单
-  useEffect(() => {
-    const saved = llmConfigs[selectedProvider];
-    if (saved) {
-      setBaseUrl(saved.baseUrl ?? getDefaultBaseUrl(selectedProvider));
+    if (saved && !dirty) {
+      setBaseUrl(saved.baseUrl ?? getDefaultBaseUrl(provider));
       setModel(saved.model);
       setTemperature(saved.temperature);
-      // apiKeyInput 留空 — 保留已存的 key
-    } else {
-      setBaseUrl(getDefaultBaseUrl(selectedProvider));
-      setModel(selectedProvider === LLMProvider.OPENAI ? 'gpt-4o-mini' : 'claude-3-5-sonnet');
-      setTemperature(0);
     }
-  }, [llmConfigs, selectedProvider]);
+  }, [saved, provider, dirty]);
 
-  // 保存
+  // isActive 切换时,刷新 saved 配置 (确保显示最新)
+  useEffect(() => {
+    if (isActive) fetchLlmConfig();
+  }, [isActive, fetchLlmConfig]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await saveLlmConfig({
-        provider: selectedProvider,
+        provider,
         apiKey: apiKeyInput || undefined,
         baseUrl,
         model,
         temperature,
       });
-      toast.success(`${PROVIDER_META[selectedProvider].name} 配置已保存`);
+      toast.success(`${meta.name} 配置已保存`);
       setApiKeyInput('');
+      setDirty(false);
     } catch (err) {
       toast.error(`保存失败: ${(err as Error).message}`);
     } finally {
@@ -87,20 +84,141 @@ export default function LlmConfigPage() {
     }
   };
 
-  // 测试健康
-  const handleTestHealth = async () => {
-    setTestingHealth(true);
+  const handleActivate = async () => {
+    setActivating(true);
     try {
-      await fetchLlmHealth();
-      const health = useAppStore.getState().llmHealth;
-      const ok = selectedProvider === LLMProvider.OPENAI ? health?.openai : health?.anthropic;
-      toast.success(ok ? '连接正常' : '连接失败');
-    } catch {
-      toast.error('测试失败');
+      const result = await activateProvider(provider);
+      if (result.ok) {
+        toast.success(`已切换到 ${meta.name}`);
+      } else {
+        toast.error(`切换失败: ${result.message}`);
+      }
+    } catch (err) {
+      toast.error(`切换失败: ${(err as Error).message}`);
     } finally {
-      setTestingHealth(false);
+      setActivating(false);
     }
   };
+
+  return (
+    <div
+      className="card"
+      style={
+        isActive
+          ? {
+              borderColor: "var(--green)",
+              boxShadow: "0 0 0 2px var(--green-lighter)",
+              background: "var(--green-bg)",
+            }
+          : undefined
+      }
+    >
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">{meta.icon}</span>
+          <div>
+            <div className="card-title">
+              {meta.name}
+              {isActive && (
+                <span
+                  className="chip ml-1.5 text-[10px]"
+                  style={{ background: "var(--green)", color: "white" }}
+                >
+                  ✓ 活跃
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-muted">{meta.models}</div>
+          </div>
+        </div>
+        <span className={`badge ${saved?.apiKey ? 'badge-success' : 'badge-warning'}`}>
+          {saved?.apiKey ? '已配置' : '未配置'}
+        </span>
+      </div>
+      <div className="card-body p-4">
+        <div className="mb-3">
+          <label className="input-label">API Key</label>
+          <input
+            className="input"
+            type="password"
+            value={apiKeyInput}
+            onChange={(e) => {
+              setApiKeyInput(e.target.value);
+              setDirty(true);
+            }}
+            placeholder={saved?.apiKey ? `已保存 (${maskKey(saved.apiKey)})` : '输入 API Key'}
+          />
+        </div>
+        <div className="mb-3">
+          <label className="input-label">Base URL</label>
+          <input
+            className="input"
+            value={baseUrl}
+            onChange={(e) => {
+              setBaseUrl(e.target.value);
+              setDirty(true);
+            }}
+          />
+        </div>
+        <div className="mb-3">
+          <label className="input-label">模型</label>
+          <input
+            className="input"
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value);
+              setDirty(true);
+            }}
+          />
+        </div>
+        <div className="mb-3">
+          <label className="input-label">Temperature ({temperature})</label>
+          <input
+            className="input p-0"
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={temperature}
+            onChange={(e) => {
+              setTemperature(parseFloat(e.target.value));
+              setDirty(true);
+            }}
+          />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
+          {!isActive && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleActivate}
+              disabled={activating || saving}
+              title="将此 Provider 设为当前活跃(后端调用会走这个)"
+            >
+              {activating ? '切换中...' : isActive ? '✓ 当前活跃' : '设为活跃'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── 主页面 ───────── */
+
+export default function LlmConfigPage() {
+  const [tab, setTab] = useState<Tab>('provider');
+  const fetchLlmConfig = useAppStore((s) => s.fetchLlmConfig);
+
+  useEffect(() => {
+    fetchLlmConfig();
+  }, [fetchLlmConfig]);
 
   return (
     <>
@@ -116,7 +234,11 @@ export default function LlmConfigPage() {
 
       <div className="tabs">
         {TABS.map((t) => (
-          <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+          <div
+            key={t}
+            className={`tab ${tab === t ? 'active' : ''}`}
+            onClick={() => setTab(t)}
+          >
             {TAB_LABELS[t]}
           </div>
         ))}
@@ -126,76 +248,16 @@ export default function LlmConfigPage() {
       {tab === 'provider' && (
         <>
           <div className="grid grid-2 mb-6">
-            {(Object.keys(PROVIDER_META) as LLMProvider[]).map((p) => {
-              const meta = PROVIDER_META[p];
-              const saved = llmConfigs[p];
-              const isActive = activeProvider === p;
-              const isSelected = selectedProvider === p;
-
-              return (
-                <div key={p} className="card">
-                  <div className="card-header">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{meta.icon}</span>
-                      <div>
-                        <div className="card-title">
-                          {meta.name}
-                          {isActive && <span className="chip green ml-1.5 text-[10px]">活跃</span>}
-                        </div>
-                        <div className="text-xs text-muted">{meta.models}</div>
-                      </div>
-                    </div>
-                    <span className={`badge ${saved?.apiKey ? 'badge-success' : 'badge-warning'}`}>
-                      {saved?.apiKey ? '已配置' : '未配置'}
-                    </span>
-                  </div>
-                  <div className="card-body p-4">
-                    {isSelected ? (
-                      <>
-                        <div className="mb-3">
-                          <label className="input-label">API Key</label>
-                          <input
-                            className="input"
-                            type="password"
-                            value={apiKeyInput}
-                            onChange={(e) => setApiKeyInput(e.target.value)}
-                            placeholder={saved?.apiKey ? `已保存 (${maskKey(saved.apiKey)})` : `输入 API Key`}
-                          />
-                        </div>
-                        <div className="mb-3">
-                          <label className="input-label">Base URL</label>
-                          <input className="input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-                        </div>
-                        <div className="mb-3">
-                          <label className="input-label">模型</label>
-                          <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
-                        </div>
-                        <div className="mb-3">
-                          <label className="input-label">Temperature ({temperature})</label>
-                          <input className="input p-0" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} />
-                        </div>
-                        <div className="flex gap-2">
-                          <button className="btn btn-secondary btn-sm" onClick={handleTestHealth} disabled={testingHealth}>
-                            {testingHealth ? '测试中...' : '测试连接'}
-                          </button>
-                          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
-                            {saving ? '保存中...' : '保存'}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedProvider(p); setApiKeyInput(''); }}>
-                        切换到此 Provider
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {(Object.keys(PROVIDER_META) as LLMProvider[]).map((p) => (
+              <ProviderCard key={p} provider={p} />
+            ))}
           </div>
 
-          <div className="px-3.5 py-3 rounded-lg text-xs text-error" style={{ background: 'var(--error-light)' }}>
-            🔐 API Key 通过 AES-256-GCM 加密后存入数据库，不进日志，不下发给前端。
+          <div
+            className="px-3.5 py-3 rounded-lg text-xs text-error"
+            style={{ background: 'var(--error-light)' }}
+          >
+            🔐 API Key 通过 AES-256-GCM 加密后存入数据库,不进日志,不下发给前端。
           </div>
         </>
       )}
@@ -206,22 +268,22 @@ export default function LlmConfigPage() {
           <div className="card-body p-5">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="input-label">Schema 理解模型（消耗较多 Token）</label>
+                <label className="input-label">Schema 理解模型(消耗较多 Token)</label>
                 <select className="input">
                   <option>gpt-4o (推荐 · 准确率高)</option>
                   <option>gpt-4o-mini (省钱)</option>
                   <option>claude-3-5-sonnet</option>
                 </select>
-                <div className="text-xs text-muted mt-1">用于：字段语义推断 · 表关系识别 · 提问生成</div>
+                <div className="text-xs text-muted mt-1">用于:字段语义推断 · 表关系识别 · 提问生成</div>
               </div>
               <div>
-                <label className="input-label">对话分析模型（高频调用）</label>
+                <label className="input-label">对话分析模型(高频调用)</label>
                 <select className="input">
                   <option>gpt-4o-mini (推荐 · 性价比高)</option>
                   <option>gpt-4o</option>
                   <option>claude-3-5-haiku</option>
                 </select>
-                <div className="text-xs text-muted mt-1">用于：对话追问 · SQL 生成 · 洞察分析</div>
+                <div className="text-xs text-muted mt-1">用于:对话追问 · SQL 生成 · 洞察分析</div>
               </div>
             </div>
           </div>
@@ -233,7 +295,7 @@ export default function LlmConfigPage() {
           <div className="card-header"><div className="card-title">Token 配额</div></div>
           <div className="card-body p-5">
             <div className="text-sm text-secondary">
-              Token 配额由各 Provider 控制，可在此页面配置 API Key 后使用。
+              Token 配额由各 Provider 控制,可在此页面配置 API Key 后使用。
             </div>
           </div>
         </div>
@@ -244,7 +306,11 @@ export default function LlmConfigPage() {
           <div className="card-header"><div className="card-title">调用日志</div></div>
           <div className="card-body p-5">
             <div className="text-sm text-muted">
-              调用日志功能开发中。可在服务端通过 <code className="font-mono-custom bg-muted px-1.5 py-0.5 rounded">CHART_DEBUG=1</code> 开启详细日志。
+              调用日志功能开发中。可在服务端通过{' '}
+              <code className="font-mono-custom bg-muted px-1.5 py-0.5 rounded">
+                CHART_DEBUG=1
+              </code>{' '}
+              开启详细日志。
             </div>
           </div>
         </div>

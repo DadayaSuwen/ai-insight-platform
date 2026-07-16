@@ -54,8 +54,26 @@ function toParserDialect(d: SqlDialectKind): "postgresql" | "mysql" {
   return d === "duckdb" ? "postgresql" : d;
 }
 
+/** 已知的危险 SQL 语句类型 (node-sql-parser AST type 值) */
+const DANGEROUS_STMT_TYPES = new Set([
+  "insert",
+  "update",
+  "delete",
+  "drop",
+  "alter",
+  "create",
+  "truncate",
+  "grant",
+  "revoke",
+  "replace",
+  "merge",
+]);
+
 /**
- * 递归检查 AST 节点不含修改型操作
+ * 递归检查 AST 节点不含修改型操作。
+ * [Fix] 只检查已知危险类型,而非拒绝所有非 "select" 类型。
+ * 原实现将 column_ref / table_ref 等 AST 子节点也当作语句类型检查,
+ * 导致一切非平凡 SELECT 都被误拒。
  */
 function ensureReadOnly(node: unknown, depth = 0): void {
   if (depth > 50) {
@@ -66,8 +84,8 @@ function ensureReadOnly(node: unknown, depth = 0): void {
 
   const n = node as { type?: string; [k: string]: unknown };
 
-  // 任何非 select 的顶层 type 都拒绝
-  if (n.type && n.type !== "select") {
+  // 只拒绝已知的危险语句类型
+  if (n.type && DANGEROUS_STMT_TYPES.has((n.type as string).toLowerCase())) {
     throw new Error(`disallowed statement type: ${n.type}`);
   }
 
@@ -113,11 +131,48 @@ export function guardSql(
     const parserDialect = toParserDialect(opts.dialect ?? "postgresql");
     ast = parser.astify(rawSql, { database: parserDialect });
   } catch (err) {
+    // [Fix] AST 解析失败时降级为正则白名单
+    // node-sql-parser 对 PG 双引号标识符 (如 "column_name") 解析不完整，
+    // 会误拒合法 SQL。正则白名单做安全兜底。
+    const trimmedSql = rawSql.trim();
+    const isSelect = /^SELECT\b/i.test(trimmedSql);
+    const hasDangerous =
+      /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|CALL|DO)\b/i.test(
+        trimmedSql,
+      );
+    const hasMultipleStatements = /;[^;]*\S/.test(trimmedSql);
+
+    if (!isSelect) {
+      return {
+        sql: rawSql,
+        modified: false,
+        rejected: true,
+        reason: "只允许 SELECT 查询",
+      };
+    }
+    if (hasDangerous || hasMultipleStatements) {
+      return {
+        sql: rawSql,
+        modified: false,
+        rejected: true,
+        reason: "SQL 含危险操作或多语句",
+      };
+    }
+
+    // 正则白名单通过 — 允许执行（跳过 AST 深度检查）
+    // 直接进入 LIMIT 包裹逻辑
+    if (opts.skipLimit) {
+      return { sql: rawSql, modified: false, rejected: false };
+    }
+    const maxRows = opts.maxRows ?? DEFAULT_MAX_ROWS;
+    if (HAS_LIMIT_REGEX.test(rawSql)) {
+      return { sql: rawSql, modified: false, rejected: false };
+    }
+    const trimmed = rawSql.replace(/;\s*$/, "").trimEnd();
     return {
-      sql: rawSql,
-      modified: false,
-      rejected: true,
-      reason: `SQL 语法错误: ${err instanceof Error ? err.message : String(err)}`,
+      sql: `${trimmed} LIMIT ${maxRows}`,
+      modified: true,
+      rejected: false,
     };
   }
 

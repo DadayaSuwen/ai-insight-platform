@@ -36,6 +36,7 @@ export interface ReviewMessage {
 export interface SchemaUnderstanding {
   tables: Array<{
     name: string;
+    chineseName?: string;
     rowCount?: number;
     columns: Array<{
       name: string;

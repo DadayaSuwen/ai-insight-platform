@@ -25,7 +25,7 @@ export interface SerializeOptions {
 }
 
 /** 默认字符预算:6000 字符 ≈ 1500 tokens(粗估 GPT-4o 4 chars/token) */
-export const DEFAULT_CHAR_BUDGET = 6000;
+export const DEFAULT_CHAR_BUDGET = 12000;
 
 export interface SerializedSchema {
   text: string;
@@ -45,7 +45,11 @@ export function serializeForPrompt(
   // 第一轮:完整模式
   const rich = render(snapshot, { includeSamples: true, fullRole: true });
   if (rich.length <= budget) {
-    return { text: rich, truncated: false, charCount: rich.length };
+    return {
+      text: `✅ 以下是当前数据源的完整 Schema（所有表和字段均已列出，无需调用 get_table_schema）：\n\n${rich}`,
+      truncated: false,
+      charCount: rich.length,
+    };
   }
 
   // 第二轮:砍 sample values
@@ -156,7 +160,7 @@ function annotate(s: SerializedSchema): SerializedSchema {
   if (s.truncated) {
     // 标记"被裁剪"以便 LLM 知道查询时主动调 get_table_details(尚无,Sprint 2 后)
     return {
-      text: `${s.text}\n\n## Schema (truncated)\n## 提示:部分表/列未列出,需要时主动查询。`,
+      text: `${s.text}\n\n## ⚠️ Schema 因 token 预算被截断，部分表/列可能缺失。如需查看某张表的完整字段，可调用 get_table_schema（每张表仅需一次）。`,
       truncated: true,
       charCount: s.text.length,
     };

@@ -139,9 +139,15 @@ export class DashboardGeneratorController {
       throw new NotFoundException("Unsafe metric expression");
     }
 
-    // 安全: CSV 数据源用 connectionConfig.tableName 覆盖, 防止元数据/LLM 表名漂移
+    // [Fix] 安全: 数据源实际表名优先于 LLM 推断的物理名 —
+    //   postgres: connectionConfig.tableName (Sprint 5.6 单表模式)
+    //   duckdb-csv: connectionConfig.tableAlias (DuckDB 暴露给 SQL 的逻辑名, 默认 "data")
+    //   其他: fall back to parsed.table
     const cfg = ds.connectionConfig as Record<string, unknown>;
-    const table = (cfg?.tableName as string) || parsed.table;
+    const table =
+      (cfg?.tableName as string | undefined) ||
+      (cfg?.tableAlias as string | undefined) ||
+      parsed.table;
 
     // range 解析 (默认 30d, 支持 7d/30d/90d/12m)
     const rangeDays = this.parseRangeDays(parsed.range);

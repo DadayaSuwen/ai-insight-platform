@@ -31,6 +31,7 @@ export default function InsightsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<string>('all');
+  const [runLoading, setRunLoading] = useState(false);
 
   useEffect(() => {
     if (!datasourceId) return;
@@ -69,6 +70,24 @@ export default function InsightsPage() {
     }
   };
 
+  const handleRunNow = async () => {
+    if (!datasourceId || runLoading) return;
+    setRunLoading(true);
+    try {
+      await insightsApi.runNow(datasourceId);
+      toast.success('巡检已触发，请稍后刷新查看结果');
+      // 等待 3 秒后自动刷新列表
+      setTimeout(() => {
+        setRange(range); // trigger re-fetch
+        setRunLoading(false);
+      }, 3000);
+    } catch (err) {
+      console.error('Run now failed', err);
+      toast.error('巡检触发失败');
+      setRunLoading(false);
+    }
+  };
+
   const highCount = insights.filter((i) => i.severity === 'high').length;
   const mediumCount = insights.filter((i) => i.severity === 'medium').length;
   const lowCount = insights.filter((i) => i.severity === 'low').length;
@@ -80,13 +99,21 @@ export default function InsightsPage() {
           <h1 className="page-title">主动洞察 · Agent 自主发现</h1>
           <p className="page-subtitle">Agent 每日定时巡检 · 共 {insights.length} 条洞察</p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select className="input" value={range} onChange={(e) => setRange(e.target.value)} style={{ width: 110 }}>
             <option value="today">今日</option>
             <option value="week">本周</option>
             <option value="month">本月</option>
             <option value="all">全部</option>
           </select>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleRunNow}
+            disabled={runLoading}
+            title="手动触发 Agent 巡检"
+          >
+            {runLoading ? '⏳ 巡检中...' : '🔍 立即巡检'}
+          </button>
         </div>
       </div>
 
@@ -133,9 +160,13 @@ export default function InsightsPage() {
           <div className="text-4xl mb-3">🔍</div>
           <p className="text-base font-semibold text-default mb-1.5">暂无洞察</p>
           <p className="text-sm text-muted">Agent 会在每日巡检时自动发现异常与机会</p>
-          <p className="text-xs text-muted mt-2">
-            或手动运行：<code className="font-mono bg-muted px-1.5 py-0.5 rounded">POST /api/insights/run-now?datasourceId={datasourceId}</code>
-          </p>
+          <button
+            className="btn btn-primary btn-sm mt-3"
+            onClick={handleRunNow}
+            disabled={runLoading}
+          >
+            {runLoading ? '⏳ 巡检中...' : '🔍 立即运行首次巡检'}
+          </button>
         </div>
       )}
 

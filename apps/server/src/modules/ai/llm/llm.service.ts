@@ -311,6 +311,21 @@ export class LlmService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * [Fix] 仅切换活跃 Provider (不修改 model/apiKey)。
+   * 用于: 用户点"设为活跃"但该 provider 还没配置时 → 暂存 activeProvider,
+   * 等用户填了 API Key 后再调用 reload 真实生效。
+   */
+  async touchActive(provider: LLMProvider): Promise<void> {
+    await this.database.db
+      .updateTable("LLMConfig")
+      .set({ updatedAt: new Date() })
+      .where("id", "=", provider)
+      .execute();
+    this.activeProvider = provider;
+    this.logger.log(`LlmService active switched (touch) to ${provider}`);
+  }
+
+  /**
    * Expose the underlying chat model for tool binding.
    * Used by PlannerAgent to call bindTools() on the active provider.
    */
