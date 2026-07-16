@@ -49,11 +49,14 @@ CREATE TABLE "ChatSession" (
     "id" TEXT NOT NULL,
     "userId" TEXT,
     "title" TEXT,
+    "dataSourceId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "ChatSession_pkey" PRIMARY KEY ("id")
 );
+
+CREATE INDEX "ChatSession_dataSourceId_idx" ON "ChatSession"("dataSourceId");
 
 -- CreateTable
 CREATE TABLE "ChatMessage" (
@@ -91,6 +94,66 @@ ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_productId_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "ChatMessage" ADD CONSTRAINT "ChatMessage_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "ChatSession"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- ============================================================
+-- [Sprint 1] Multi-Datasource V3 — DataSource tables
+-- ============================================================
+
+CREATE TABLE "DataSource" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "type" TEXT NOT NULL,
+    "connectionConfig" JSONB NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "lastError" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "DataSource_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE "DataSourceSnapshot" (
+    "id" TEXT NOT NULL,
+    "dataSourceId" TEXT NOT NULL,
+    "payload" JSONB NOT NULL,
+    "fetchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "tokenEstimate" INTEGER NOT NULL DEFAULT 0,
+    "truncated" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "DataSourceSnapshot_pkey" PRIMARY KEY ("id")
+);
+
+CREATE INDEX "DataSourceSnapshot_dataSourceId_fetchedAt_idx"
+    ON "DataSourceSnapshot"("dataSourceId", "fetchedAt");
+
+ALTER TABLE "DataSourceSnapshot" ADD CONSTRAINT
+    "DataSourceSnapshot_dataSourceId_fkey"
+    FOREIGN KEY ("dataSourceId") REFERENCES "DataSource"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Seed: superstore-demo points at the same database the legacy tools use.
+INSERT INTO "DataSource" (
+    "id", "name", "description", "type", "connectionConfig",
+    "status", "createdAt", "updatedAt"
+) VALUES (
+    'superstore-demo',
+    'Superstore 销售数据 (Demo)',
+    '系统自带的演示数据源(Sprint 1)。承载 apps/server/prisma/seed.ts 加载的 9994 行 SalesOrderItem 数据。新增数据源不影响此 demo。',
+    'postgres',
+    jsonb_build_object(
+        'type', 'postgres',
+        'host', 'localhost',
+        'port', 5432,
+        'database', current_database(),
+        'user', current_user,
+        'ssl', false,
+        'schema', 'public'
+    ),
+    'active',
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+) ON CONFLICT ("id") DO NOTHING;
 
 ┌─────────────────────────────────────────────────────────┐
 │  Update available 5.22.0 -> 7.8.0                       │

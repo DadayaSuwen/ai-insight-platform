@@ -1,4 +1,10 @@
-export { QuerySalesArgsSchema, GenChartArgsSchema } from "./schemas";
-export { createQuerySalesTool } from "./query-sales.tool";
-export { createGenChartTool } from "./gen-chart.tool";
-export { ChartHelper, EChartsOption, ChartDataItem } from "./chart.helper";
+export {
+  QueryDetailsArgsSchema,
+  GenChartArgsSchema,
+  GetTableSchemaArgsSchema,
+} from "./schemas";
+export { QueryDetailsTool } from "./query-details.tool";
+export { GenChartTool } from "./gen-chart.tool";
+export { GenerateInsightTool } from "./generate-insight.tool";
+export { GetTableSchemaTool } from "./get-table-schema.tool";
+export { ChartHelper, EChartsOption } from "./chart.helper";

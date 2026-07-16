@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "../../../lib/utils";
 
 /**
  * InsightPanel — 渲染 generate_insight 工具的结构化结果
@@ -30,38 +31,11 @@ export interface InsightData {
   recommendation?: string;
 }
 
-const SEVERITY_META: Record<
-  InsightSeverity,
-  { icon: string; label: string; bg: string; border: string; text: string }
-> = {
-  info: {
-    icon: "ℹ️",
-    label: "观察",
-    bg: "rgba(59, 130, 246, 0.08)",
-    border: "rgba(59, 130, 246, 0.3)",
-    text: "#2563eb",
-  },
-  warning: {
-    icon: "⚠️",
-    label: "需关注",
-    bg: "rgba(245, 158, 11, 0.08)",
-    border: "rgba(245, 158, 11, 0.3)",
-    text: "#d97706",
-  },
-  opportunity: {
-    icon: "🚀",
-    label: "机会",
-    bg: "rgba(34, 197, 94, 0.08)",
-    border: "rgba(34, 197, 94, 0.3)",
-    text: "#16a34a",
-  },
-  risk: {
-    icon: "🔴",
-    label: "风险",
-    bg: "rgba(239, 68, 68, 0.08)",
-    border: "rgba(239, 68, 68, 0.3)",
-    text: "#dc2626",
-  },
+const SEVERITY_META: Record<InsightSeverity, { icon: string; label: string }> = {
+  info:        { icon: "ℹ️", label: "观察" },
+  warning:     { icon: "⚠️", label: "需关注" },
+  opportunity: { icon: "🚀", label: "机会" },
+  risk:        { icon: "🔴", label: "风险" },
 };
 
 export function InsightPanel({ data }: { data: InsightData }) {
@@ -70,44 +44,19 @@ export function InsightPanel({ data }: { data: InsightData }) {
   }
 
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border)",
-      }}
-    >
+    <div className="rounded-xl overflow-hidden bg-muted border border-default">
       {/* 头部: summary + 总数徽章 */}
-      <div
-        className="px-4 py-3 border-b"
-        style={{
-          borderColor: "var(--border)",
-          background: "linear-gradient(135deg, var(--bg-secondary), var(--bg-hover))",
-        }}
-      >
+      <div className="px-4 py-3 border-b border-default" style={{ background: "linear-gradient(135deg, var(--bg-secondary), var(--bg-hover))" }}>
         <div className="flex items-center justify-between mb-1">
-          <div
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: "var(--accent)" }}
-          >
+          <div className="text-xs font-semibold uppercase tracking-wide text-accent">
             🧠 商业洞察
           </div>
-          <div
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              background: "var(--bg-primary)",
-              color: "var(--text-muted)",
-              border: "1px solid var(--border)",
-            }}
-          >
+          <div className="text-xs px-2 py-0.5 rounded-full bg-surface text-muted border border-default">
             {data.insights.length} 条
           </div>
         </div>
         {data.summary && (
-          <div
-            className="text-sm font-medium leading-relaxed"
-            style={{ color: "var(--text-primary)" }}
-          >
+          <div className="text-sm font-medium leading-relaxed text-default">
             {data.summary}
           </div>
         )}
@@ -120,49 +69,26 @@ export function InsightPanel({ data }: { data: InsightData }) {
           return (
             <div
               key={idx}
-              className="rounded-lg p-3 transition-all hover:translate-x-0.5"
-              style={{
-                background: meta.bg,
-                borderLeft: `3px solid ${meta.border}`,
-              }}
+              className={cn("rounded-lg p-3 transition-all hover:translate-x-0.5", `insight-card-${item.severity}`)}
             >
               <div className="flex items-start gap-2 mb-1">
                 <span className="text-base leading-none">{meta.icon}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className="font-semibold text-sm"
-                      style={{ color: "var(--text-primary)" }}
-                    >
+                    <span className="font-semibold text-sm text-default">
                       {item.title}
                     </span>
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      style={{
-                        background: meta.border,
-                        color: "white",
-                      }}
-                    >
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium text-white", `insight-badge-${item.severity}`)}>
                       {meta.label}
                     </span>
                   </div>
                 </div>
               </div>
-              <p
-                className="text-xs leading-relaxed ml-7"
-                style={{ color: "var(--text-secondary)" }}
-              >
+              <p className="text-xs leading-relaxed ml-7 text-secondary">
                 {item.detail}
               </p>
               {item.evidence && (
-                <div
-                  className="ml-7 mt-1.5 text-[11px] font-mono px-2 py-1 rounded inline-block"
-                  style={{
-                    background: "var(--bg-primary)",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
+                <div className="ml-7 mt-1.5 text-[11px] font-mono px-2 py-1 rounded inline-block bg-surface text-muted border border-default">
                   📊 {item.evidence}
                 </div>
               )}
@@ -173,23 +99,11 @@ export function InsightPanel({ data }: { data: InsightData }) {
 
       {/* 可执行建议 */}
       {data.recommendation && (
-        <div
-          className="px-4 py-3 border-t"
-          style={{
-            borderColor: "var(--border)",
-            background: "var(--bg-hover)",
-          }}
-        >
-          <div
-            className="text-xs font-semibold mb-1 flex items-center gap-1"
-            style={{ color: "var(--accent)" }}
-          >
+        <div className="px-4 py-3 border-t border-default bg-hover-custom">
+          <div className="text-xs font-semibold mb-1 flex items-center gap-1 text-accent">
             💡 建议行动
           </div>
-          <div
-            className="text-xs leading-relaxed"
-            style={{ color: "var(--text-primary)" }}
-          >
+          <div className="text-xs leading-relaxed text-default">
             {data.recommendation}
           </div>
         </div>
@@ -204,22 +118,10 @@ export function InsightPanel({ data }: { data: InsightData }) {
  */
 export function InsightSkeleton() {
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div
-        className="px-4 py-3 border-b flex items-center gap-2"
-        style={{ borderColor: "var(--border)" }}
-      >
+    <div className="rounded-xl overflow-hidden bg-muted border border-default">
+      <div className="px-4 py-3 border-b border-default flex items-center gap-2">
         <span className="text-base">🧠</span>
-        <span
-          className="text-xs font-semibold uppercase tracking-wide animate-pulse"
-          style={{ color: "var(--accent)" }}
-        >
+        <span className="text-xs font-semibold uppercase tracking-wide animate-pulse text-accent">
           正在生成商业洞察...
         </span>
       </div>
@@ -227,24 +129,11 @@ export function InsightSkeleton() {
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="rounded-lg p-3 animate-pulse"
-            style={{
-              background: "var(--bg-hover)",
-              borderLeft: "3px solid var(--border)",
-            }}
+            className="rounded-lg p-3 animate-pulse bg-hover-custom border-l-[3px] border-l-default"
           >
-            <div
-              className="h-3 w-1/3 rounded mb-2"
-              style={{ background: "var(--border)" }}
-            />
-            <div
-              className="h-2 w-full rounded mb-1"
-              style={{ background: "var(--border)" }}
-            />
-            <div
-              className="h-2 w-2/3 rounded"
-              style={{ background: "var(--border)" }}
-            />
+            <div className="h-3 w-1/3 rounded mb-2 bg-[var(--border)]" />
+            <div className="h-2 w-full rounded mb-1 bg-[var(--border)]" />
+            <div className="h-2 w-2/3 rounded bg-[var(--border)]" />
           </div>
         ))}
       </div>

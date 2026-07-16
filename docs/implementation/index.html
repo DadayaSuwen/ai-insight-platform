@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Insight · 自主 Schema 探索 Agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg-primary: #FAFAF7;
+    --bg-secondary: #F4F2EC;
+    --bg-tertiary: #EAE6DC;
+    --bg-hover: #EFEDE5;
+    --border: #E5DFD2;
+    --border-light: #EFEDE5;
+    --text-primary: #2D2A24;
+    --text-secondary: #6B665C;
+    --text-muted: #9C968A;
+    --text-inverse: #FAFAF7;
+    --green: #5BA888;
+    --green-dark: #4A8E73;
+    --green-darker: #2D6B53;
+    --green-light: #DCEBE1;
+    --green-lighter: #EEF5F0;
+    --green-bg: #F2F8F4;
+    --amber: #D4A06D;
+    --amber-light: #F5E6D3;
+    --orange: #C6866A;
+    --orange-light: #F2DDD2;
+    --success: #5BA888;
+    --warning: #D4A06D;
+    --error: #C97064;
+    --info: #6B95B8;
+    --error-light: #F2DDD2;
+    --warning-light: #F5E6D3;
+    --info-light: #DCE6EF;
+    --shadow-sm: 0 1px 2px rgba(45, 42, 36, 0.04);
+    --shadow: 0 2px 8px rgba(45, 42, 36, 0.06);
+    --shadow-md: 0 4px 16px rgba(45, 42, 36, 0.08);
+    --shadow-lg: 0 8px 32px rgba(45, 42, 36, 0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+
+  /* ===== 认证页（登录/注册） ===== */
+  .auth-page {
+    min-height: 100vh; display: flex;
+    background: linear-gradient(135deg, #EEF5F0 0%, #FAFAF7 50%, #F5E6D3 100%);
+    position: relative; overflow: hidden;
+  }
+  .auth-page::before {
+    content: ''; position: absolute;
+    top: -200px; right: -200px; width: 600px; height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(91, 168, 136, 0.15), transparent 70%);
+  }
+  .auth-page::after {
+    content: ''; position: absolute;
+    bottom: -150px; left: -150px; width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(212, 160, 109, 0.12), transparent 70%);
+  }
+  .auth-left {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    padding: 80px 96px; position: relative; z-index: 1;
+  }
+  .auth-right {
+    width: 460px; background: var(--bg-primary);
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 64px 56px;
+    box-shadow: -8px 0 32px rgba(45, 42, 36, 0.06);
+    position: relative; z-index: 1;
+  }
+  .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 48px; }
+  .auth-brand-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--green), var(--green-dark));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(91, 168, 136, 0.3);
+  }
+  .auth-brand-icon svg { color: white; }
+  .auth-brand-name { font-size: 18px; font-weight: 700; }
+  .auth-brand-sub { font-size: 12px; color: var(--text-muted); }
+  .auth-title { font-size: 30px; font-weight: 700; line-height: 1.3; margin-bottom: 16px; }
+  .auth-title .accent { color: var(--green-dark); }
+  .auth-subtitle { font-size: 15px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 40px; max-width: 420px; }
+  .auth-features { display: flex; flex-direction: column; gap: 14px; }
+  .auth-feature { display: flex; align-items: flex-start; gap: 12px; }
+  .auth-feature-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: var(--green-lighter); color: var(--green-dark);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .auth-feature-title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .auth-feature-desc { font-size: 12px; color: var(--text-muted); }
+  .auth-form-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .auth-form-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
+  .auth-field { margin-bottom: 18px; }
+  .auth-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  .auth-input {
+    width: 100%; padding: 10px 14px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-primary); font-size: 14px; color: var(--text-primary);
+    transition: all 0.15s; outline: none;
+  }
+  .auth-input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-lighter); }
+  .auth-btn {
+    width: 100%; padding: 12px; border: none; border-radius: 8px;
+    background: var(--green-dark); color: white;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s; margin-top: 8px;
+  }
+  .auth-btn:hover { background: var(--green-darker); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(91, 168, 136, 0.3); }
+  .auth-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--text-muted); font-size: 12px; }
+  .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .auth-sso { display: flex; gap: 8px; }
+  .auth-sso-btn {
+    flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-primary); font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .auth-sso-btn:hover { background: var(--bg-secondary); border-color: var(--green); }
+  .auth-footer { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 24px; }
+  .auth-switch { font-size: 13px; color: var(--text-muted); text-align: center; margin-top: 16px; }
+  .auth-switch a { color: var(--green-dark); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .auth-switch a:hover { text-decoration: underline; }
+
+  /* ===== 主应用 Shell ===== */
+  .app-shell { display: none; min-height: 100vh; }
+  .app-shell.show { display: flex; }
+
+  .sidebar {
+    width: 240px; background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+    height: 100vh; position: sticky; top: 0;
+  }
+  .sidebar-brand {
+    padding: 20px; border-bottom: 1px solid var(--border-light);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sidebar-brand-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--green), var(--green-dark));
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .sidebar-brand-icon svg { color: white; }
+  .sidebar-brand-text { font-size: 14px; font-weight: 700; line-height: 1.2; }
+  .sidebar-brand-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  .datasource-switcher {
+    margin: 12px; padding: 10px 12px;
+    border-radius: 8px; background: var(--bg-primary);
+    border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+  }
+  .datasource-switcher:hover { border-color: var(--green); }
+  .datasource-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .datasource-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  .sidebar-nav { flex: 1; overflow-y: auto; padding: 8px 12px; }
+  .nav-section { margin-bottom: 16px; }
+  .nav-section-title { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.08em; padding: 8px 8px 6px; text-transform: uppercase; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 6px;
+    color: var(--text-secondary); font-size: 13px;
+    cursor: pointer; transition: all 0.12s;
+    margin-bottom: 2px; text-decoration: none;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .nav-item.active { background: var(--green-lighter); color: var(--green-darker); font-weight: 600; }
+  .nav-item .nav-badge {
+    margin-left: auto; background: var(--green); color: white;
+    font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600;
+  }
+  .nav-item .nav-badge.amber { background: var(--amber); }
+  .nav-item.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .sidebar-footer { padding: 12px; border-top: 1px solid var(--border-light); }
+  .user-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; border-radius: 8px; cursor: pointer; transition: all 0.12s;
+  }
+  .user-card:hover { background: var(--bg-hover); }
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--green), var(--amber));
+    color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; flex-shrink: 0;
+  }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .user-role { font-size: 11px; color: var(--text-muted); }
+
+  .main-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 56px; background: var(--bg-primary);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; flex-shrink: 0;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+  .breadcrumb .current { color: var(--text-primary); font-weight: 600; }
+  .topbar-actions { display: flex; align-items: center; gap: 8px; }
+  .topbar-icon-btn {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary); cursor: pointer; transition: all 0.12s;
+    border: none; background: transparent; position: relative;
+  }
+  .topbar-icon-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+  .page-container { flex: 1; overflow-y: auto; padding: 24px 32px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-header { margin-bottom: 24px; display: flex; align-items: flex-start; justify-content: space-between; }
+  .page-title { font-size: 22px; font-weight: 700; color: var(--text-primary); margin: 0; }
+  .page-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  .page-actions { display: flex; gap: 8px; }
+
+  /* ===== 通用组件 ===== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all 0.12s;
+    border: 1px solid transparent; text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn-primary { background: var(--green-dark); color: white; }
+  .btn-primary:hover { background: var(--green-darker); }
+  .btn-secondary { background: var(--bg-primary); border-color: var(--border); color: var(--text-primary); }
+  .btn-secondary:hover { background: var(--bg-secondary); border-color: var(--green); }
+  .btn-ghost { color: var(--text-secondary); }
+  .btn-ghost:hover { background: var(--bg-secondary); color: var(--text-primary); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-lg { padding: 12px 20px; font-size: 14px; }
+  .btn-danger { color: var(--error); border-color: var(--error-light); }
+  .btn-danger:hover { background: var(--error-light); }
+
+  .card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between; }
+  .card-title { font-size: 14px; font-weight: 600; }
+  .card-body { padding: 20px; }
+  .card-footer { padding: 12px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-light); font-size: 12px; color: var(--text-muted); }
+
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); }
+  .badge-success { background: var(--green-light); color: var(--green-darker); }
+  .badge-warning { background: var(--warning-light); color: var(--warning); }
+  .badge-error { background: var(--error-light); color: var(--error); }
+  .badge-info { background: var(--info-light); color: var(--info); }
+
+  .input { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); font-size: 13px; color: var(--text-primary); outline: none; transition: all 0.12s; width: 100%; }
+  .input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-lighter); }
+  .input-lg { padding: 11px 14px; font-size: 14px; }
+  .input-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  textarea.input { font-family: inherit; resize: vertical; min-height: 80px; }
+
+  .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table th { text-align: left; padding: 10px 16px; background: var(--bg-secondary); color: var(--text-muted); font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .table td { padding: 12px 16px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }
+  .table tbody tr:hover { background: var(--bg-secondary); }
+  .table .num { text-align: right; font-variant-numeric: tabular-nums; font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+
+  .kpi-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; }
+  .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--green); }
+  .kpi-card.amber::before { background: var(--amber); }
+  .kpi-card.orange::before { background: var(--orange); }
+  .kpi-card.info::before { background: var(--info); }
+  .kpi-label { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+  .kpi-value { font-size: 26px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .kpi-unit { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-left: 4px; }
+  .kpi-delta { font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+  .kpi-delta.up { color: var(--green-dark); }
+  .kpi-delta.down { color: var(--error); }
+
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-light); }
+  .chip.green { background: var(--green-lighter); color: var(--green-darker); border-color: var(--green-light); }
+  .chip.amber { background: var(--warning-light); color: var(--warning); border-color: var(--amber-light); }
+  .chip.info { background: var(--info-light); color: var(--info); border-color: var(--info-light); }
+  .chip.error { background: var(--error-light); color: var(--error); border-color: var(--error-light); }
+
+  .status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  .status-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+  .status-dot.warning::before { background: var(--warning); }
+  .status-dot.error::before { background: var(--error); }
+  .status-dot.muted::before { background: var(--text-muted); }
+
+  .chart-container { width: 100%; height: 280px; }
+  .chart-container.sm { height: 200px; }
+  .chart-container.lg { height: 360px; }
+
+  /* ===== 连接数据源页 ===== */
+  .connect-page { padding: 40px 20px; }
+  .connect-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 16px; padding: 40px; max-width: 720px; margin: 0 auto; box-shadow: var(--shadow-md); }
+  .connect-header { text-align: center; margin-bottom: 32px; }
+  .connect-logo { width: 64px; height: 64px; border-radius: 16px; background: linear-gradient(135deg, var(--green), var(--green-dark)); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 8px 24px rgba(91, 168, 136, 0.3); }
+  .connect-logo svg { color: white; }
+  .connect-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+  .connect-subtitle { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
+  .db-type-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+  .db-type-card { padding: 16px 12px; border: 1px solid var(--border); border-radius: 10px; text-align: center; cursor: pointer; transition: all 0.15s; background: var(--bg-primary); }
+  .db-type-card:hover { border-color: var(--green); background: var(--green-bg); }
+  .db-type-card.active { border-color: var(--green); background: var(--green-lighter); box-shadow: 0 0 0 3px var(--green-lighter); }
+  .db-type-icon { font-size: 24px; margin-bottom: 6px; }
+  .db-type-name { font-size: 12px; font-weight: 600; }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  /* ===== Tab 切换 ===== */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab { padding: 10px 16px; font-size: 13px; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.12s; margin-bottom: -1px; }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--green-dark); border-bottom-color: var(--green-dark); font-weight: 600; }
+
+  /* ===== 探索进度页 ===== */
+  .explore-page { padding: 40px 20px; max-width: 800px; margin: 0 auto; }
+  .explore-step { display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border-light); }
+  .explore-step:last-child { border-bottom: none; }
+  .explore-step-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 16px; font-weight: 700; background: var(--bg-tertiary); color: var(--text-muted); }
+  .explore-step.done .explore-step-icon { background: var(--green); color: white; }
+  .explore-step.active .explore-step-icon { background: var(--green-dark); color: white; animation: pulse 1.5s infinite; }
+  .explore-step.pending .explore-step-icon { background: var(--bg-tertiary); color: var(--text-muted); }
+  .explore-step-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .explore-step-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+  .explore-step-detail { margin-top: 8px; padding: 10px 12px; background: var(--bg-secondary); border-radius: 6px; font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(91, 168, 136, 0.5); } 50% { box-shadow: 0 0 0 8px rgba(91, 168, 136, 0); } }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* ===== Schema 纠错对话页 ===== */
+  .schema-review-layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; height: calc(100vh - 56px - 48px); }
+  .schema-tree { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+  .schema-tree-header { padding: 14px 16px; border-bottom: 1px solid var(--border-light); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .schema-tree-body { flex: 1; overflow-y: auto; padding: 8px; }
+  .schema-table-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: all 0.12s; }
+  .schema-table-item:hover { background: var(--bg-secondary); }
+  .schema-table-item.active { background: var(--green-lighter); }
+  .schema-table-item.confirmed { border-left: 3px solid var(--green); padding-left: 9px; }
+  .schema-table-item.has-issue { border-left: 3px solid var(--amber); padding-left: 9px; }
+  .schema-table-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+  .schema-table-meta { font-size: 11px; color: var(--text-muted); }
+
+  .review-chat { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+  .review-chat-header { padding: 14px 16px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between; }
+  .review-chat-messages { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .review-message { display: flex; gap: 12px; margin-bottom: 20px; }
+  .review-message.user { flex-direction: row-reverse; }
+  .review-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+  .review-avatar.ai { background: linear-gradient(135deg, var(--green), var(--green-dark)); color: white; }
+  .review-avatar.user { background: linear-gradient(135deg, var(--amber), var(--orange)); color: white; }
+  .review-bubble { max-width: 75%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.7; }
+  .review-message.user .review-bubble { background: var(--green-lighter); color: var(--text-primary); border-top-right-radius: 4px; }
+  .review-message.ai .review-bubble { background: var(--bg-secondary); color: var(--text-primary); border-top-left-radius: 4px; }
+
+  .schema-field-card { margin-top: 10px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 12px; }
+  .schema-field-row { display: grid; grid-template-columns: 140px 100px 1fr 80px; gap: 10px; padding: 8px 12px; align-items: center; border-bottom: 1px solid var(--border-light); }
+  .schema-field-row:last-child { border-bottom: none; }
+  .schema-field-row.header { background: var(--bg-tertiary); font-weight: 600; color: var(--text-secondary); font-size: 11px; }
+  .schema-field-name { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
+  .schema-field-type { font-family: "SF Mono", Menlo, monospace; color: var(--text-secondary); }
+  .schema-field-meaning { color: var(--text-primary); }
+  .schema-field-meaning.guessed { color: var(--text-secondary); font-style: italic; }
+  .schema-field-status { text-align: right; }
+
+  .review-input-area { border-top: 1px solid var(--border-light); padding: 12px 16px; display: flex; gap: 8px; align-items: flex-end; background: var(--bg-primary); }
+  .review-input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; outline: none; resize: none; min-height: 40px; max-height: 120px; font-family: inherit; }
+  .review-input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-lighter); }
+
+  .quick-reply { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .quick-reply-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 16px; font-size: 12px; background: var(--bg-primary); color: var(--text-secondary); cursor: pointer; transition: all 0.12s; }
+  .quick-reply-btn:hover { border-color: var(--green); color: var(--green-darker); background: var(--green-lighter); }
+
+  /* ===== CSV 上传区 ===== */
+  .csv-upload-zone {
+    border: 2px dashed var(--border); border-radius: 12px;
+    padding: 48px 24px; text-align: center;
+    cursor: pointer; transition: all 0.15s;
+    background: var(--bg-secondary);
+  }
+  .csv-upload-zone:hover { border-color: var(--green); background: var(--green-bg); }
+  .csv-upload-zone.dragging { border-color: var(--green); background: var(--green-lighter); }
+  .csv-upload-icon { font-size: 48px; margin-bottom: 12px; }
+  .csv-upload-text { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .csv-upload-hint { font-size: 12px; color: var(--text-muted); }
+
+  /* ===== 权限矩阵 ===== */
+  .perm-matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .perm-matrix th { padding: 10px 12px; background: var(--bg-secondary); color: var(--text-muted); font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); text-align: center; }
+  .perm-matrix th:first-child { text-align: left; }
+  .perm-matrix td { padding: 10px 12px; border-bottom: 1px solid var(--border-light); text-align: center; }
+  .perm-matrix td:first-child { text-align: left; font-weight: 500; }
+  .perm-checkbox { width: 16px; height: 16px; accent-color: var(--green); }
+
+  /* 开关 */
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch-track { width: 36px; height: 20px; border-radius: 10px; background: var(--bg-tertiary); position: relative; transition: all 0.15s; }
+  .switch-track.on { background: var(--green); }
+  .switch-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: all 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .switch-track.on .switch-thumb { left: 18px; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  /* ===== 首次引导页 ===== */
+  .onboarding-page { min-height: calc(100vh - 56px); display: flex; align-items: center; justify-content: center; padding: 40px 20px; background: linear-gradient(135deg, #EEF5F0 0%, #FAFAF7 50%, #F5E6D3 100%); }
+  .onboarding-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 20px; padding: 48px; max-width: 640px; width: 100%; box-shadow: 0 16px 48px rgba(45, 42, 36, 0.10); text-align: center; }
+  .onboarding-logo { width: 80px; height: 80px; border-radius: 20px; background: linear-gradient(135deg, var(--green), var(--green-dark)); display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; box-shadow: 0 12px 32px rgba(91, 168, 136, 0.3); }
+  .onboarding-logo svg { color: white; }
+  .onboarding-title { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+  .onboarding-subtitle { font-size: 15px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 32px; }
+
+  /* 模式选择卡片 */
+  .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .mode-card { padding: 24px; border: 2px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.15s; text-align: left; background: var(--bg-primary); }
+  .mode-card:hover { border-color: var(--green); background: var(--green-bg); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .mode-card-icon { width: 48px; height: 48px; border-radius: 12px; background: var(--green-lighter); color: var(--green-dark); display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+  .mode-card.amber .mode-card-icon { background: var(--warning-light); color: var(--warning); }
+  .mode-card-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .mode-card-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px; }
+  .mode-card-arrow { font-size: 13px; color: var(--green-dark); font-weight: 600; display: flex; align-items: center; gap: 4px; }
+</style>
+</head>
+<body>
+
+<!-- ===== 登录页 ===== -->
+<div id="auth-login" class="auth-page">
+  <div class="auth-left">
+    <div class="auth-brand">
+      <div class="auth-brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      </div>
+      <div>
+        <div class="auth-brand-name">AI Insight</div>
+        <div class="auth-brand-sub">自主 Schema 探索 Agent · v0.1</div>
+      </div>
+    </div>
+    <h1 class="auth-title">
+      连接你的私有数据，<br>
+      让 <span class="accent">Agent 自己搞懂</span> 它
+    </h1>
+    <p class="auth-subtitle">
+      Agent 会自主探索你的数据库结构，不确定的地方主动提问确认，敲定后自动生成工作台并持续主动发现洞察。
+      这是 ChatGPT 做不到的——它连不到你的私有库。
+    </p>
+    <div class="auth-features">
+      <div class="auth-feature">
+        <div class="auth-feature-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+        <div>
+          <div class="auth-feature-title">多源数据接入</div>
+          <div class="auth-feature-desc">PostgreSQL / MySQL / SQLite / CSV · 自主探索 Schema</div>
+        </div>
+      </div>
+      <div class="auth-feature">
+        <div class="auth-feature-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <div>
+          <div class="auth-feature-title">对话式纠错</div>
+          <div class="auth-feature-desc">不确定的字段会主动问你，敲定后才开始分析</div>
+        </div>
+      </div>
+      <div class="auth-feature">
+        <div class="auth-feature-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m7.07 7.07l4.24 4.24M1 12h6m6 0h6"/></svg></div>
+        <div>
+          <div class="auth-feature-title">主动洞察</div>
+          <div class="auth-feature-desc">每日巡检 · 自动发现异常与机会 · 推送通知</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="auth-right">
+    <h2 class="auth-form-title">欢迎回来</h2>
+    <p class="auth-form-sub">登录进入你的工作空间</p>
+
+    <div class="auth-field">
+      <label class="auth-label">账号</label>
+      <input class="auth-input" type="text" value="li.weiming@example.com">
+    </div>
+    <div class="auth-field">
+      <label class="auth-label">密码</label>
+      <input class="auth-input" type="password" value="••••••••••••">
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
+        <input type="checkbox" checked style="accent-color: var(--green);"> 记住我
+      </label>
+      <a style="font-size:12px; color: var(--green-dark); cursor:pointer;">忘记密码？</a>
+    </div>
+
+    <button class="auth-btn" onclick="login()">登录 →</button>
+
+    <div class="auth-divider">或使用 SSO 登录</div>
+    <div class="auth-sso">
+      <button class="auth-sso-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>
+        GitHub
+      </button>
+      <button class="auth-sso-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+        Google
+      </button>
+      <button class="auth-sso-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        LDAP
+      </button>
+    </div>
+
+    <div class="auth-switch">
+      还没有账号？<a onclick="showAuth('register')">立即注册</a>
+    </div>
+
+    <div class="auth-footer">
+      © 2026 AI Insight · 开源项目<br>
+      首次使用需要邀请码注册
+    </div>
+  </div>
+</div>
+
+<!-- ===== 注册页 ===== -->
+<div id="auth-register" class="auth-page" style="display:none;">
+  <div class="auth-left">
+    <div class="auth-brand">
+      <div class="auth-brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      </div>
+      <div>
+        <div class="auth-brand-name">AI Insight</div>
+        <div class="auth-brand-sub">创建你的账号</div>
+      </div>
+    </div>
+    <h1 class="auth-title">
+      注册账号，<br>
+      <span class="accent">3 分钟</span>开启你的 AI 数据分析
+    </h1>
+    <p class="auth-subtitle">
+      注册后你可以连接自己的数据库或上传 CSV，Agent 会自主探索并生成工作台。
+      第一个注册的用户自动成为管理员。
+    </p>
+  </div>
+
+  <div class="auth-right">
+    <h2 class="auth-form-title">创建账号</h2>
+    <p class="auth-form-sub">需要邀请码才能注册</p>
+
+    <div class="auth-field">
+      <label class="auth-label">邀请码</label>
+      <input class="auth-input" type="text" placeholder="8 位邀请码" value="AIINSIGHT">
+    </div>
+    <div class="auth-field">
+      <label class="auth-label">姓名</label>
+      <input class="auth-input" type="text" placeholder="你的姓名">
+    </div>
+    <div class="auth-field">
+      <label class="auth-label">邮箱</label>
+      <input class="auth-input" type="email" placeholder="you@example.com">
+    </div>
+    <div class="auth-field">
+      <label class="auth-label">密码</label>
+      <input class="auth-input" type="password" placeholder="至少 8 位，含大小写字母和数字">
+    </div>
+
+    <div style="margin-bottom: 16px; padding: 10px 12px; background: var(--info-light); border-radius: 8px; font-size: 11px; color: var(--info); line-height: 1.6;">
+      💡 <strong>角色说明：</strong>首个用户自动成为<strong>管理员</strong>（可管理数据源、用户、模型配置）；后续用户默认为<strong>分析师</strong>（可连接数据源、对话分析）；管理员可创建<strong>查看者</strong>角色（只读）。
+    </div>
+
+    <button class="auth-btn" onclick="login()">注册并登录 →</button>
+
+    <div class="auth-switch">
+      已有账号？<a onclick="showAuth('login')">返回登录</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 主应用 Shell ===== -->
+<div id="app-shell" class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-brand-text">AI Insight</div>
+        <div class="sidebar-brand-sub">自主探索 Agent</div>
+      </div>
+    </div>
+
+    <div class="datasource-switcher" id="datasource-switcher" onclick="navigate('datasource-list')">
+      <div class="datasource-name">
+        <span id="current-ds-name">未配置</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="datasource-meta" id="current-ds-meta">点击配置数据源</div>
+    </div>
+
+    <nav class="sidebar-nav" id="sidebar-nav">
+      <!-- 动态渲染，根据用户角色与是否配置数据源 -->
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-card" onclick="navigate('profile')">
+        <div class="user-avatar" id="user-avatar">李</div>
+        <div class="user-info">
+          <div class="user-name">
+            <span id="user-name">李伟明</span>
+            <span class="badge badge-success" id="user-role-badge" style="font-size:9px; padding:1px 5px;">管理员</span>
+          </div>
+          <div class="user-role" id="user-email">li.weiming@example.com</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <div class="breadcrumb">
+        <span id="bc-ds">未连接</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        <span class="current" id="breadcrumb-current">工作台</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('llm-config')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          模型配置
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="navigate('chat')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          提问
+        </button>
+      </div>
+    </header>
+
+    <main class="page-container">
+      <div id="page-content"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  // 全局状态
+  // ============================================================
+  const STATE = {
+    isLoggedIn: false,
+    user: { name: '李伟明', email: 'li.weiming@example.com', role: 'admin', avatar: '李' },
+    datasourceConfigured: false,  // 是否已配置数据源
+    currentDatasource: null,      // { name, type, host, tables }
+    currentPage: 'onboarding'     // 默认进入引导页
+  };
+
+  const ROLE_LABELS = { admin: '管理员', analyst: '分析师', viewer: '查看者' };
+  const ROLE_COLORS = { admin: 'badge-success', analyst: 'badge-info', viewer: 'badge-warning' };
+
+  const BREADCRUMB_MAP = {
+    'onboarding': '欢迎',
+    'datasource-list': '数据源',
+    'datasource-new': '新建数据源',
+    'datasource-csv': '上传 CSV',
+    'explore': '探索中',
+    'schema-review': 'Schema 确认',
+    'confirm': '敲定 Schema',
+    'dashboard': '工作台',
+    'chat': '对话追问',
+    'insights': '主动洞察',
+    'schema': 'Schema 修订',
+    'history': '探索历史',
+    'llm-config': '模型配置',
+    'users': '用户管理',
+    'roles': '角色权限',
+    'profile': '个人设置'
+  };
+
+  // ============================================================
+  // 认证流程
+  // ============================================================
+  function showAuth(type) {
+    document.getElementById('auth-login').style.display = type === 'login' ? 'flex' : 'none';
+    document.getElementById('auth-register').style.display = type === 'register' ? 'flex' : 'none';
+  }
+
+  function login() {
+    STATE.isLoggedIn = true;
+    document.getElementById('auth-login').style.display = 'none';
+    document.getElementById('auth-register').style.display = 'none';
+    document.getElementById('app-shell').classList.add('show');
+
+    // 更新用户信息
+    document.getElementById('user-name').textContent = STATE.user.name;
+    document.getElementById('user-email').textContent = STATE.user.email;
+    document.getElementById('user-avatar').textContent = STATE.user.avatar;
+    const roleBadge = document.getElementById('user-role-badge');
+    roleBadge.textContent = ROLE_LABELS[STATE.user.role];
+    roleBadge.className = 'badge ' + ROLE_COLORS[STATE.user.role];
+    roleBadge.style.fontSize = '9px';
+    roleBadge.style.padding = '1px 5px';
+
+    renderSidebar();
+    // 检测是否配置数据源，决定首页
+    if (!STATE.datasourceConfigured) {
+      navigate('onboarding');
+    } else {
+      navigate('dashboard');
+    }
+  }
+
+  function logout() {
+    STATE.isLoggedIn = false;
+    document.getElementById('app-shell').classList.remove('show');
+    showAuth('login');
+  }
+
+  // ============================================================
+  // 侧边栏渲染（根据角色与数据源状态）
+  // ============================================================
+  function renderSidebar() {
+    const nav = document.getElementById('sidebar-nav');
+    const isAdmin = STATE.user.role === 'admin';
+    const hasDS = STATE.datasourceConfigured;
+
+    let html = '';
+
+    // 工作台区
+    html += `
+      <div class="nav-section">
+        <div class="nav-section-title">工作台</div>
+        <a class="nav-item ${hasDS ? '' : 'disabled'}" data-route="dashboard" onclick="${hasDS ? "navigate('dashboard')" : ''}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+          <span>工作台</span>
+        </a>
+        <a class="nav-item ${hasDS ? '' : 'disabled'}" data-route="chat" onclick="${hasDS ? "navigate('chat')" : ''}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>对话追问</span>
+        </a>
+        <a class="nav-item ${hasDS ? '' : 'disabled'}" data-route="insights" onclick="${hasDS ? "navigate('insights')" : ''}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m7.07 7.07l4.24 4.24M1 12h6m6 0h6"/></svg>
+          <span>主动洞察</span>
+          ${hasDS ? '<span class="nav-badge amber">3</span>' : ''}
+        </a>
+      </div>
+    `;
+
+    // 数据区
+    html += `
+      <div class="nav-section">
+        <div class="nav-section-title">数据</div>
+        <a class="nav-item" data-route="datasource-list" onclick="navigate('datasource-list')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          <span>数据源管理</span>
+        </a>
+        <a class="nav-item ${hasDS ? '' : 'disabled'}" data-route="schema" onclick="${hasDS ? "navigate('schema')" : ''}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Schema 修订</span>
+        </a>
+        <a class="nav-item ${hasDS ? '' : 'disabled'}" data-route="history" onclick="${hasDS ? "navigate('history')" : ''}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>探索历史</span>
+        </a>
+      </div>
+    `;
+
+    // 管理区（仅管理员）
+    if (isAdmin) {
+      html += `
+        <div class="nav-section">
+          <div class="nav-section-title">管理</div>
+          <a class="nav-item" data-route="llm-config" onclick="navigate('llm-config')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            <span>模型配置</span>
+          </a>
+          <a class="nav-item" data-route="users" onclick="navigate('users')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>用户管理</span>
+          </a>
+          <a class="nav-item" data-route="roles" onclick="navigate('roles')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>角色权限</span>
+          </a>
+        </div>
+      `;
+    }
+
+    nav.innerHTML = html;
+  }
+
+  // ============================================================
+  // 路由
+  // ============================================================
+  function navigate(route) {
+    // 数据源未配置时，只允许访问数据源相关页面与管理页面
+    if (!STATE.datasourceConfigured && !['onboarding','datasource-list','datasource-new','datasource-csv','explore','schema-review','confirm','llm-config','users','roles','profile'].includes(route)) {
+      alert('请先配置数据源');
+      return;
+    }
+
+    // 非管理员访问管理页面
+    if (STATE.user.role !== 'admin' && ['users','roles','llm-config'].includes(route)) {
+      alert('无权限');
+      return;
+    }
+
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.route === route);
+    });
+    document.getElementById('breadcrumb-current').textContent = BREADCRUMB_MAP[route] || route;
+    const content = document.getElementById('page-content');
+    content.innerHTML = PAGES[route] || `<div class="page-header"><h1 class="page-title">页面未实现</h1></div>`;
+    document.querySelector('.page-container').scrollTop = 0;
+    if (PAGE_INIT[route]) PAGE_INIT[route]();
+  }
+
+  // ============================================================
+  // 数据源配置完成（用于探索流程结束后调用）
+  // ============================================================
+  function markDatasourceConfigured(name, type, tables) {
+    STATE.datasourceConfigured = true;
+    STATE.currentDatasource = { name, type, tables };
+    document.getElementById('current-ds-name').textContent = name;
+    document.getElementById('current-ds-meta').textContent = `${type} · ${tables} 张表`;
+    document.getElementById('bc-ds').textContent = name;
+    renderSidebar();
+  }
+
+  // ============================================================
+  // 开始探索（从「连接数据库」或「上传 CSV」页跳转到探索进度页）
+  // ============================================================
+  function startExplore() {
+    navigate('explore');
+  }
+</script>
+
+<script src="pages.js"></script>
+
+</body>
+</html>

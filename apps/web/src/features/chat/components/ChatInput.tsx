@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
+import { cn } from "../../../lib/utils";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -7,12 +8,14 @@ interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   maxLength?: number;
+  /** [Sprint 5.7+] 编辑时预填文本 */
+  editText?: string;
 }
 
 const PLACEHOLDERS = [
+  "基于已确认的 Schema，问任何问题…",
   "输入消息，例如：按类目统计销售额",
   "输入消息，例如：展示月度销售趋势",
-  "输入消息，例如：哪些商品库存偏低",
 ];
 
 /**
@@ -38,12 +41,18 @@ function ChatInput({
   disabled,
   placeholder,
   maxLength = 2000,
+  editText,
 }: ChatInputProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(editText ?? "");
   const [placeholderIdx] = useState(() =>
     Math.floor(Math.random() * PLACEHOLDERS.length),
   );
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  // [Sprint 5.7+] 编辑消息: 当 editText 变化时填入输入框
+  useEffect(() => {
+    if (editText) setValue(editText);
+  }, [editText]);
 
   // Auto-resize textarea — capped at ~6 lines, then scrolls internally
   useEffect(() => {
@@ -88,16 +97,10 @@ function ChatInput({
   };
 
   return (
-    <div
-      className="flex flex-col border-t"
-      style={{ background: "var(--bg-primary)", borderColor: "var(--border)" }}
-    >
+    <div className="flex flex-col border-t bg-surface border-default">
       {/* Character limit warning */}
       {isOverLimit && (
-        <div
-          className="px-4 py-1 text-xs"
-          style={{ background: "var(--error-light)", color: "var(--error)" }}
-        >
+        <div className="px-4 py-1 text-xs bg-error-light text-error">
           内容超出上限 ({charCount}/{maxLength})
         </div>
       )}
@@ -105,13 +108,9 @@ function ChatInput({
       {/* Composer — single rounded container, absolutely-positioned send button */}
       <div className="px-4 pt-3 pb-3">
         <div
-          className="relative flex flex-col rounded-3xl border transition-colors"
-          style={{
-            background: "var(--bg-secondary)",
-            borderColor: "var(--border)",
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
-          onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+          className="relative flex flex-col rounded-lg border bg-muted border-default transition-colors focus-within:border-[var(--accent)]"
+          onFocus={undefined}
+          onBlur={undefined}
         >
           {/* Textarea — fills the container, leaves room on the right for the send button */}
           <textarea
@@ -123,37 +122,24 @@ function ChatInput({
             disabled={disabled || isLoading}
             rows={1}
             maxLength={maxLength}
-            className="block w-full resize-none border-0 bg-transparent text-base transition-colors placeholder:text-[13px] placeholder:font-normal focus:outline-none focus:ring-0"
-            style={{
-              color: "var(--text-primary)",
-              lineHeight: "18px",
-              padding: "14px 56px 8px 18px",
-              margin: 0,
-              minHeight: "18px",
-              maxHeight: "144px",
-              overflowY: "auto",
-              boxShadow: "none",
-            }}
+            className="block w-full resize-none border-0 bg-transparent text-default text-base leading-[18px] pt-[14px] pr-[56px] pb-2 pl-[18px] m-0 min-h-[18px] max-h-[144px] overflow-y-auto shadow-none transition-colors placeholder:text-[13px] placeholder:font-normal focus:outline-none focus:ring-0"
           />
 
           {/* Bottom toolbar row — tools on the left, char count on the right */}
-          <div
-            className="flex items-center justify-between gap-2 px-3 pb-2"
-            style={{ color: "var(--text-muted)" }}
-          >
+          <div className="flex items-center justify-between gap-2 px-3 pb-2 text-muted">
             <div className="flex items-center gap-1 text-xs">
               {/* Reserved for future tools (model picker, attach, mic, etc.) */}
             </div>
             <div className="flex items-center gap-3 text-[11px] tabular-nums">
               {charCount > maxLength * 0.8 && (
                 <span
-                  style={{
-                    color: isOverLimit
-                      ? "var(--error)"
+                  className={cn(
+                    isOverLimit
+                      ? "text-error"
                       : charCount > maxLength * 0.9
-                        ? "var(--warning)"
-                        : "var(--text-muted)",
-                  }}
+                        ? "text-warning"
+                        : "text-muted",
+                  )}
                 >
                   {charCount}/{maxLength}
                 </span>
@@ -161,19 +147,18 @@ function ChatInput({
             </div>
           </div>
 
-          {/* Send / Stop button — absolute, bottom-right, never collides with text */}
+          {/* Send / Stop button — 原型 .btn-primary 方形绿色按钮，bottom-right */}
           <button
             onClick={handleButtonClick}
             disabled={!canSend && !isLoading}
-            className="absolute bottom-2.5 right-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm transition-all active:scale-95 disabled:cursor-not-allowed"
-            style={{
-              background: isLoading
-                ? "var(--error)"
+            className={cn(
+              "absolute bottom-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-md shadow-sm transition-all active:scale-95 disabled:cursor-not-allowed",
+              isLoading
+                ? "bg-red-500 text-white"
                 : canSend
-                  ? "var(--accent)"
-                  : "var(--bg-tertiary)",
-              color: isLoading || canSend ? "white" : "var(--text-muted)",
-            }}
+                  ? "bg-accent text-white"
+                  : "bg-subtle text-muted",
+            )}
             title={isLoading ? "停止生成" : "发送 (Enter)"}
           >
             {isLoading ? (
@@ -203,10 +188,7 @@ function ChatInput({
       </div>
 
       {/* Keyboard hint */}
-      <div
-        className="flex items-center justify-end gap-4 px-4 pb-2 text-[10px]"
-        style={{ color: "var(--text-muted)" }}
-      >
+      <div className="flex items-center justify-end gap-4 px-4 pb-2 text-[10px] text-muted">
         <span>Enter 发送</span>
         <span>Shift + Enter 换行</span>
       </div>

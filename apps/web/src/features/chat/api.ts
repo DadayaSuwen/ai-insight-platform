@@ -10,17 +10,21 @@ import type {
 /** Thin Axios-based client for chat session CRUD. SSE remains on native fetch. */
 export const chatSessionApi = {
   list: () =>
-    axiosInstance.get<ChatSession[]>("/chat/sessions").then((r) => r.data),
-
-  create: (title: string = "新对话") =>
     axiosInstance
-      .post<CreateSessionResponse>("/chat/sessions", { title })
+      .get<{ success: boolean; data: ChatSession[] }>("/chat/sessions")
+      .then((r) => r.data.data),
+
+  create: (title: string = "新对话", dataSourceId?: string) =>
+    axiosInstance
+      .post<CreateSessionResponse>("/chat/sessions", { title, dataSourceId })
       .then((r) => r.data.data),
 
   messages: (id: string) =>
     axiosInstance
-      .get<ChatMessageRecord[]>(`/chat/sessions/${id}/messages`)
-      .then((r) => r.data),
+      .get<{ success: boolean; data: ChatMessageRecord[] }>(
+        `/chat/sessions/${id}/messages`,
+      )
+      .then((r) => r.data.data),
 
   remove: (id: string) =>
     axiosInstance

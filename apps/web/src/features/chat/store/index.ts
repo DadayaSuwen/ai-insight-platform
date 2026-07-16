@@ -4,11 +4,14 @@ import type { ChatSession } from '../../../types/chat';
 import {
   loadSessions,
   loadCurrentSessionId,
+  saveCurrentSessionId,
   loadSidebarOpen,
   loadSidebarCollapsed,
   loadSearchQuery,
   saveSearchQuery,
   pruneMissingSessionId,
+  loadSelectedDataSourceId,
+  saveSelectedDataSourceId,
 } from './persistence';
 
 interface ChatState {
@@ -38,6 +41,9 @@ interface ChatState {
   /** 侧栏搜索框输入（按会话 title 模糊匹配，localStorage 持久化） */
   searchQuery: string;
 
+  // ── [Sprint 3] 当前选中的数据源(下次创建会话生效) ──
+  selectedDataSourceId: string | null;
+
   setCurrentSessionId: (id: string | null) => void;
   setSessions: (s: ChatSession[]) => void;
   /** Insert or update a session in the list (matched by id). */
@@ -49,6 +55,7 @@ interface ChatState {
   setSidebarOpen: (b: boolean) => void;
   setSidebarCollapsed: (b: boolean) => void;
   setSearchQuery: (q: string) => void;
+  setSelectedDataSourceId: (id: string | null) => void;
 }
 
 const getInitialTheme = (): 'light' | 'dark' => {
@@ -111,7 +118,13 @@ export const useChatStore = create<ChatState>((set) => ({
   sidebarCollapsed: initialSidebarCollapsed,
   searchQuery: initialSearchQuery,
 
-  setCurrentSessionId: (id) => set({ currentSessionId: id }),
+  // [Sprint 3] 用户选择的数据源 (null = 未选择)
+  selectedDataSourceId: loadSelectedDataSourceId(),
+
+  setCurrentSessionId: (id) => {
+    saveCurrentSessionId(id);
+    set({ currentSessionId: id });
+  },
   setSessions: (s) => set({ sessions: s }),
   upsertSession: (s) =>
     set((state) => {
@@ -135,5 +148,9 @@ export const useChatStore = create<ChatState>((set) => ({
   setSearchQuery: (q) => {
     saveSearchQuery(q);
     set({ searchQuery: q });
+  },
+  setSelectedDataSourceId: (id) => {
+    saveSelectedDataSourceId(id);
+    set({ selectedDataSourceId: id });
   },
 }));

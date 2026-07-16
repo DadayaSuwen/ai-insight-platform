@@ -1,508 +1,455 @@
-import { useRef, useEffect, useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Loader2, PanelLeft } from "lucide-react";
+/**
+ * [Fix-10 Task 10.2] 对话追问页 — 接入真实 SSE
+ *
+ * 删除 Fix-7 mock 硬编码对话
+ * 改用 useSSEChat + useChatActions + useChatStore
+ *
+ * 三栏布局:
+ *   左 240px: 推荐提问
+ *   中 flex-1: 真实 SSE 对话流
+ *   右 280px: 上下文面板 (实时 tool_calls / token / 耗时)
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import { useDatasourceStore } from "../../../core/store/datasource-store";
+import {
+  getDatasourceSchema,
+  type SchemaUnderstanding,
+} from "../../schema-review/api";
+import { useChatStore } from "../store";
+import { useChatActions } from "../hooks/useChatActions";
+import { useSSEChat } from "../hooks";
+import { isAssistant, type ToolCallData, type ToolResultData } from "../types";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
-import { useChatStore } from "../store";
-import { useSSEChat } from "../hooks";
-import { useChatActions } from "../hooks/useChatActions";
-import { chatSessionApi } from "../api";
-import { recordToChatMessage } from "../utils/recordToChatMessage";
-import {
-  saveCurrentSessionId,
-  saveSessions,
-  saveSidebarOpen,
-  saveSidebarCollapsed,
-} from "../store/persistence";
 import {
   SessionSidebar,
   CollapsedSidebar,
   MobileSidebarDrawer,
   SidebarToggle,
 } from "./sidebar";
-import WelcomeScreen from "./WelcomeScreen";
-import type {
-  ChatMessage,
-  AssistantMessage,
-  ToolCallData,
-  ToolResultData,
-} from "../types";
 
-import type { ChatSession } from "../../../types/chat";
-
-function newId(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `id-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  );
-}
-
-/** Preset quick-command chips shown in the empty state and below the header */
-const QUICK_COMMANDS = [
-  {
-    label: "本月销售总览",
-    icon: "📊",
-    query: "帮我统计本月的总销售额、订单量和销量，并给出一个概览。",
-  },
-  {
-    label: "各品类业绩对比",
-    icon: "📈",
-    query:
-      "对比各类别商品今年的销售额和利润，画出柱状图，并分析哪个品类表现最好。",
-  },
-  {
-    label: "年度销售趋势",
-    icon: "📉",
-    query: "分析今年每个月的销售趋势，画出折线图，找出销售额最高和最低的月份。",
-  },
-  {
-    label: "客户画像洞察",
-    icon: "👥",
-    query: "对比不同客户类型在购买品类上的偏好差异，并给出商业建议。",
-  },
-  {
-    label: "地区利润分析",
-    icon: "🗺️",
-    query: "分析各个地区的利润表现，哪些地区亏损较多？",
-  },
-  {
-    label: "爆款商品盘点",
-    icon: "🔥",
-    query: "查一下今年销量最高的前 5 个商品，以及它们的总销售额。",
-  },
+/* ─── 推荐提问 (兜底) ─── */
+const FALLBACK_SUGGESTIONS = [
+  "本月销售额 Top 5 商品是哪些？",
+  "各渠道订单分布如何？",
+  "近 6 个月销售趋势怎么样？",
+  "哪些客户消费最高？",
+  "退货率最高的商品是哪些？",
 ];
 
-/** Simulated connection health — in production this would ping /database/schema */
-function StatusDot({ connected }: { connected: boolean }) {
-  return (
-    <span className="relative flex h-2 w-2">
-      {connected && (
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-      )}
-      <span
-        className={`relative inline-flex h-2 w-2 rounded-full ${
-          connected ? "bg-green-500" : "bg-red-500"
-        }`}
-      />
-    </span>
+/**
+ * 根据已确认的 Schema 动态生成推荐提问。
+ * 命中规则按优先级累加，凑满 5 条；不足则用 FALLBACK_SUGGESTIONS 兜底。
+ */
+function generateSuggestions(schema: SchemaUnderstanding | null): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (q: string) => {
+    if (out.length < 5 && !seen.has(q)) {
+      out.push(q);
+      seen.add(q);
+    }
+  };
+  if (!schema || schema.tables.length === 0) return [...FALLBACK_SUGGESTIONS];
+
+  const allCols = schema.tables.flatMap((t) => t.columns);
+  const orderish = schema.tables.find((t) => /订单|order/i.test(t.name));
+  const productish = schema.tables.find((t) =>
+    /商品|产品|product|item/i.test(t.name),
   );
+  const customerish = schema.tables.find((t) =>
+    /客户|customer|member/i.test(t.name),
+  );
+  const refundish = schema.tables.find((t) => /退|refund|return/i.test(t.name));
+  const dateCol = allCols.find(
+    (c) =>
+      /date|time|created|at$/i.test(c.name) ||
+      /日期|时间/.test(c.chineseName ?? ""),
+  );
+  const metricCol = allCols.find(
+    (c) =>
+      c.semanticRole === "metric" ||
+      /金额|数量|amt|amount|qty|price|销售额/i.test(c.chineseName ?? c.name),
+  );
+  const channelCol = allCols.find(
+    (c) =>
+      /渠道|channel|source/i.test(c.name) ||
+      /渠道|来源/.test(c.chineseName ?? ""),
+  );
+
+  // 规则 1：订单 + metric + date → "本月 Top N" + "近 6 个月趋势"
+  if (orderish && metricCol && dateCol) {
+    push(`本月销售额 Top 5 的${orderish.name}是哪些？`);
+    push(`近 6 个月${metricCol.chineseName ?? metricCol.name}趋势怎么样？`);
+  }
+  // 规则 2：订单 + 渠道 → 渠道分布
+  if (orderish && channelCol) {
+    push(
+      `各${channelCol.chineseName ?? channelCol.name}${orderish.name}分布如何？`,
+    );
+  }
+  // 规则 3：客户表 → 客户消费排名
+  if (customerish && orderish && metricCol) {
+    push(`哪些${customerish.name}消费最高？`);
+  }
+  // 规则 4：退货相关 → 退货率
+  if (
+    refundish ||
+    allCols.some((c) => /退|退货|refund/i.test(c.chineseName ?? ""))
+  ) {
+    push(`退货率最高的${productish?.name ?? "商品"}是哪些？`);
+  }
+  // 规则 5：商品 + metric → 商品排行
+  if (productish && metricCol) {
+    push(
+      `${productish.name}中${metricCol.chineseName ?? metricCol.name}最高的 5 个是哪些？`,
+    );
+  }
+
+  // 兜底：用静态池补到 5 条，且不重复
+  for (const fb of FALLBACK_SUGGESTIONS) {
+    if (out.length >= 5) break;
+    push(fb);
+  }
+  return out.slice(0, 5);
 }
 
-/**
- * ChatWindow — enterprise chat surface with multi-session sidebar.
- */
-function ChatWindow() {
-  const messages = useChatStore((s) => s.messages);
-  const updateLastAssistant = useChatStore((s) => s.updateLastAssistant);
-  const upsertSession = useChatStore((s) => s.upsertSession);
-  const theme = useChatStore((s) => s.theme);
-  const toggleTheme = useChatStore((s) => s.toggleTheme);
-  const currentSessionId = useChatStore((s) => s.currentSessionId);
-  const sessions = useChatStore((s) => s.sessions);
-  const sidebarOpen = useChatStore((s) => s.sidebarOpen);
-  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
-  const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed);
-  const historyLoading = useChatStore((s) => s.historyLoading);
+export default function ChatWindow() {
+  const { datasourceId } = useParams<{ datasourceId: string }>();
   const navigate = useNavigate();
-  const currentSession = currentSessionId
-    ? sessions.find((s) => s.id === currentSessionId)
-    : undefined;
+  const urlDsId = useDatasourceStore((s) => s.currentDatasourceId);
+  const dsId = datasourceId || urlDsId || "";
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const isNearBottomRef = useRef(true);
-  const [connected] = useState(true);
+  // [Bug-1] 同步 URL 的 datasourceId 到 chat store, 否则后端收不到数据源
+  useEffect(() => {
+    if (dsId && dsId !== "mock") {
+      useChatStore.getState().setSelectedDataSourceId(dsId);
+    }
+  }, [dsId]);
 
-  // ── 副作用封装 ──
-  const { sendInCurrentSession, loadSessions, refreshSessions } =
+  // 差距 1+2 — 拉取已确认的 Schema understanding 用于左栏和 header 统计
+  const [schema, setSchema] = useState<SchemaUnderstanding | null>(null);
+  useEffect(() => {
+    if (!dsId || dsId === "mock") {
+      setSchema(null);
+      return;
+    }
+    let cancelled = false;
+    getDatasourceSchema(dsId)
+      .then((res) => {
+        if (!cancelled) setSchema(res.schemaUnderstanding);
+      })
+      .catch(() => {
+        if (!cancelled) setSchema(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dsId]);
+
+  // 差距 4 — 读后端真实 token + 耗时(chat-system-architecture.md §六原则 4)
+  // 不再客户端估算,所有数据由后端 ChatService 在 done 事件的 stats 字段下发。
+  const [lastStats, setLastStats] = useState<{
+    elapsedMs?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  } | null>(null);
+
+  const messages = useChatStore((s) => s.messages);
+  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { sendInCurrentSession, loadSessions, selectSession } =
     useChatActions();
 
-  const scrollToBottom = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    isNearBottomRef.current = true;
-  };
-
-  useEffect(() => {
-    if (isNearBottomRef.current) {
-      scrollToBottom();
-    }
-  }, [messages]);
-
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isNearBottomRef.current = distanceFromBottom < 80;
-  };
-
-  // ─── SSE Event Handlers ────────────────────────────────────
-
-  const onText = useCallback(
-    (data: { content: string }) => {
-      updateLastAssistant((msg) => ({
+  const { sendMessage, isLoading, error, abort } = useSSEChat({
+    onText: (data) => {
+      useChatStore.getState().updateLastAssistant((msg) => ({
         ...msg,
         content: msg.content + data.content,
       }));
     },
-    [updateLastAssistant],
-  );
-
-  const onToolCall = useCallback(
-    (data: ToolCallData) => {
-      updateLastAssistant((msg) => ({
+    onToolCall: (data) => {
+      useChatStore.getState().updateLastAssistant((msg) => ({
         ...msg,
         toolCalls: [...(msg.toolCalls ?? []), data],
       }));
     },
-    [updateLastAssistant],
-  );
-
-  const onToolResult = useCallback(
-    (data: ToolResultData) => {
-      updateLastAssistant((msg) => ({
+    onToolResult: (data) => {
+      useChatStore.getState().updateLastAssistant((msg) => ({
         ...msg,
         toolResults: [...(msg.toolResults ?? []), data],
       }));
     },
-    [updateLastAssistant],
-  );
-
-  const onError = useCallback(
-    (data: { code: string; message: string }) => {
-      updateLastAssistant((msg) => ({
+    onError: (data) => {
+      useChatStore.getState().updateLastAssistant((msg) => ({
         ...msg,
         error: { code: data.code, message: data.message },
       }));
     },
-    [updateLastAssistant],
-  );
-
-  const onDone = useCallback(
-    (data?: { session?: ChatSession | null }) => {
-      updateLastAssistant((msg) => ({ ...msg, isFinal: true }));
-      isNearBottomRef.current = true;
-      scrollToBottom();
-      // 优先用 done 事件携带的 session 局部更新（覆盖自动重命名 + touch updatedAt），
-      // 省一次 GET /chat/sessions。仅当后端没回 session 时（catch 路径）才走兜底刷新。
-      if (data?.session) {
-        upsertSession(data.session);
-      } else {
-        void refreshSessions();
+    onDone: (data) => {
+      // 后端在最终 done 事件下发 stats(可能 undefined — Anthropic 流式不发 usage)
+      if (data?.stats) {
+        setLastStats(data.stats);
       }
+      useChatStore.getState().updateLastAssistant((msg) => ({
+        ...msg,
+        isFinal: true,
+      }));
     },
-    [updateLastAssistant, upsertSession, refreshSessions],
-  );
-
-  const { sendMessage, isLoading, error, abort } = useSSEChat({
-    onText,
-    onToolCall,
-    onToolResult,
-    onError,
-    onDone,
   });
 
-  // ─── Effects: 初始加载 + 持久化 ───────────────────────────
-
-  // 首次挂载：拉取会话列表；如果存在 currentSessionId 则恢复其历史
+  // 自动滚动到底部
   useEffect(() => {
-    void (async () => {
-      await loadSessions();
-      const id = useChatStore.getState().currentSessionId;
-      if (id) {
-        try {
-          const records = await chatSessionApi.messages(id);
-          const msgs: ChatMessage[] = records.map(recordToChatMessage);
-          useChatStore.getState().setMessages(msgs);
-        } catch (err) {
-          console.error("[ChatWindow] restore session failed", err);
-        }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // [Fix] 进入对话页时加载历史会话，恢复最近会话的消息
+  useEffect(() => {
+    let cancelled = false;
+    loadSessions().then(() => {
+      if (cancelled) return;
+      const cur = useChatStore.getState().currentSessionId;
+      if (cur) {
+        selectSession(cur, { abort });
       }
-    })();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // 仅在挂载时执行一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 持久化 currentSessionId
-  useEffect(() => {
-    saveCurrentSessionId(currentSessionId);
-  }, [currentSessionId]);
-
-  // 持久化 sessions（200ms debounce）
-  useEffect(() => {
-    const t = setTimeout(() => saveSessions(sessions), 200);
-    return () => clearTimeout(t);
-  }, [sessions]);
-
-  // 持久化 sidebarOpen
-  useEffect(() => {
-    saveSidebarOpen(sidebarOpen);
-  }, [sidebarOpen]);
-
-  // 持久化 sidebarCollapsed
-  useEffect(() => {
-    saveSidebarCollapsed(sidebarCollapsed);
-  }, [sidebarCollapsed]);
-
-  // ─── User Actions ───────────────────────────────────────────
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      await sendInCurrentSession(text, { sendMessage, abort, newId });
-    },
-    [sendInCurrentSession, sendMessage, abort],
-  );
-
-  const handleQuickCommand = (query: string) => {
-    if (isLoading) return;
-    handleSend(query);
+  const handleSend = async (text: string) => {
+    if (!text.trim() || isLoading) return;
+    await sendInCurrentSession(text, {
+      sendMessage,
+      abort,
+      newId: () => crypto.randomUUID(),
+    });
   };
 
-  const isEmpty = messages.length === 0;
+  const lastAssistant = [...messages].reverse().find(isAssistant);
+  const lastToolCalls: ToolCallData[] = lastAssistant?.toolCalls ?? [];
+  const lastToolResults: ToolResultData[] = lastAssistant?.toolResults ?? [];
+
+  // 差距 6 — 根据 schema 动态生成推荐提问;schema 未到则用 FALLBACK
+  const suggestions = useMemo(() => generateSuggestions(schema), [schema]);
 
   return (
-    <div className="flex h-full">
-      {/* 移动端抽屉 (<md) */}
+    <div className="flex flex-1 h-full overflow-hidden">
+      {/* 左侧 - 会话历史侧边栏 */}
+      {sidebarCollapsed ? <CollapsedSidebar /> : <SessionSidebar />}
       <MobileSidebarDrawer />
-      {/* 桌面侧栏 (md:) */}
-      <div className="hidden md:block">
-        {sidebarCollapsed ? <CollapsedSidebar /> : <SessionSidebar />}
-      </div>
+      <SidebarToggle />
 
-      <main className="flex h-full flex-1 flex-col">
-        {/* ── Header ─────────────────────────────────── */}
-        <header
-          className="flex shrink-0 items-center justify-between border-b px-4 py-3"
-          style={{
-            background: "var(--bg-primary)",
-            borderColor: "var(--border)",
-          }}
-        >
-          <div className="flex items-center gap-2">
-            {/* 移动端：打开抽屉 */}
-            <SidebarToggle />
-            {/* 桌面端：折叠状态时显示展开按钮 */}
-            {sidebarCollapsed && (
-              <button
-                onClick={() => setSidebarCollapsed(false)}
-                aria-label="展开侧边栏"
-                title="展开侧边栏"
-                className="hidden h-8 w-8 items-center justify-center rounded-md transition-colors md:flex"
-                style={{ color: "var(--text-secondary)" }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--bg-hover)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <PanelLeft size={16} />
-              </button>
-            )}
-            <div className="min-w-0 flex-1">
-              <h1
-                className="truncate text-sm font-semibold"
-                style={{ color: "var(--text-primary)" }}
-                title={currentSession?.title || "新对话"}
-              >
-                {currentSession?.title || "新对话"}
-              </h1>
-              <div
-                className="flex items-center gap-1.5 text-xs"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <StatusDot connected={connected} />
-                <span>{connected ? "服务正常" : "服务中断"}</span>
-                <span className="opacity-50">·</span>
-                <span>Agent 架构已启用</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/settings")}
-              className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-hover)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-              title="LLM 设置"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-
-            <button
-              onClick={toggleTheme}
-              className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--bg-hover)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-              title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
-            >
-              {theme === "dark" ? (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="5" />
-                  <line x1="12" y1="1" x2="12" y2="3" />
-                  <line x1="12" y1="21" x2="12" y2="23" />
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                  <line x1="1" y1="12" x2="3" y2="12" />
-                  <line x1="21" y1="12" x2="23" y2="12" />
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                  <line x1="18.36" y1="5.64" x2="19.78" y2="19.78" />
-                </svg>
-              ) : (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </header>
-
-        {/* ── Quick Commands ──────────────────────── */}
-        {isEmpty && (
-          <div
-            className="shrink-0 border-b px-6 py-3"
-            style={{
-              borderColor: "var(--border)",
-              background: "var(--bg-primary)",
-            }}
+      {/* 中间 - 对话主区 (minHeight:0 防止 flex row 子元素随内容撑高,确保内部滚动条生效) */}
+      <main className="flex-1 flex flex-col min-w-0 min-h-[0] bg-surface">
+        {/* 顶栏 */}
+        <div className="py-3 px-4 border-b border-light flex items-center gap-2 shrink-0">
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate(`/dashboard/${dsId}`)}
+            title="返回工作台"
           >
-            <div className="mx-auto max-w-5xl">
-              <p
-                className="mb-2.5 text-xs font-medium"
-                style={{ color: "var(--text-muted)" }}
-              >
-                快捷指令
+            <ArrowLeft size={14} />
+            返回工作台
+          </button>
+          <span className="badge badge-success">● Schema 已确认</span>
+          {/* 差距 2 — Schema 统计信息 */}
+          {schema && (
+            <span className="text-xs text-muted">
+              基于 {schema.tables.length} 张表 ·{" "}
+              {schema.tables.reduce((sum, t) => sum + t.columns.length, 0)} 字段
+              · {schema.relations?.length ?? 0} 关系
+            </span>
+          )}
+        </div>
+
+        {/* 消息列表 */}
+        <div className="flex-1 overflow-y-auto py-5 px-6">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted gap-3">
+              <div className="text-4xl">💬</div>
+              <p className="text-[15px] font-semibold">
+                基于已确认的 Schema，问任何问题
               </p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_COMMANDS.map((cmd) => (
-                  <button
-                    key={cmd.query}
-                    className="quick-chip"
-                    onClick={() => handleQuickCommand(cmd.query)}
-                    disabled={isLoading}
-                  >
-                    <span>{cmd.icon}</span>
-                    <span>{cmd.label}</span>
-                  </button>
-                ))}
-              </div>
+              <p className="text-sm">
+                Agent 会调用 SQL 查询、生成图表并给出分析建议
+              </p>
+            </div>
+          ) : (
+            messages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onSuggestionClick={handleSend}
+              />
+            ))
+          )}
+          {error && (
+            <div className="py-2.5 px-3.5 my-2 bg-error-light border-l-[3px] border-l-red-500 rounded-md text-xs text-error">
+              {error}
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* 推荐提问 — 仅在空对话时显示在输入框上方 */}
+        {messages.length === 0 && suggestions.length > 0 && (
+          <div
+            className="px-6 py-3 border-t border-light shrink-0"
+            style={{ background: "var(--bg-secondary)" }}
+          >
+            <div className="text-xs text-muted mb-2">
+              💡 推荐提问（基于当前 Schema）
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((q, i) => (
+                <button
+                  key={i}
+                  className="px-3 py-1.5 rounded-full border text-xs text-default transition-colors disabled:opacity-50"
+                  style={{
+                    background: "var(--bg-primary)",
+                    borderColor: "var(--border)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "var(--green)";
+                    e.currentTarget.style.background = "var(--green-lighter)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.background = "var(--bg-primary)";
+                  }}
+                  onClick={() => handleSend(q)}
+                  disabled={isLoading}
+                >
+                  {q}
+                </button>
+              ))}
             </div>
           </div>
         )}
 
-        {/* ── Messages / Welcome ─────────────────── */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="relative flex-1 overflow-y-auto"
-          style={{ background: "var(--bg-secondary)" }}
-        >
-          {historyLoading && (
-            <div
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3"
-              style={{
-                background: "var(--bg-secondary)",
-                color: "var(--text-muted)",
-              }}
-            >
-              <Loader2
-                className="animate-spin"
-                size={22}
-                style={{ color: "var(--accent)" }}
-              />
-              <div className="text-sm">正在加载历史对话…</div>
+        {/* 输入区 */}
+        <ChatInput onSend={handleSend} onStop={abort} isLoading={isLoading} />
+      </main>
+
+      {/* 右侧 - 上下文面板 */}
+      <aside className="w-[280px] shrink-0 border-l border-light bg-muted p-4 overflow-y-auto text-xs">
+        <div className="context-section mb-4">
+          <h3>使用工具</h3>
+          {lastToolCalls.length === 0 ? (
+            <div className="text-xs text-muted">
+              {isLoading ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 border-2 border-muted border-t-green rounded-full animate-spin" />
+                  思考中...
+                </span>
+              ) : (
+                "等待工具调用..."
+              )}
             </div>
-          )}
-          {isEmpty ? (
-            <WelcomeScreen onSend={handleSend} isLoading={isLoading} />
           ) : (
-            <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
-            {messages.map((m) => (
-              <div key={m.id} className="msg-enter">
-                <MessageBubble message={m} onSuggestionClick={handleSend} />
-              </div>
-            ))}
+            <ul className="m-0 pl-4 text-xs">
+              {lastToolCalls.map((tc: ToolCallData, i: number) => (
+                <li key={i} className="text-secondary mb-1">
+                  <code className="font-mono text-xs">{tc.name}</code>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="context-section mb-4">
+          <h3>🗄️ 可用表 · {schema?.tables.length ?? 0} 张</h3>
+          {schema && schema.tables.length > 0 ? (
+            <ul className="m-0 p-0 list-none">
+              {schema.tables.map((t) => (
+                <li key={t.name} className="text-xs text-secondary mb-1.5">
+                  <code className="font-mono text-[11px] text-default">
+                    {t.name}
+                  </code>
+                  <span className="text-muted ml-1.5">
+                    {t.columns.length} 字段
+                    {t.rowCount != null && (
+                      <> · {t.rowCount.toLocaleString()} 行</>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-xs text-muted">加载中…</div>
+          )}
+        </div>
+
+        <div className="context-section mb-4">
+          <h3>本轮工具结果</h3>
+          {lastToolResults.length === 0 ? (
+            <div className="text-xs text-muted">暂无</div>
+          ) : (
+            <div className="text-xs text-secondary">
+              {lastToolResults.length} 个结果
+              <ul className="mt-1 pl-4">
+                {lastToolResults.map((tr: ToolResultData, i: number) => (
+                  <li key={i} className="mb-0.5">
+                    <code className="font-mono text-[10px]">{tr.name}</code>
+                    {tr.result?.rowCount !== undefined && (
+                      <span className="text-muted ml-1.5">
+                        {tr.result.rowCount as number} 行
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
 
-        {/* ── Error banner ──────────────────────── */}
-        {error && (
-          <div
-            className="flex items-center gap-2 border-t px-6 py-2 text-xs"
-            style={{
-              background: "var(--error-light)",
-              borderColor: "var(--error)",
-              color: "var(--error)",
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <span>{error}</span>
-            <button
-              className="ml-auto underline"
-              onClick={() => useChatStore.getState().clearMessages()}
-            >
-              清空并重试
-            </button>
-          </div>
-        )}
+        {/* 差距 4 — Token 消耗 (后端真实 stats) */}
+        <div className="context-section mb-4">
+          <h3>📊 Token 消耗</h3>
+          {lastStats ? (
+            <div className="text-xs text-secondary leading-relaxed">
+              <div className="flex justify-between">
+                <span>输入 tokens</span>
+                <span className="font-mono">
+                  {lastStats.inputTokens?.toLocaleString() ?? "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>输出 tokens</span>
+                <span className="font-mono">
+                  {lastStats.outputTokens?.toLocaleString() ?? "—"}
+                </span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-light mt-1">
+                <span className="font-semibold">合计</span>
+                <span className="font-mono text-green font-semibold">
+                  {lastStats.totalTokens?.toLocaleString() ?? "—"}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-muted">—</div>
+          )}
+        </div>
 
-        {/* ── Input ──────────────────────────────── */}
-        {!isEmpty && (
-          <ChatInput
-            onSend={handleSend}
-            onStop={abort}
-            isLoading={isLoading}
-          />
-        )}
-      </main>
+        {/* 差距 4 — 耗时 (后端真实 elapsedMs) */}
+        <div className="context-section">
+          <h3>⏱️ 耗时</h3>
+          <div className="text-xs text-secondary font-mono">
+            {lastStats?.elapsedMs != null
+              ? `${(lastStats.elapsedMs / 1000).toFixed(1)}s`
+              : "—"}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
-
-export default ChatWindow;

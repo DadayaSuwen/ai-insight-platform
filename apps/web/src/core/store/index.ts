@@ -1,25 +1,18 @@
 import { create } from "zustand";
 import { LLMProvider, type LLMConfig } from "@workspace/types";
+import axiosInstance from "../api/AxiosInstance";
 
 interface AppState {
-  /** All provider configs keyed by provider name */
   llmConfigs: Record<LLMProvider, LLMConfig | null>;
-  /** Currently active provider (set after POST /llm/config or on load) */
   activeProvider: LLMProvider;
-  llmHealth: {
-    openai: boolean;
-    anthropic: boolean;
-  } | null;
+  llmHealth: { openai: boolean; anthropic: boolean } | null;
   isLoadingConfig: boolean;
 
   fetchLlmConfig: () => Promise<void>;
-  saveLlmConfig: (
-    config: LLMConfig,
-  ) => Promise<{ ok: boolean; message: string }>;
+  saveLlmConfig: (config: LLMConfig) => Promise<{ ok: boolean; message: string }>;
+  activateProvider: (provider: LLMProvider) => Promise<{ ok: boolean; message?: string }>;
   fetchLlmHealth: () => Promise<void>;
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
 const defaultConfigs: Record<LLMProvider, LLMConfig | null> = {
   [LLMProvider.OPENAI]: null,
@@ -35,33 +28,26 @@ export const useAppStore = create<AppState>((set) => ({
   fetchLlmConfig: async () => {
     set({ isLoadingConfig: true });
     try {
-      const res = await fetch(`${API_BASE}/llm/config`);
-      if (res.ok) {
-        const data: { configs: LLMConfig[]; activeProvider: string } =
-          await res.json();
-        const llmConfigs = { ...defaultConfigs } as Record<
-          LLMProvider,
-          LLMConfig | null
-        >;
-        for (const cfg of data.configs) {
-          llmConfigs[cfg.provider] = cfg;
-        }
-        set({
-          llmConfigs,
-          activeProvider: data.activeProvider as LLMProvider,
-          isLoadingConfig: false,
-        });
-      } else {
-        set({ isLoadingConfig: false });
+      const res = await axiosInstance.get("/llm/config");
+      const data = res.data;
+      const llmConfigs = { ...defaultConfigs } as Record<LLMProvider, LLMConfig | null>;
+      for (const cfg of (data.configs || [])) {
+        // 后端返回 apiKeyMasked/hasApiKey 而非明文 apiKey
+        llmConfigs[cfg.provider as LLMProvider] = {
+          provider: cfg.provider,
+          model: cfg.model,
+          temperature: cfg.temperature,
+          baseUrl: cfg.baseUrl,
+          apiKey: cfg.hasApiKey ? (cfg.apiKeyMasked || "****") : "",
+        } as LLMConfig;
       }
+      set({ llmConfigs, activeProvider: data.activeProvider as LLMProvider, isLoadingConfig: false });
     } catch {
       set({ isLoadingConfig: false });
     }
   },
 
   saveLlmConfig: async (config: LLMConfig) => {
-    // Build payload — omit `apiKey` if empty so we don't silently overwrite
-    // a previously-saved key with `null`. Empty string means "explicit clear".
     const payload: Record<string, unknown> = {
       provider: config.provider,
       model: config.model,
@@ -69,59 +55,55 @@ export const useAppStore = create<AppState>((set) => ({
     };
     if (config.baseUrl) payload.baseUrl = config.baseUrl;
     if (config.apiKey !== undefined) {
-      // Empty string → clear; non-empty → update; undefined → omit entirely.
       payload.apiKey = config.apiKey;
     }
 
-    let res: Response;
     try {
-      res = await fetch(`${API_BASE}/llm/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {
-      return {
-        ok: false,
-        message: `网络错误：${e instanceof Error ? e.message : String(e)}`,
-      };
+      const res = await axiosInstance.post("/llm/config", payload);
+      const data = res.data;
+      if (data.ok) {
+        // 保存配置不切换活跃 — 活跃状态由 activateProvider 单独控制
+        set((state) => ({
+          llmConfigs: { ...state.llmConfigs, [config.provider]: config },
+        }));
+      }
+      return { ok: !!data.ok, message: data.message ?? "" };
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || `网络错误：${(e as Error).message}` };
     }
+  },
 
-    let data: { ok?: boolean; message?: string };
+  /**
+   * [Fix] 显式切换活跃 Provider — 与保存配置解耦。
+   * 调用后端 /llm/config (不传 model 等也会保留),然后拉一次最新 activeProvider。
+   */
+  activateProvider: async (provider: LLMProvider) => {
     try {
-      data = await res.json();
-    } catch {
-      return { ok: false, message: `服务器返回了非 JSON (HTTP ${res.status})` };
+      const res = await axiosInstance.post<{ success: boolean; data: { activeProvider: LLMProvider } }>(
+        "/llm/config/active",
+        { provider },
+      );
+      const active = res.data?.data?.activeProvider ?? provider;
+      set({ activeProvider: active });
+      // 重新拉一次完整配置同步 UI
+      const cur = useAppStore.getState();
+      await cur.fetchLlmConfig();
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || `网络错误：${(e as Error).message}` };
     }
-
-    if (!res.ok && !data?.ok) {
-      return {
-        ok: false,
-        message: data?.message ?? `HTTP ${res.status} ${res.statusText}`,
-      };
-    }
-
-    if (data.ok) {
-      set((state) => ({
-        llmConfigs: { ...state.llmConfigs, [config.provider]: config },
-        activeProvider: config.provider,
-      }));
-    }
-    return { ok: !!data.ok, message: data.message ?? "" };
   },
 
   fetchLlmHealth: async () => {
     try {
-      const res = await fetch(`${API_BASE}/llm/health`);
-      if (res.ok) {
-        const data = await res.json();
-        set({
-          llmHealth: {
-            openai: data.openai?.ok ?? false,
-            anthropic: data.anthropic?.ok ?? false,
-          },
-        });
-      }
+      const res = await axiosInstance.get("/llm/health");
+      const data = res.data;
+      set({
+        llmHealth: {
+          openai: data.openai?.ok ?? false,
+          anthropic: data.anthropic?.ok ?? false,
+        },
+      });
     } catch {
       // ignore
     }

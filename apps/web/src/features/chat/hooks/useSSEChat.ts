@@ -123,6 +123,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
         break;
       case "error": {
         const e = data as ErrorEventData;
+        // [M7] 把 SSE 错误 + traceId 打到 console,便于前端调试 + 客服查服务端日志
+        console.error("[SSE error]", e);
         opts.onError?.(e);
         setError(e.message);
         // error 后不立即复位 isLoading —— ChatInput 仍能 abort；
@@ -156,9 +158,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
 
       const baseURL =
         import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
-      const url = `${baseURL}/chat/stream?message=${encodeURIComponent(
-        message,
-      )}&sessionId=${encodeURIComponent(sessionId)}`;
+      const url = `${baseURL}/chat/stream`;
 
       // eventsource-parser 实例，每个 fetch 一个（否则多流交叉）
       const parser = createParser({
@@ -166,7 +166,15 @@ export function useSSEChat(options: UseSSEChatOptions = {}): UseSSEChatReturn {
       });
 
       try {
-        const res = await fetch(url, { signal: controller.signal });
+        const token = localStorage.getItem("aiip.auth.token.v1");
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers,
+          body: JSON.stringify({ message, sessionId }),
+        });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }

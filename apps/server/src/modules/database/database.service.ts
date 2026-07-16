@@ -19,6 +19,9 @@ export class DatabaseService implements OnModuleDestroy {
           idleTimeoutMillis: 30_000,
           // 默认 0 = 永不超时，可能挂死；5s 是 node-postgres 文档推荐值
           connectionTimeoutMillis: 5_000,
+          ssl: process.env.DATABASE_URL?.includes("sslmode=require")
+            ? { rejectUnauthorized: false }
+            : undefined,
         }),
       }),
     });

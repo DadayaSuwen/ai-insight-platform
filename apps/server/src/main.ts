@@ -1,5 +1,7 @@
 import { NestFactory } from '@nestjs/core';
+import { randomUUID } from 'crypto';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './core/exceptions/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -15,6 +17,21 @@ async function bootstrap() {
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
+  });
+
+  // [BUG-007] 全局统一错误响应格式 { success: false, error: { code, message } }
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // [M7] X-Request-ID middleware — 为每个 HTTP 请求生成唯一 traceId
+  //   1. 优先读客户端传入的 header (前端可串联用户行为)
+  //   2. 否则生成 UUID
+  //   3. 写回响应 header + 挂到 req 上 (供 controller 读取注入 AsyncLocalStorage)
+  app.use((req: any, res: any, next: any) => {
+    const traceId =
+      (req.headers['x-request-id'] as string | undefined) || randomUUID();
+    res.setHeader('X-Request-ID', traceId);
+    req.traceId = traceId;
+    next();
   });
 
   const port = process.env.PORT || 3000;

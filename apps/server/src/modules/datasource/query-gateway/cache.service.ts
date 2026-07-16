@@ -1,0 +1,131 @@
+import { Injectable, Logger } from "@nestjs/common";
+import * as crypto from "node:crypto";
+import type { QueryIntent } from "@workspace/types";
+import type { QueryResult } from "../executors/executor.interface";
+
+/**
+ * [Sprint 4 / V3] QueryGateway 查询结果缓存
+ *
+ * - Cache Key: SHA256(dataSourceId + JSON.stringify(sortKeys(intent)))
+ * - TTL: 默认 5 分钟;空结果 30 秒(防穿透)
+ * - LRU: 1000 条上限,超出 FIFO 淘汰
+ * - 手动失效:invalidate(dataSourceId) → 该数据源的所有缓存条目删除
+ *
+ * 架构师避坑 #4:
+ *   QueryIntent JSON 序列化必须 key 稳定 — LLM 输出的对象 key 顺序不固定,
+ *   所以我们在 serializeIntent() 中递归 sortKeys。
+ *
+ * 注:本缓存是 query 结果缓存,与 metadata cache (5 min TTL on schema) 不同:
+ *   - metadata cache: 数据源 schema,频繁复用
+ *   - query cache: 同一个 QueryIntent 多次执行,用户重复问相同问题时提速
+ */
+
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
+const EMPTY_RESULT_TTL_MS = 30 * 1000;
+const MAX_ENTRIES = 1000;
+
+export interface CachedQueryEntry {
+  intent: QueryIntent;
+  result: QueryResult;
+  expiresAt: number;
+  isEmpty: boolean;
+}
+
+@Injectable()
+export class QueryCacheService {
+  private readonly logger = new Logger(QueryCacheService.name);
+  private cache = new Map<
+    string,
+    { dataSourceId: string; entry: CachedQueryEntry }
+  >();
+
+  /**
+   * 用 stableKey 生成 cache key。
+   * 包含 userId 以保证租户隔离:不同用户即使 query 相同 dataSource + 相同 intent 也视为不同缓存条目。
+   */
+  buildKey(dataSourceId: string, userId: string, intent: QueryIntent): string {
+    const stable = JSON.stringify(sortKeys(intent));
+    return `${dataSourceId}:${userId}:${crypto
+      .createHash("sha256")
+      .update(stable)
+      .digest("hex")}`;
+  }
+
+  get(dataSourceId: string, userId: string, intent: QueryIntent): QueryResult | null {
+    const key = this.buildKey(dataSourceId, userId, intent);
+    const wrapped = this.cache.get(key);
+    if (!wrapped) return null;
+    if (Date.now() > wrapped.entry.expiresAt) {
+      this.cache.delete(key);
+      this.logger.debug(`[Cache Expire] ${dataSourceId} key=${key.slice(0, 12)}`);
+      return null;
+    }
+    this.logger.debug(
+      `[Cache Hit] ${dataSourceId} key=${key.slice(0, 12)} expires in ${Math.round((wrapped.entry.expiresAt - Date.now()) / 1000)}s`,
+    );
+    return wrapped.entry.result;
+  }
+
+  set(dataSourceId: string, userId: string, intent: QueryIntent, result: QueryResult): void {
+    const key = this.buildKey(dataSourceId, userId, intent);
+    const isEmpty = result.rows.length === 0;
+    const expiresAt = Date.now() + (isEmpty ? EMPTY_RESULT_TTL_MS : DEFAULT_TTL_MS);
+    if (this.cache.size >= MAX_ENTRIES) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, {
+      dataSourceId,
+      entry: { intent, result, expiresAt, isEmpty },
+    });
+    this.logger.debug(
+      `[Cache Miss] ${dataSourceId} key=${key.slice(0, 12)} cached (rows=${result.rows.length}, empty=${isEmpty}, ttl=${Math.round(expiresAt / 1000)}s)`,
+    );
+  }
+
+  /**
+   * 失效该数据源的所有缓存(POST /api/datasources/:id/refresh 时调用)。
+   */
+  invalidate(dataSourceId: string): number {
+    let removed = 0;
+    for (const [key, wrapped] of this.cache.entries()) {
+      if (wrapped.dataSourceId === dataSourceId) {
+        this.cache.delete(key);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      this.logger.log(
+        `[Cache Invalidate] ${dataSourceId} removed ${removed} entries`,
+      );
+    }
+    return removed;
+  }
+
+  invalidateAll(): void {
+    this.cache.clear();
+  }
+
+  size(): number {
+    return this.cache.size;
+  }
+}
+
+/**
+ * 递归 sort 所有对象 key,保证 JSON.stringify 序列化结果稳定。
+ *
+ * 数组保持顺序(语义敏感),只对对象 key 排序。
+ */
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  if (value && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[k] = sortKeys((value as Record<string, unknown>)[k]);
+    }
+    return sorted;
+  }
+  return value;
+}

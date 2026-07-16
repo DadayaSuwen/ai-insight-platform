@@ -18,15 +18,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
+    let detail: string | object =
       exception instanceof HttpException
         ? exception.getResponse()
         : 'Internal server error';
+    // NestJS 的 message 可能是对象 { message, error, statusCode }
+    const msg = typeof detail === 'object' && detail !== null
+      ? ((detail as any).message || JSON.stringify(detail))
+      : String(detail);
 
     response.status(status).json({
-      statusCode: status,
-      message,
-      timestamp: new Date().toISOString(),
+      success: false,
+      error: { code: `HTTP_${status}`, message: msg },
     });
   }
 }

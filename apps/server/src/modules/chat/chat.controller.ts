@@ -1,47 +1,79 @@
-import { Controller, Sse, Query, MessageEvent, Req } from "@nestjs/common";
-import type { Request } from "express";
-import { Observable, defer, finalize } from "rxjs";
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
+import type { Request, Response } from "express";
+import { runWithTrace, traceLogger } from "../ai/debug-log";
 import { ChatService } from "./chat.service";
+import { JwtAuthGuard } from "../auth/auth.guard";
+import { CurrentUser } from "../auth/auth.decorators";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PERMISSIONS } from "../rbac/permissions";
 
+/**
+ * [Sprint 2+5] SSE chat controller — 多租户
+ *
+ *   POST /chat/stream  { message, sessionId }   (Bearer)
+ *
+ * [BUG-005] 改为 POST + body 传参，避免长消息 URL 414
+ */
 @Controller("chat")
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  /**
-   * SSE stream endpoint.
-   * GET /chat/stream?message=...&sessionId=...
-   *
-   * 用 RxJS defer 把 AbortController 创建延迟到订阅时；监听 req.on("close")
-   * （客户端断开 / Stop 按钮 / 浏览器关闭）→ abort → 透传到 planner/agent →
-   * LangChain ChatOllama 真正中断 HTTP 请求。
-   */
-  @Sse("stream")
-  stream(
-    @Query("message") message: string,
-    @Query("sessionId") sessionId: string,
+  @Post("stream")
+  @HttpCode(200)
+  @Permissions(PERMISSIONS.CHAT_QUERY)
+  async stream(
+    @Body() body: { message: string; sessionId: string },
+    @CurrentUser() user: { sub: string },
     @Req() req: Request,
-  ): Observable<MessageEvent> {
+    @Res() res: Response,
+  ) {
+    const { message, sessionId } = body || {};
     if (!message || !sessionId) {
-      return new Observable<MessageEvent>((subscriber) => {
-        subscriber.next({
-          type: "error",
-          data: { code: "INVALID_PARAMS", message: "参数缺失" },
-        });
-        subscriber.next({ type: "done", data: {} });
-        subscriber.complete();
-      });
+      res.status(400).json({ success: false, error: { code: "INVALID_PARAMS", message: "参数缺失" } });
+      return;
     }
 
-    return defer(() => {
-      const controller = new AbortController();
-      // 客户端断开（Stop / 浏览器关闭 / 网络断）→ 立即 abort
-      req.on("close", () => controller.abort());
-      return this.chatService.processMessageStream(sessionId, message, {
-        signal: controller.signal,
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    const traceId = (req as any).traceId ?? "no-trace";
+    const controller = new AbortController();
+    req.on("close", () => controller.abort());
+
+    try {
+      const observable = runWithTrace(
+        { traceId, sessionId, userMessage: message.slice(0, 200), startTs: Date.now() },
+        () => {
+          traceLogger.trace({ phase: "controller-entry", ctx: { sessionId, messageLen: message.length }, level: "log" });
+          return this.chatService.processMessageStream(sessionId, user.sub, message, { signal: controller.signal });
+        },
+      );
+
+      observable.subscribe({
+        next: (evt: any) => {
+          res.write(`event: ${evt.type}\ndata: ${JSON.stringify(evt.data)}\n\n`);
+        },
+        complete: () => res.end(),
+        error: (err: any) => {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: err?.message || String(err) })}\n\n`);
+          res.end();
+        },
       });
-    }).pipe(
-      // 兜底：Observable 终止时确保不再持有 req 监听器，防止内存泄漏
-      finalize(() => req.removeAllListeners("close")),
-    );
+    } catch (err) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: (err as Error).message })}\n\n`);
+      res.end();
+    }
   }
 }

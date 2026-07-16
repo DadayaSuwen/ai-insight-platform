@@ -6,8 +6,13 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  UseGuards,
 } from "@nestjs/common";
 import { LlmService } from "./llm.service";
+import { JwtAuthGuard } from "../../auth/auth.guard";
+import { PermissionsGuard } from "../../rbac/permissions.guard";
+import { Permissions } from "../../rbac/permissions.decorator";
+import { PERMISSIONS } from "../../rbac/permissions";
 import {
   LLMProvider,
   LLMConfigSchema,
@@ -24,6 +29,7 @@ import {
  * GET  /llm/models  — returns available models per provider
  */
 @Controller("llm")
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class LlmController {
   private readonly logger = new Logger(LlmController.name);
 
@@ -32,6 +38,7 @@ export class LlmController {
   // ─── GET /llm/config ────────────────────────────────────────────────────────
 
   @Get("config")
+  @Permissions(PERMISSIONS.LLM_CONFIG)
   async getConfig(): Promise<LLMConfigs> {
     const configs = await this.llmService.getAllConfigs();
     return {
@@ -40,7 +47,8 @@ export class LlmController {
         model: c.model,
         temperature: c.temperature,
         baseUrl: c.baseUrl,
-        apiKey: c.apiKey,
+        apiKeyMasked: c.apiKey ? `****${c.apiKey.slice(-4)}` : null,
+        hasApiKey: !!c.apiKey,
       })),
       activeProvider: this.llmService.getActiveProvider(),
     };
@@ -50,6 +58,7 @@ export class LlmController {
 
   @Post("config")
   @HttpCode(HttpStatus.OK)
+  @Permissions(PERMISSIONS.LLM_CONFIG)
   async setConfig(
     @Body() body: unknown,
   ): Promise<{ ok: boolean; message: string }> {
@@ -93,6 +102,31 @@ export class LlmController {
       }`,
     );
     return { ok: true, message: "Config updated" };
+  }
+
+  // ─── POST /llm/config/active — 切换活跃 Provider ────────────────────────────
+
+  @Post("config/active")
+  @HttpCode(HttpStatus.OK)
+  @Permissions(PERMISSIONS.LLM_CONFIG)
+  async setActive(
+    @Body() body: { provider?: string },
+  ): Promise<{ success: boolean; data: { activeProvider: string } }> {
+    const provider = body?.provider;
+    if (provider !== "openai" && provider !== "anthropic") {
+      return { success: false, data: { activeProvider: this.llmService.getActiveProvider() } };
+    }
+    const lp = provider as LLMProvider;
+    // 复用 reload 逻辑:从 DB 读该 provider 的配置,不修改 model 等
+    const configs = await this.llmService.getAllConfigs();
+    const cfg = configs.find((c) => c.provider === lp);
+    if (!cfg || !cfg.apiKey) {
+      // 没有该 provider 的配置或没填 apiKey → 仍然记录 activeProvider 但保持旧的 chat
+      await this.llmService.touchActive(lp);
+    } else {
+      await this.llmService.reload(cfg);
+    }
+    return { success: true, data: { activeProvider: lp } };
   }
 
   // ─── GET /llm/health ────────────────────────────────────────────────────────

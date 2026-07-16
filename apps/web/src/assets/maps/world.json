@@ -1,0 +1,5 @@
+{
+  "type": "FeatureCollection",
+  "features": [],
+  "_comment": "M5-Patch placeholder: 世界地图 GeoJSON 待后续追加 (DataV.GeoAtlas / Natural Earth)。当前为空 FeatureCollection,ECharts map series 注册成功但无国家多边形,渲染为空白地图。如需完整世界地图,请下载 https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json 的世界版替换本文件。"
+}
