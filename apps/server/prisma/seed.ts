@@ -1,8 +1,5 @@
 /**
- * [Fix-8 Task 8.1] 种子脚本 — 创建默认管理员
- *
- * 首次 pnpm db:seed 后, 数据库中有:
- *   demo@local.dev / demo123 (管理员)
+ * 种子脚本 — 创建默认管理员
  */
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -19,18 +16,18 @@ async function main() {
   });
 
   if (!existing) {
-    const passwordHash = await bcrypt.hash('demo123', 10);
+    const passwordHash = await bcrypt.hash('housuwen', 10);
     await prisma.user.create({
       data: {
         id: DEFAULT_USER_ID,
-        email: 'demo@local.dev',
+        email: '1179002658@qq.com',
         passwordHash,
-        name: 'Demo Admin',
-        role: 'ADMIN',
+        name: 'Admin',
+        role: 'admin',
         status: 'active',
       },
     });
-    console.log('✓ 默认管理员已创建: demo@local.dev / demo123');
+    console.log('✓ 默认管理员已创建: 1179002658@qq.com');
   } else {
     console.log('✓ 默认管理员已存在, 跳过');
   }
@@ -44,3 +41,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

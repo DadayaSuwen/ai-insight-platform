@@ -8,7 +8,7 @@ import { toast } from '../../store/toast';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const [inviteCode, setInviteCode] = useState('AIINSIGHT');
+  const [inviteCode, setInviteCode] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
