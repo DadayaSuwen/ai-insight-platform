@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "steps": {
+    "install": {
+      "commands": [
+        "corepack enable pnpm",
+        "corepack prepare pnpm@9.0.0 --activate",
+        "cd ../..",
+        "pnpm install --frozen-lockfile",
+        "pnpm --filter @workspace/types build",
+        "cd apps/web",
+        "pnpm exec vite build"
+      ],
+      "caches": {
+        "pnpm-store": {
+          "directory": "/root/.local/share/pnpm/store"
+        }
+      }
+    }
+  },
+  "deploy": {
+    "startCommand": "npx --yes serve dist -s -l 3000",
+    "variables": {
+      "NODE_ENV": "production",
+      "PORT": "3000"
+    },
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 30
+  }
+}

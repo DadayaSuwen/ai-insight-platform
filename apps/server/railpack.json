@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "buildAptPackages": ["libssl1.1"],
+  "steps": {
+    "install": {
+      "commands": [
+        "corepack enable pnpm",
+        "corepack prepare pnpm@9.0.0 --activate",
+        "cd ../..",
+        "pnpm install --frozen-lockfile",
+        "pnpm --filter @workspace/types build",
+        "cd apps/server",
+        "pnpm rebuild duckdb duckdb-async",
+        "pnpm exec prisma generate"
+      ],
+      "caches": {
+        "pnpm-store": {
+          "directory": "/root/.local/share/pnpm/store"
+        }
+      }
+    },
+    "build": {
+      "inputs": [{ "step": "install" }],
+      "commands": [
+        "cd ../..",
+        "pnpm --filter @workspace/types build",
+        "cd apps/server",
+        "pnpm exec nest build"
+      ]
+    }
+  },
+  "deploy": {
+    "startCommand": "node dist/main.js",
+    "variables": {
+      "NODE_ENV": "production",
+      "PORT": "3000",
+      "DISABLE_INSIGHTS_CRON": "1"
+    },
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 60
+  }
+}

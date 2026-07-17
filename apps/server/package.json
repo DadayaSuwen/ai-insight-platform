@@ -6,7 +6,7 @@
     "dev": "nest start --watch",
     "prebuild": "pnpm --filter @workspace/types build",
     "build": "nest build",
-    "start": "node dist/main",
+    "start": "node dist/main.js",
     "lint": "eslint .",
     "test": "jest"
   },
