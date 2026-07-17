@@ -24,8 +24,7 @@ ai-insight-platform/
 │   ├── types/       # 共享类型定义
 │   └── eslint-config/
 ├── docs/             # 项目文档
-├── .docker/
-└── docker-compose.yml
+└── railpack.toml     # Railway Railpack 多服务部署配置 (server + web)
 ```
 
 ## Quick Start
@@ -61,15 +60,6 @@ pnpm dev:all
 | `pnpm db:up` | 启动 PostgreSQL 数据库 |
 | `pnpm db:seed` | 初始化数据库 (push + seed) |
 | `pnpm db:studio` | 打开 Prisma Studio |
-| `pnpm docker:build` | 构建 server/web Docker 镜像 |
-| `pnpm docker:up` | 后台启动全部 Docker 服务（postgres + server + web） |
-| `pnpm docker:down` | 停止并移除容器（保留卷） |
-| `pnpm docker:logs` | 跟踪所有容器日志 |
-| `pnpm docker:reset` | 销毁卷并重新启动 |
-| `pnpm docker:rebuild` | 不缓存重建镜像 |
-| `pnpm docker:seed` | 在运行中的 server 容器内手动执行 seed |
-| `pnpm docker:infra` | 仅启动 postgres（不开 server/web） |
-| `pnpm docker:rebuild` | 不缓存重建镜像 |
 
 ## Environment Variables
 
@@ -179,26 +169,23 @@ VITE_API_BASE_URL=http://localhost:3000
 - [开发指南](./docs/guides/SETUP.md)
 - [调试指南](./docs/guides/DEBUG.md)
 - [配置说明](./docs/guides/CONFIG.md)
-- [Docker 部署](./docs/guides/DOCKER.md)
+- [Railway 部署](./docs/guides/DEPLOY.md)
 - [多轮对话 UI 增强](./docs/development/MULTI_TURN_DIALOGUE.md)
 
-## Docker 快速启动
+## Railway 部署
 
 ```bash
-# 准备 .env
-cp .env.example .env
-
-# 构建并启动全部服务
-pnpm docker:build
-pnpm docker:up
-
-# 在前端 Settings 页面配置 LLM API Key（OpenAI / Anthropic）
-
-# 浏览器访问
-open http://localhost:8080
+# 1. Railway 控制台 → New Project → Deploy from GitHub → 选 ai-insight-platform
+# 2. railpack.toml 自动识别 server 和 web 两个服务
+# 3. Add Plugin → PostgreSQL, 自动注入 DATABASE_URL
+# 4. server 服务 Variables 面板填:
+#    JWT_SECRET, DB_CONFIG_ENCRYPTION_KEY, FRONTEND_ORIGIN, DISABLE_INSIGHTS_CRON=1, INIT_SEED=true (仅首次)
+# 5. web 服务 Variables 面板填:
+#    VITE_API_BASE_URL=https://<server 服务实际 URL>
+# 6. 部署完成, 浏览器访问 web 服务 URL
 ```
 
-详见 [Docker 部署指南](./docs/guides/DOCKER.md)。
+详见 [Railway 部署指南](./docs/guides/DEPLOY.md)。
 
 ---
 
@@ -478,7 +465,7 @@ apps/web/src/
 | 场景 | 服务端口 | 备注 |
 |---|---|---|
 | 本地开发 | postgres:5432 + server:3000 + web:5173 (Vite HMR) | 三个独立 dev 进程 |
-| Docker compose | postgres:5432 + server:3000 + web:80 (nginx 反代 server) | nginx `proxy_buffering off` 让 `/chat/` `/ai/` 路径 SSE 不被缓冲 |
+| Railway (Railpack) | server:3000 + web:静态 | `railpack.toml` 双服务, web 通过 `VITE_API_BASE_URL` 绝对 URL 直连 server |
 | Vercel | 仅 web (静态部署) | server 需独立部署(Render / Fly.io / Railway),`VITE_API_BASE_URL` 设为绝对 URL |
 | 生产 LLM 密钥 | 不进 .env,前端 Settings → `POST /llm/config` → DB LLMConfig 表 | 密钥不出服务器,可运行时轮换 |
 

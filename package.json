@@ -13,22 +13,8 @@
     "test:server": "pnpm --filter @ai-insight/server test",
     "test:watch": "pnpm --filter @ai-insight/server test -- --watch",
     "test:coverage": "pnpm --filter @ai-insight/server test -- --coverage",
-    "db:up": "docker-compose up -d postgres",
     "db:seed": "pnpm --filter @ai-insight/server exec prisma db push && pnpm --filter @ai-insight/server exec ts-node prisma/seed.ts",
-    "db:studio": "pnpm --filter @ai-insight/server exec prisma studio",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f",
-    "docker:reset": "docker compose down -v && docker compose up -d",
-    "docker:rebuild": "docker compose build --no-cache && docker compose up -d",
-    "docker:seed": "docker compose exec server /repo/apps/server/node_modules/.bin/ts-node prisma/seed.ts",
-    "docker:infra": "docker compose up postgres -d",
-    "docker:prod:up": "sh scripts/deploy-prod.sh",
-    "docker:prod:down": "docker compose --env-file .env -f docker-compose.prod.yml down",
-    "docker:prod:logs": "docker compose --env-file .env -f docker-compose.prod.yml logs -f",
-    "docker:prod:verify": "sh scripts/verify-prod.sh",
-    "docker:prod:backup": "sh scripts/backup-postgres.sh"
+    "db:studio": "pnpm --filter @ai-insight/server exec prisma studio"
   },
   "devDependencies": {
     "turbo": "^2.0.0",
