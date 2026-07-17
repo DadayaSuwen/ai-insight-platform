@@ -10,4 +10,4 @@ cmds = [
 ]
 
 [start]
-cmd = "npx --yes serve dist -s -l $PORT"
+cmd = "cd apps/web && npx --yes serve dist -s -l $PORT"

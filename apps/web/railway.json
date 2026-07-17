@@ -4,7 +4,7 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "npx --yes serve dist -s -l $PORT",
+    "startCommand": "cd apps/web && npx --yes serve dist -s -l $PORT",
     "healthcheckPath": "/",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE"
