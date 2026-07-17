@@ -12,4 +12,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd apps/server && node dist/main.js"
+cmd = "cd apps/server && pnpm exec prisma db push && pnpm exec ts-node prisma/seed.ts && node dist/main.js"
