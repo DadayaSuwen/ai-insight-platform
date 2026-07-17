@@ -1,0 +1,13 @@
+[phases.install]
+cmds = [
+  "corepack enable pnpm && corepack prepare pnpm@9.0.0 --activate && cd ../.. && pnpm install --frozen-lockfile"
+]
+
+[phases.build]
+cmds = [
+  "cd ../.. && pnpm --filter @workspace/types build",
+  "pnpm exec vite build"
+]
+
+[start]
+cmd = "npx --yes serve dist -s -l $PORT"

@@ -1,0 +1,15 @@
+[phases.install]
+cmds = [
+  "corepack enable pnpm && corepack prepare pnpm@9.0.0 --activate && cd ../.. && pnpm install --frozen-lockfile"
+]
+
+[phases.build]
+cmds = [
+  "cd ../.. && pnpm --filter @workspace/types build",
+  "pnpm rebuild duckdb duckdb-async",
+  "pnpm exec prisma generate",
+  "pnpm exec nest build"
+]
+
+[start]
+cmd = "node dist/main.js"
