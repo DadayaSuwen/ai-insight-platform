@@ -6,9 +6,9 @@ cmds = [
 [phases.build]
 cmds = [
   "cd ../.. && pnpm --filter @workspace/types build",
-  "pnpm rebuild duckdb duckdb-async",
-  "pnpm exec prisma generate",
-  "pnpm exec nest build"
+  "cd ../.. && pnpm --filter @ai-insight/server exec prisma generate",
+  "cd ../.. && pnpm --filter @ai-insight/server rebuild duckdb duckdb-async",
+  "cd ../.. && pnpm --filter @ai-insight/server run build"
 ]
 
 [start]
